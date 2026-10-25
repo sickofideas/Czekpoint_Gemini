@@ -39,6 +39,8 @@ export const emptyState = () => ({
   summitEntries: {},
   plannedRoute: null,
   confirmedStopIds: [],
+  savedTrips: [],
+  voiceNavEnabled: false,
 });
 
 export function sanitizeWalkSegments(segments) {
@@ -197,6 +199,8 @@ export function loadState() {
         summitEntries: data.summitEntries && typeof data.summitEntries === 'object' && !Array.isArray(data.summitEntries) ? data.summitEntries : {},
         plannedRoute: data.plannedRoute && typeof data.plannedRoute === 'object' ? data.plannedRoute : null,
         confirmedStopIds: Array.isArray(data.confirmedStopIds) ? [...new Set(data.confirmedStopIds)] : [],
+        savedTrips: Array.isArray(data.savedTrips) ? data.savedTrips.slice(0, 50) : [],
+        voiceNavEnabled: typeof data.voiceNavEnabled === 'boolean' ? data.voiceNavEnabled : false,
         storageCorrupted: false,
         storageError: '',
       };
@@ -271,6 +275,8 @@ export function loadState() {
       summitEntries: {},
       plannedRoute: null,
       confirmedStopIds: [],
+      savedTrips: [],
+      voiceNavEnabled: false,
     };
 
     try {
@@ -357,6 +363,8 @@ export function saveState(state, options = {}) {
       summitEntries: state.summitEntries && typeof state.summitEntries === 'object' && !Array.isArray(state.summitEntries) ? state.summitEntries : {},
       plannedRoute: state.plannedRoute && typeof state.plannedRoute === 'object' ? state.plannedRoute : null,
       confirmedStopIds: Array.isArray(state.confirmedStopIds) ? [...new Set(state.confirmedStopIds)] : [],
+      savedTrips: Array.isArray(state.savedTrips) ? state.savedTrips.slice(0, 50) : [],
+      voiceNavEnabled: typeof state.voiceNavEnabled === 'boolean' ? state.voiceNavEnabled : false,
       revision: nextRevision,
     };
     delete nextState.storageCorrupted;
@@ -412,7 +420,7 @@ export function exportStateJson() {
   const exportPayload = {
     exportedAt: new Date().toISOString(),
     appName: 'czekpoint',
-    appVersion: '0.9.0',
+    appVersion: '1.0.0',
     schemaVersion: 2,
     data: {
       profile: state.profile,
@@ -435,6 +443,8 @@ export function exportStateJson() {
       summitEntries: state.summitEntries || {},
       plannedRoute: state.plannedRoute || null,
       confirmedStopIds: state.confirmedStopIds || [],
+      savedTrips: state.savedTrips || [],
+      voiceNavEnabled: state.voiceNavEnabled ?? false,
     },
   };
   return JSON.stringify(exportPayload, null, 2);
@@ -582,6 +592,8 @@ export function importStateJson(jsonString) {
     summitEntries: d.summitEntries && typeof d.summitEntries === 'object' && !Array.isArray(d.summitEntries) ? d.summitEntries : {},
     plannedRoute: d.plannedRoute && typeof d.plannedRoute === 'object' ? d.plannedRoute : null,
     confirmedStopIds: Array.isArray(d.confirmedStopIds) ? [...new Set(d.confirmedStopIds)] : [],
+    savedTrips: Array.isArray(d.savedTrips) ? d.savedTrips.slice(0, 50) : [],
+    voiceNavEnabled: typeof d.voiceNavEnabled === 'boolean' ? d.voiceNavEnabled : false,
   };
 
   return saveState(newState, { allowOverwriteCorrupted: true });

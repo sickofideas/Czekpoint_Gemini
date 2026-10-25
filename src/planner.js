@@ -66,6 +66,47 @@ export const PLANNER_CATEGORIES = Object.freeze([
     overpassKey: 'leisure',
     overpassRegex: 'park|playground|dog_park',
   },
+  {
+    id: 'benches',
+    label: 'Odpočívadla a lavičky',
+    icon: '🪑',
+    overpassKey: 'amenity_tourism',
+    overpassRegex: 'bench|picnic_site|shelter',
+  },
+]);
+
+export const TERRAIN_DIFFICULTIES = Object.freeze([
+  {
+    id: 'easy',
+    label: '🟢 Lehká (rovinky, zpevněné cesty, bez prudkých stoupání)',
+    shortLabel: '🟢 Lehká',
+    icon: '🟢',
+  },
+  {
+    id: 'medium',
+    label: '🟡 Běžná turistická (lesní cesty a mírné kopce)',
+    shortLabel: '🟡 Běžná',
+    icon: '🟡',
+  },
+  {
+    id: 'hard',
+    label: '🔴 Náročná (vrcholy, vyhlídky a stoupání)',
+    shortLabel: '🔴 Náročná',
+    icon: '🔴',
+  },
+]);
+
+export const CZECH_PLACE_PRESETS = Object.freeze([
+  { id: 'namesti', label: 'Rožmitál pod Třemšínem (Náměstí)', lat: 49.6033, lng: 13.8633 },
+  { id: 'stary-rozmital', label: 'Starý Rožmitál (Alej Johanky)', lat: 49.6082, lng: 13.8507 },
+  { id: 'nadrazi', label: 'Nádraží Rožmitál pod Třemšínem', lat: 49.5968, lng: 13.8682 },
+  { id: 'tremsin-hut', label: 'Hutě pod Třemšínem (Brdy)', lat: 49.5698, lng: 13.8022 },
+  { id: 'pribram', label: 'Příbram (Svatá Hora / náměstí)', lat: 49.6889, lng: 14.0092 },
+  { id: 'breznice', label: 'Březnice (zámek a park)', lat: 49.5576, lng: 13.9516 },
+  { id: 'pisek', label: 'Písek (Kamenný most)', lat: 49.3088, lng: 14.1475 },
+  { id: 'beroun', label: 'Beroun (Husovo náměstí)', lat: 49.9638, lng: 14.0720 },
+  { id: 'kasperske-hory', label: 'Kašperské Hory (Šumava)', lat: 49.1440, lng: 13.5565 },
+  { id: 'blatna', label: 'Blatná (vodní zámek)', lat: 49.4230, lng: 13.8794 },
 ]);
 
 export const COMPANION_STYLES = Object.freeze([
@@ -74,6 +115,18 @@ export const COMPANION_STYLES = Object.freeze([
   { id: 'stroller', label: 'S kočárkem', icon: '👶', speedKmH: 3.2 },
   { id: 'family', label: 'Skupina / Rodina', icon: '👨‍👩‍👧', speedKmH: 3.2 },
 ]);
+
+export function isPeakOrSteepPlace(p) {
+  if (!p || typeof p !== 'object') return false;
+  const nat = String(p.tags?.natural || '').toLowerCase();
+  const tour = String(p.tags?.tourism || '').toLowerCase();
+  const title = String(p.title || '').toLowerCase();
+  if (nat === 'peak' || nat === 'cliff' || nat === 'rock') return true;
+  if (p.access?.difficulty === 'hard' || Number(p.elevationGainM) > 120) return true;
+  if (/vrchol|třemšín|skála|skály|drtič|hřeben|rozhledna/.test(title)) return true;
+  if (p.kind === 'view' && (tour === 'viewpoint' || /vyhlídka/.test(title)) && p.access?.stroller === 'no') return true;
+  return false;
+}
 
 /**
  * Vestavěné vodní toky (Vlčava / Lomnice v Rožmitále) a mosty/lávky pro realistický výpočet pěších tras (Body 26 & 27).
@@ -543,6 +596,25 @@ export function analyzePlannedRoute(origin, orderedPlaces, companionMode = 'solo
       ? `Vypočtená pěší trasa${returnToOrigin ? ' (okruh včetně návratu na start)' : ''}`
       : `Orientační přímé spojnice${returnToOrigin ? ' (okruh vzdušně — pěší trasa neověřena)' : ' (vzdušně — výpočet pěší trasy nedostupný)'}`;
 
+  const terrainDifficulty = ['easy', 'medium', 'hard'].includes(options.terrainDifficulty)
+    ? options.terrainDifficulty
+    : 'medium';
+
+  let estimatedElevationGainM = Number.isFinite(options.elevationGainM) ? Math.round(options.elevationGainM) : 0;
+  if (!Number.isFinite(options.elevationGainM)) {
+    for (const p of places) {
+      if (Number.isFinite(Number(p.elevationGainM)) && Number(p.elevationGainM) > 0) {
+        estimatedElevationGainM += Math.round(Number(p.elevationGainM) * 0.55);
+      } else if (isPeakOrSteepPlace(p)) {
+        estimatedElevationGainM += 65;
+      } else if (p.kind === 'view') {
+        estimatedElevationGainM += 35;
+      } else {
+        estimatedElevationGainM += 10;
+      }
+    }
+  }
+
   const warnings = [];
   if (companionMode === 'stroller') {
     for (const p of places) {
@@ -566,11 +638,21 @@ export function analyzePlannedRoute(origin, orderedPlaces, companionMode = 'solo
     }
   }
 
+  if (terrainDifficulty === 'easy') {
+    for (const p of places) {
+      if (isPeakOrSteepPlace(p)) {
+        warnings.push(`${p.title || 'Zastávka'}: obsahuje stoupání nebo skalnatý úsek mimo lehký terén`);
+      }
+    }
+  }
+
   return {
     airDistanceM,
     returnAirDistanceM: Math.round(returnAirM),
     estimatedWalkDistanceM,
     estimatedMinutes,
+    estimatedElevationGainM,
+    terrainDifficulty,
     returnToOrigin,
     routeMode,
     routeModeLabel,
@@ -580,12 +662,14 @@ export function analyzePlannedRoute(origin, orderedPlaces, companionMode = 'solo
 }
 
 /**
- * Sestaví skutečný okruh (včetně návratu na start) odpovídající požadované délce `targetKm` (Bod 5 & 27).
+ * Sestaví skutečný okruh (včetně návratu na start) odpovídající požadované délce `targetKm` a `terrainDifficulty` (Bod 5, 27 & v1.0).
  */
 export function autoSuggestTrip({
   origin = START_PRESETS[0],
   targetKm = 5,
   companionMode = 'solo',
+  terrainDifficulty = 'medium',
+  categories = [],
   availablePlaces = [],
   discoveries = [],
 } = {}) {
@@ -600,29 +684,58 @@ export function autoSuggestTrip({
 
   const isStroller = companionMode === 'stroller';
   const isDog = companionMode === 'dog';
+  const difficulty = ['easy', 'medium', 'hard'].includes(terrainDifficulty) ? terrainDifficulty : 'medium';
   const visitedSet = new Set(Array.isArray(discoveries) ? discoveries : []);
+  const categorySet = Array.isArray(categories) && categories.length > 0 ? new Set(categories) : null;
 
-  const candidates = (availablePlaces || [])
-    .filter(p => {
+  const filterByDifficultyAndCategory = (list, strictDifficulty = true) =>
+    list.filter(p => {
       if (!p || !Number.isFinite(p.lat) || !Number.isFinite(p.lng)) return false;
       if (p.pointKind === 'route-start') return false;
       if (isStroller && p.access?.stroller === 'no') return false;
       if (isDog && p.access?.dog === 'no') return false;
+      if (strictDifficulty && difficulty === 'easy') {
+        if (isPeakOrSteepPlace(p)) return false;
+        if (p.access?.stroller === 'no') return false;
+      }
+      if (categorySet && p.category && !categorySet.has(p.category)) {
+        // Povolíme shodu i pro spřízněné kategorie (např. benches <-> nature)
+        if (!(categorySet.has('benches') && p.category === 'nature') && !(categorySet.has('nature') && p.category === 'benches')) {
+          return false;
+        }
+      }
       return true;
-    })
+    });
+
+  let rawCandidates = filterByDifficultyAndCategory(availablePlaces || [], true);
+  // Pokud by přísný filtr kategorií v malém okruhu nechal méně než 2 místa, uvolníme filtr kategorií při zachování náročnosti terénu
+  if (rawCandidates.length < 2 && categorySet) {
+    rawCandidates = (availablePlaces || []).filter(p => {
+      if (!p || !Number.isFinite(p.lat) || !Number.isFinite(p.lng)) return false;
+      if (p.pointKind === 'route-start') return false;
+      if (isStroller && p.access?.stroller === 'no') return false;
+      if (isDog && p.access?.dog === 'no') return false;
+      if (difficulty === 'easy' && (isPeakOrSteepPlace(p) || p.access?.stroller === 'no')) return false;
+      return true;
+    });
+  }
+
+  const candidates = rawCandidates
     .map(p => {
       const dist = haversineMeters(center, p) ?? 0;
       const isVisited = visitedSet.has(p.id) || visitedSet.has(`catalog:${p.id}`);
-      return { ...p, _dist: dist, _visited: isVisited };
+      const isPeak = isPeakOrSteepPlace(p) || p.kind === 'view';
+      return { ...p, _dist: dist, _visited: isVisited, _isPeak: isPeak };
     })
     .filter(p => p._dist >= 40 && p._dist <= targetMeters * 0.75);
 
   if (candidates.length < 2) {
-    const emptyAnalysis = analyzePlannedRoute(center, [], companionMode, { returnToOrigin: true });
+    const emptyAnalysis = analyzePlannedRoute(center, [], companionMode, { returnToOrigin: true, terrainDifficulty: difficulty });
     return {
       found: false,
       returnToOrigin: true,
       targetKm: target,
+      terrainDifficulty: difficulty,
       places: [],
       selectedPlaceIds: [],
       analysis: emptyAnalysis,
@@ -632,6 +745,12 @@ export function autoSuggestTrip({
 
   const idealRadiusM = targetMeters * 0.32;
   const sortedByRing = [...candidates].sort((a, b) => {
+    if (difficulty === 'hard' && a._isPeak !== b._isPeak) {
+      return a._isPeak ? -1 : 1;
+    }
+    if (difficulty === 'easy' && a._isPeak !== b._isPeak) {
+      return a._isPeak ? 1 : -1;
+    }
     const da = Math.abs(a._dist - idealRadiusM);
     const db = Math.abs(b._dist - idealRadiusM);
     if (Math.abs(da - db) > 150) return da - db;
@@ -648,16 +767,27 @@ export function autoSuggestTrip({
       const copy = { ...p };
       delete copy._dist;
       delete copy._visited;
+      delete copy._isPeak;
       return copy;
     });
     const ordered = optimizeRouteOrder(center, cleanSubset, { returnToOrigin: true });
-    const analysis = analyzePlannedRoute(center, ordered, companionMode, { returnToOrigin: true });
+    const analysis = analyzePlannedRoute(center, ordered, companionMode, {
+      returnToOrigin: true,
+      terrainDifficulty: difficulty,
+    });
     const walkM = analysis.estimatedWalkDistanceM;
     const diffRatio = Math.abs(walkM - targetMeters) / targetMeters;
     const unvisitedCount = subset.filter(p => !p._visited).length;
     const visitedPenalty = (subset.length - unvisitedCount) * 0.04;
+    const peakCount = subset.filter(p => p._isPeak).length;
+    const terrainBonusOrPenalty =
+      difficulty === 'hard'
+        ? -peakCount * 0.14 - Math.min(0.25, (analysis.estimatedElevationGainM || 0) / 800)
+        : difficulty === 'easy'
+        ? peakCount * 0.45 + Math.min(0.35, (analysis.estimatedElevationGainM || 0) / 300)
+        : 0;
     const inTolerance = walkM >= minAcceptableM && walkM <= maxAcceptableM;
-    const scoreVal = diffRatio + visitedPenalty + (inTolerance ? 0 : 2);
+    const scoreVal = diffRatio + visitedPenalty + terrainBonusOrPenalty + (inTolerance ? 0 : 2);
 
     if (scoreVal < bestScore) {
       bestScore = scoreVal;
@@ -685,11 +815,12 @@ export function autoSuggestTrip({
   }
 
   if (!bestCandidate || !bestCandidate.inTolerance) {
-    const emptyAnalysis = analyzePlannedRoute(center, [], companionMode, { returnToOrigin: true });
+    const emptyAnalysis = analyzePlannedRoute(center, [], companionMode, { returnToOrigin: true, terrainDifficulty: difficulty });
     return {
       found: false,
       returnToOrigin: true,
       targetKm: target,
+      terrainDifficulty: difficulty,
       places: [],
       selectedPlaceIds: [],
       analysis: emptyAnalysis,
@@ -701,6 +832,7 @@ export function autoSuggestTrip({
     found: true,
     returnToOrigin: true,
     targetKm: target,
+    terrainDifficulty: difficulty,
     places: bestCandidate.ordered,
     selectedPlaceIds: bestCandidate.ordered.map(p => p.id),
     analysis: bestCandidate.analysis,
@@ -709,6 +841,366 @@ export function autoSuggestTrip({
 }
 
 const walkingGeometryCache = new Map();
+
+/**
+ * Vypočítá azimut mezi dvěma body ve stupních (0–360°).
+ */
+export function computeBearingDeg(a, b) {
+  if (!a || !b) return 0;
+  const lat1 = ((Array.isArray(a) ? a[0] : a.lat) * Math.PI) / 180;
+  const lng1 = ((Array.isArray(a) ? a[1] : a.lng) * Math.PI) / 180;
+  const lat2 = ((Array.isArray(b) ? b[0] : b.lat) * Math.PI) / 180;
+  const lng2 = ((Array.isArray(b) ? b[1] : b.lng) * Math.PI) / 180;
+  const dLng = lng2 - lng1;
+  const y = Math.sin(dLng) * Math.cos(lat2);
+  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+  return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+}
+
+/**
+ * Odvodí srozumitelné odbočovací instrukce (`steps`) ze souřadnic lomené čáry trasy (offline / lokální fallback pro Bod 5 ZADÁNÍ #08).
+ */
+export function buildTurnStepsFromCoordinates(coordinates = [], stopTargets = []) {
+  if (!Array.isArray(coordinates) || coordinates.length < 2) return [];
+  const steps = [];
+  let accumM = 0;
+
+  for (let i = 1; i < coordinates.length - 1; i++) {
+    const prev = { lat: coordinates[i - 1][0], lng: coordinates[i - 1][1] };
+    const curr = { lat: coordinates[i][0], lng: coordinates[i][1] };
+    const next = { lat: coordinates[i + 1][0], lng: coordinates[i + 1][1] };
+
+    const segM = haversineMeters(prev, curr) ?? 0;
+    accumM += segM;
+
+    const b1 = computeBearingDeg(prev, curr);
+    const b2 = computeBearingDeg(curr, next);
+    let delta = ((b2 - b1 + 540) % 360) - 180; // -180..+180 (záporné = vlevo, kladné = vpravo)
+
+    const stopHere = (stopTargets || []).find(st => st.coordIndex === i && st.waypointIndex > 0);
+    if (stopHere) {
+      steps.push({
+        lat: curr.lat,
+        lng: curr.lng,
+        coordIndex: i,
+        distanceM: Math.round(accumM),
+        maneuverType: 'arrive',
+        modifier: 'straight',
+        icon: '🏁',
+        actionLabel: `cíl ${stopHere.title}`,
+        name: stopHere.title,
+      });
+      accumM = 0;
+      continue;
+    }
+
+    if (Math.abs(delta) >= 32 && accumM >= 15) {
+      const isLeft = delta < 0;
+      const isSlight = Math.abs(delta) < 55;
+      steps.push({
+        lat: curr.lat,
+        lng: curr.lng,
+        coordIndex: i,
+        distanceM: Math.round(accumM),
+        maneuverType: 'turn',
+        modifier: isLeft ? (isSlight ? 'slight left' : 'left') : (isSlight ? 'slight right' : 'right'),
+        icon: isLeft ? '↰' : '↱',
+        actionLabel: isLeft ? (isSlight ? 'mírně vlevo' : 'odboč vlevo') : (isSlight ? 'mírně vpravo' : 'odboč vpravo'),
+        name: '',
+      });
+      accumM = 0;
+    }
+  }
+
+  const lastIdx = coordinates.length - 1;
+  const prevLast = { lat: coordinates[lastIdx - 1][0], lng: coordinates[lastIdx - 1][1] };
+  const lastPt = { lat: coordinates[lastIdx][0], lng: coordinates[lastIdx][1] };
+  accumM += haversineMeters(prevLast, lastPt) ?? 0;
+  const finalStop = (stopTargets || [])[stopTargets.length - 1];
+
+  steps.push({
+    lat: lastPt.lat,
+    lng: lastPt.lng,
+    coordIndex: lastIdx,
+    distanceM: Math.round(accumM),
+    maneuverType: 'arrive',
+    modifier: 'straight',
+    icon: '🏁',
+    actionLabel: finalStop?.title ? `cíl ${finalStop.title}` : 'cíl trasy',
+    name: finalStop?.title || 'Cíl trasy',
+  });
+
+  return steps;
+}
+
+/**
+ * Vytáhne odbočovací manévry (`steps`) z odpovědi OSRM (`steps=true`).
+ */
+export function extractStepsFromOsrmRoute(route, coordinates = [], stopTargets = []) {
+  const osrmLegs = Array.isArray(route?.legs) ? route.legs : [];
+  const extracted = [];
+
+  for (let lIdx = 0; lIdx < osrmLegs.length; lIdx++) {
+    const legSteps = Array.isArray(osrmLegs[lIdx]?.steps) ? osrmLegs[lIdx].steps : [];
+    for (const st of legSteps) {
+      const loc = st?.maneuver?.location;
+      if (!Array.isArray(loc) || loc.length < 2) continue;
+      const lat = Number(loc[1]);
+      const lng = Number(loc[0]);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+
+      const type = String(st.maneuver?.type || 'continue');
+      const mod = String(st.maneuver?.modifier || 'straight');
+      const roadName = typeof st.name === 'string' && st.name.trim() ? st.name.trim() : '';
+
+      let icon = '↑';
+      let actionLabel = roadName ? `pokračuj po ${roadName}` : 'pokračuj po stezce';
+      if (type === 'arrive') {
+        icon = '🏁';
+        const targetMeta = stopTargets[lIdx + 1];
+        actionLabel = targetMeta?.title ? `cíl ${targetMeta.title}` : 'jsi u cíle';
+      } else if (mod.includes('left')) {
+        icon = '↰';
+        actionLabel = mod.includes('slight') ? 'odboč mírně vlevo' : 'odboč vlevo';
+        if (roadName) actionLabel += ` (${roadName})`;
+      } else if (mod.includes('right')) {
+        icon = '↱';
+        actionLabel = mod.includes('slight') ? 'odboč mírně vpravo' : 'odboč vpravo';
+        if (roadName) actionLabel += ` (${roadName})`;
+      } else if (type === 'depart') {
+        icon = '↑';
+        actionLabel = roadName ? `vyraz po ${roadName}` : 'pokračuj po trase';
+      }
+
+      // Najdeme nejbližší coordIndex na trase
+      let bestCoordIdx = 0;
+      let minD = Infinity;
+      for (let cIdx = 0; cIdx < coordinates.length; cIdx++) {
+        const d = haversineMeters({ lat, lng }, { lat: coordinates[cIdx][0], lng: coordinates[cIdx][1] }) ?? Infinity;
+        if (d < minD) {
+          minD = d;
+          bestCoordIdx = cIdx;
+        }
+      }
+
+      extracted.push({
+        lat,
+        lng,
+        coordIndex: bestCoordIdx,
+        distanceM: Math.round(Number(st.distance) || 0),
+        maneuverType: type,
+        modifier: mod,
+        icon,
+        actionLabel,
+        name: roadName,
+      });
+    }
+  }
+
+  if (extracted.length === 0) {
+    return buildTurnStepsFromCoordinates(coordinates, stopTargets);
+  }
+  return extracted;
+}
+
+/**
+ * Vrátí aktuální navigační povel u kompasu („Za kolik metrů kam odbočit“) pro hráče na trase (ZADÁNÍ #08 Bod 5).
+ */
+export function computeActiveTurnInstruction(arg1, arg2, arg3 = null, arg4 = null) {
+  let sharedRoute = null;
+  let currentPos = null;
+  let nextStop = null;
+
+  if (arg1 && Array.isArray(arg1.coordinates)) {
+    sharedRoute = arg1;
+    currentPos = arg2;
+  } else {
+    currentPos = arg1;
+    sharedRoute = arg2;
+  }
+
+  if (Array.isArray(arg3)) {
+    const confirmedSet = arg4 instanceof Set ? arg4 : new Set(Array.isArray(arg4) ? arg4 : []);
+    nextStop = arg3.find(p => p && !confirmedSet.has(p.id)) || null;
+  } else if (arg3 && typeof arg3 === 'object') {
+    nextStop = arg3;
+  }
+
+  if (!sharedRoute || !Array.isArray(sharedRoute.coordinates) || sharedRoute.coordinates.length < 2) {
+    if (nextStop && currentPos && Number.isFinite(currentPos.lat) && Number.isFinite(currentPos.lng)) {
+      const distM = Math.round(haversineMeters(currentPos, nextStop) ?? 0);
+      const speechText = distM < 25 ? `Jste u cíle ${nextStop.title}.` : `Pokračujte ${distM} metrů k cíli ${nextStop.title}.`;
+      return {
+        icon: distM < 25 ? '🏁' : '↑',
+        text: distM < 25 ? `🏁 Jsi u cíle: ${nextStop.title}` : `↑ Pokračuj ${distM} m · Směr: ${nextStop.title}`,
+        speechText,
+        voiceText: speechText,
+        distanceToTurnM: distM,
+        isNearTurn: distM <= 40,
+        stepKey: `direct_${nextStop.id}_${distM < 25 ? 'arr' : 'go'}`,
+      };
+    }
+    return {
+      icon: '🧭',
+      text: '↑ Volná procházka · sleduj mapu a kompas',
+      speechText: '',
+      voiceText: '',
+      distanceToTurnM: null,
+      isNearTurn: false,
+      stepKey: 'free',
+    };
+  }
+
+  const coords = sharedRoute.coordinates;
+  const steps = Array.isArray(sharedRoute.steps) && sharedRoute.steps.length > 0
+    ? sharedRoute.steps
+    : buildTurnStepsFromCoordinates(coords, sharedRoute.stopTargets || []);
+
+  let playerCoordIdx = 0;
+  if (currentPos && Number.isFinite(currentPos.lat) && Number.isFinite(currentPos.lng)) {
+    let minD = Infinity;
+    for (let i = 0; i < coords.length; i++) {
+      const d = haversineMeters(currentPos, { lat: coords[i][0], lng: coords[i][1] }) ?? Infinity;
+      if (d < minD) {
+        minD = d;
+        playerCoordIdx = i;
+      }
+    }
+  }
+
+  // Najdeme nejbližší nadcházející manévr (odbočku nebo cíl) po playerCoordIdx
+  let upcomingStep = steps.find(s => s.coordIndex > playerCoordIdx && s.maneuverType !== 'depart') || steps[steps.length - 1];
+  if (!upcomingStep) {
+    return {
+      icon: '↑',
+      text: '↑ Pokračuj po naplánované trase',
+      speechText: 'Pokračujte po naplánované trase.',
+      voiceText: 'Pokračujte po naplánované trase.',
+      distanceToTurnM: 0,
+      isNearTurn: false,
+      stepKey: 'cont',
+    };
+  }
+
+  const sliceCoords = coords.slice(playerCoordIdx, Math.max(playerCoordIdx + 1, (upcomingStep.coordIndex ?? coords.length - 1) + 1));
+  const distFromPos = currentPos && Number.isFinite(currentPos.lat)
+    ? Math.round(haversineMeters(currentPos, { lat: upcomingStep.lat, lng: upcomingStep.lng }) ?? computePolylineLengthM(sliceCoords))
+    : computePolylineLengthM(sliceCoords);
+  const distM = Math.max(5, Math.round(computePolylineLengthM(sliceCoords) || distFromPos));
+
+  const nextStopSuffix = nextStop?.title ? ` · Směr: ${nextStop.title}` : '';
+
+  if (upcomingStep.maneuverType === 'arrive' && distM <= 25) {
+    const speechText = `Jste u cíle ${nextStop?.title || upcomingStep.name || ''}. Získáváte razítko.`;
+    return {
+      icon: '🏁',
+      text: `🏁 Jsi u cíle: ${nextStop?.title || upcomingStep.name || 'Zastávka'}`,
+      speechText,
+      voiceText: speechText,
+      distanceToTurnM: distM,
+      isNearTurn: true,
+      stepKey: `arrive_${upcomingStep.coordIndex}`,
+    };
+  }
+
+  if (upcomingStep.maneuverType === 'turn' || upcomingStep.icon === '↰' || upcomingStep.icon === '↱') {
+    const speechText = `Za ${distM} metrů ${upcomingStep.actionLabel}.`;
+    return {
+      icon: upcomingStep.icon,
+      text: `${upcomingStep.icon} Za ${distM} m ${upcomingStep.actionLabel}${nextStopSuffix}`,
+      speechText,
+      voiceText: speechText,
+      distanceToTurnM: distM,
+      isNearTurn: distM <= 45,
+      stepKey: `turn_${upcomingStep.coordIndex}`,
+    };
+  }
+
+  const speechText = `Pokračujte po stezce ${distM} metrů.`;
+  return {
+    icon: '↑',
+    text: `↑ Pokračuj po stezce ${distM} m${nextStopSuffix}`,
+    speechText,
+    voiceText: speechText,
+    distanceToTurnM: distM,
+    isNearTurn: distM <= 40,
+    stepKey: `straight_${upcomingStep.coordIndex}`,
+  };
+}
+
+/**
+ * Vyhledá město, obec nebo místo v ČR pomocí Nominatim API s vestavěnou zálohou českých obcí (ZADÁNÍ #08 Bod 1).
+ */
+export async function searchPlaceNominatim(query, fetchImpl = typeof fetch !== 'undefined' ? fetch : null) {
+  const q = String(query || '').trim();
+  if (!q) return [...CZECH_PLACE_PRESETS];
+
+  const qNorm = q.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const localMatches = CZECH_PLACE_PRESETS.filter(item => {
+    const lNorm = item.label.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    return lNorm.includes(qNorm);
+  });
+
+  if (!fetchImpl || q.length < 2) {
+    return localMatches.length > 0 ? localMatches : CZECH_PLACE_PRESETS.slice(0, 4);
+  }
+
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?format=json&countrycodes=cz&limit=5&q=${encodeURIComponent(q)}`;
+    let timeoutId;
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const signal = controller ? controller.signal : undefined;
+    if (controller) timeoutId = setTimeout(() => controller.abort(), 3500);
+
+    try {
+      const res = await fetchImpl(url, {
+        signal,
+        headers: { 'Accept-Language': 'cs' },
+      });
+      if (res && res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0) {
+          const remoteResults = data
+            .map((item, idx) => ({
+              id: `nom-${item.place_id || idx}`,
+              label: String(item.display_name || q).split(',').slice(0, 2).join(', ').trim(),
+              fullLabel: String(item.display_name || q),
+              lat: Number(item.lat),
+              lng: Number(item.lon),
+            }))
+            .filter(r => Number.isFinite(r.lat) && Number.isFinite(r.lng));
+          if (remoteResults.length > 0) {
+            return remoteResults;
+          }
+        }
+      }
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
+  } catch {
+    // Fallback to local presets on network error
+  }
+
+  return localMatches.length > 0 ? localMatches : CZECH_PLACE_PRESETS.slice(0, 4);
+}
+
+/**
+ * Vypočítá nejkratší pěší trasu z aktuální polohy hráče zpět na start výpravy (`🏠 Návrat na start / k autu`).
+ */
+export async function buildReturnToOriginRoute(currentPos, origin, fetchImpl = typeof fetch !== 'undefined' ? fetch : null, options = {}) {
+  const startPt = currentPos && Number.isFinite(currentPos.lat) && Number.isFinite(currentPos.lng)
+    ? currentPos
+    : origin || START_PRESETS[0];
+  const targetOrigin = origin && Number.isFinite(origin.lat) && Number.isFinite(origin.lng)
+    ? { ...origin, id: origin.id || 'return-start', title: origin.label || origin.title || 'Start výpravy' }
+    : { ...START_PRESETS[0], title: START_PRESETS[0].label };
+
+  const geom = await fetchWalkingGeometry([startPt, targetOrigin], fetchImpl, options);
+  if (!geom || geom.isFallback || !geom.coordinates || geom.coordinates.length < 2) {
+    return buildLocalRoutedGeometry([startPt, targetOrigin], options);
+  }
+  return geom;
+}
 
 /**
  * Sestaví plnou společnou pěší trasu (`sharedWalkingRoute`), kterou sdílejí:
@@ -723,6 +1215,7 @@ export function buildLocalRoutedGeometry(waypoints, options = {}) {
       coordinates: valid.map(p => [p.lat, p.lng]),
       distanceM: 0,
       legs: [],
+      steps: [],
       stopTargets: [],
       mode: 'empty',
       isFallback: false,
@@ -778,10 +1271,13 @@ export function buildLocalRoutedGeometry(waypoints, options = {}) {
     totalDistanceM += leg.distanceM;
   }
 
+  const steps = buildTurnStepsFromCoordinates(coordinates, stopTargets);
+
   return {
     coordinates,
     distanceM: Math.round(totalDistanceM),
     legs,
+    steps,
     stopTargets,
     mode: 'routed',
     isFallback: false,
@@ -790,13 +1286,13 @@ export function buildLocalRoutedGeometry(waypoints, options = {}) {
 }
 
 /**
- * Fetches actual walking route geometry along footpaths using OSRM Foot Routing,
- * or computes a obstacle-aware walking route around ponds and over bridges.
- * Explicitly distinguishes calculated footpath ('routed') from straight-line fallback ('air_fallback') (Bod 6 & 26).
+ * Fetches actual walking route geometry along footpaths using OSRM Foot Routing (`steps=true`),
+ * or computes an obstacle-aware walking route around ponds and over bridges.
+ * Explicitly distinguishes calculated footpath ('routed') from straight-line fallback ('air_fallback') (Bod 6 & 26 & v1.0 Bod 5).
  */
 export async function fetchWalkingGeometry(waypoints, fetchImpl = typeof fetch !== 'undefined' ? fetch : null, options = {}) {
   if (!Array.isArray(waypoints) || waypoints.length === 0) {
-    return { coordinates: [], distanceM: 0, legs: [], stopTargets: [], mode: 'empty', isFallback: false, canSimulate: false };
+    return { coordinates: [], distanceM: 0, legs: [], steps: [], stopTargets: [], mode: 'empty', isFallback: false, canSimulate: false };
   }
   const valid = waypoints.filter(p => p && Number.isFinite(p.lat) && Number.isFinite(p.lng));
   if (valid.length < 2) {
@@ -804,6 +1300,7 @@ export async function fetchWalkingGeometry(waypoints, fetchImpl = typeof fetch !
       coordinates: valid.map(p => [p.lat, p.lng]),
       distanceM: 0,
       legs: [],
+      steps: [],
       stopTargets: [],
       mode: 'empty',
       isFallback: false,
@@ -824,17 +1321,21 @@ export async function fetchWalkingGeometry(waypoints, fetchImpl = typeof fetch !
       const seg = haversineMeters(accessibleWaypoints[i], accessibleWaypoints[i + 1]);
       if (seg != null) dist += seg;
     }
+    const stopTargets = accessibleWaypoints.map((w, idx) => ({
+      id: w.id || `wp_${idx}`,
+      title: w.title || w.label || `Bod ${idx + 1}`,
+      lat: w.lat,
+      lng: w.lng,
+      waypointIndex: idx,
+      coordIndex: idx,
+    }));
+    const coords = accessibleWaypoints.map(p => [p.lat, p.lng]);
     return {
-      coordinates: accessibleWaypoints.map(p => [p.lat, p.lng]),
+      coordinates: coords,
       distanceM: Math.round(dist),
       legs: [],
-      stopTargets: accessibleWaypoints.map((w, idx) => ({
-        id: w.id || `wp_${idx}`,
-        title: w.title || w.label || `Bod ${idx + 1}`,
-        lat: w.lat,
-        lng: w.lng,
-        coordIndex: idx,
-      })),
+      steps: buildTurnStepsFromCoordinates(coords, stopTargets),
+      stopTargets,
       mode: 'air_fallback',
       isFallback: true,
       canSimulate: false,
@@ -857,7 +1358,7 @@ export async function fetchWalkingGeometry(waypoints, fetchImpl = typeof fetch !
 
   try {
     const coordsStr = accessibleWaypoints.map(p => `${Number(p.lng).toFixed(5)},${Number(p.lat).toFixed(5)}`).join(';');
-    const url = `https://router.project-osrm.org/route/v1/foot/${coordsStr}?overview=full&geometries=geojson&steps=false`;
+    const url = `https://router.project-osrm.org/route/v1/foot/${coordsStr}?overview=full&geometries=geojson&steps=true`;
 
     let timeoutId;
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
@@ -925,11 +1426,13 @@ export async function fetchWalkingGeometry(waypoints, fetchImpl = typeof fetch !
           });
         }
 
+        const steps = extractStepsFromOsrmRoute(route, coordinates, stopTargets);
         const distanceM = Math.round(Number(route.distance) || computePolylineLengthM(coordinates));
         const result = {
           coordinates,
           distanceM,
           legs,
+          steps,
           stopTargets,
           mode: 'routed',
           isFallback: false,

@@ -730,31 +730,69 @@ export function removePlannedStop(selectedPlaceIds = [], placeIdOrIndex) {
   return list.filter(id => id !== placeIdOrIndex);
 }
 
-/** Trail point retention: in-memory up to 1 hour (3600_000 ms), max 600 points */
+/** Trail point retention: in-memory up to 1 hour (3600_000 ms), max 600 points.
+ * Computes walking azimuth `bearing` and alternates `isLeft` (`side: 'L' | 'R'`) every ~8-12 m (ZADÁNÍ #08 Bod 3).
+ */
 export function appendTrail(trail, fix, now = Date.now()) {
   if (!fix || !Number.isFinite(fix.lat) || !Number.isFinite(fix.lng)) return Array.isArray(trail) ? trail : [];
   const fresh = (Array.isArray(trail) ? trail : []).filter(
     p => p && Number.isFinite(p.ts) && now - p.ts <= 3600_000 && p.ts <= now + 5000
   );
+  const lastPt = fresh.length > 0 ? fresh[fresh.length - 1] : null;
+  let bearing = Number.isFinite(fix.bearing) ? Math.round(fix.bearing) : 0;
+
+  if (lastPt && !lastPt.segmentBreak && !fix.segmentBreak) {
+    const dist = haversineMeters(lastPt, fix) ?? 0;
+    // Pokud se hráč posunul o méně než 8 m a nejde o přerušení úseku, nepřidáváme novou stopu na totéž místo
+    if (dist < 8 && fresh.length > 0 && !fix.forceTrailPoint) {
+      return fresh;
+    }
+    if (dist >= 0.5) {
+      const dLng = ((fix.lng - lastPt.lng) * Math.PI) / 180;
+      const lat1 = (lastPt.lat * Math.PI) / 180;
+      const lat2 = (fix.lat * Math.PI) / 180;
+      const y = Math.sin(dLng) * Math.cos(lat2);
+      const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+      bearing = Math.round(((Math.atan2(y, x) * 180) / Math.PI + 360) % 360);
+    } else if (Number.isFinite(lastPt.bearing)) {
+      bearing = lastPt.bearing;
+    }
+  }
+
+  const nextIndex = fresh.length;
+  const isLeft = nextIndex % 2 === 0;
   const point = {
     lat: Math.round(fix.lat * 1e5) / 1e5,
     lng: Math.round(fix.lng * 1e5) / 1e5,
     ts: now,
+    bearing,
+    isLeft,
+    side: isLeft ? 'L' : 'R',
     segmentBreak: Boolean(fix.segmentBreak),
   };
-  return [...fresh, point].slice(-600);
+  return pruneTrail([...fresh, point].slice(-600), now);
 }
 
-/** Prunes points older than 1h and returns them with computed fading opacity */
+/** Prunes points older than 1h and returns them with computed fading opacity (0.85 down to 0.15) */
 export function pruneTrail(trail, now = Date.now()) {
   const list = Array.isArray(trail) ? trail : [];
   return list
     .filter(p => p && Number.isFinite(p.ts) && now - p.ts <= 3600_000 && p.ts <= now + 5000)
-    .map(p => {
+    .map((p, idx) => {
       const age = Math.max(0, now - p.ts);
       const ratio = 1 - Math.min(1, age / 3600_000);
-      const opacity = Math.round((0.15 + 0.75 * ratio) * 100) / 100;
-      return { lat: p.lat, lng: p.lng, ts: p.ts, opacity, segmentBreak: p.segmentBreak };
+      const opacity = Math.round((0.15 + 0.70 * ratio) * 100) / 100;
+      const isLeft = typeof p.isLeft === 'boolean' ? p.isLeft : idx % 2 === 0;
+      return {
+        lat: p.lat,
+        lng: p.lng,
+        ts: p.ts,
+        bearing: Number.isFinite(p.bearing) ? p.bearing : 0,
+        isLeft,
+        side: p.side || (isLeft ? 'L' : 'R'),
+        opacity,
+        segmentBreak: p.segmentBreak,
+      };
     });
 }
 

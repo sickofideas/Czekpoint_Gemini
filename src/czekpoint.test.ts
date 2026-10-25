@@ -16,6 +16,8 @@ import {
   expeditionPointsDelta,
   appendToWalkSegments,
   computeFootprintPlacements,
+  appendTrail,
+  pruneTrail,
   discoverNearby,
 } from './walk-engine.js';
 import {
@@ -36,7 +38,14 @@ import {
   optimizeRouteOrder,
   buildLocalRoutedGeometry,
   computeRemainingFromSharedRoute,
+  computeActiveTurnInstruction,
+  searchPlaceNominatim,
+  buildReturnToOriginRoute,
 } from './planner.js';
+import {
+  renderBootFootprintSvg,
+  renderPlayerAvatarMarkerHtml,
+} from './walk.js';
 import {
   SPEED_PRESETS,
   ACCURACY_PRESETS,
@@ -500,5 +509,72 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
     assert.equal(evalOpp1.newlyConfirmedIds.length, 0);
     assert.equal(evalOpp2.newlyConfirmedIds.length, 0, 'Odhalení vodní plochy nesmí potvrdit zastávku na protějším břehu');
   });
+
+  it('v1.0 (ZADÁNÍ #08 — Bod 1 & 2): Průvodce výpravou filtruje náročnost terénu (easy / medium / hard), vyhledá města v ČR a vykreslí živého Avatara s orbitální šipkou', async () => {
+    const origin = { id: 'namesti', label: 'Rožmitál — náměstí', lat: 49.6018, lng: 13.8635 };
+    const candidatePlaces = [
+      { id: 'rybnik-stop', title: 'Podzámecký rybník — nábřeží', lat: 49.6036, lng: 13.8594, category: 'water', kind: 'water', collectible: true },
+      { id: 'zamek-stop', title: 'Zámek Rožmitál', lat: 49.6024, lng: 13.8621, category: 'castles', kind: 'castle', collectible: true },
+      { id: 'tremsin-vrchol', title: 'Vrch Třemšín — skalní vyhlídka (827 m)', lat: 49.5672, lng: 13.7775, category: 'views', kind: 'peak', elevationGainM: 280, collectible: true },
+      { id: 'studanka-stop', title: 'Králova studánka', lat: 49.5960, lng: 13.8480, category: 'water', kind: 'spring', collectible: true },
+    ];
+
+    const easyTrip = autoSuggestTrip({
+      origin,
+      targetKm: 5,
+      companionMode: 'solo',
+      terrainDifficulty: 'easy',
+      availablePlaces: candidatePlaces,
+      discoveries: [],
+    });
+    assert.equal(easyTrip.found, true);
+    assert.equal(
+      easyTrip.selectedPlaceIds.includes('tremsin-vrchol'),
+      false,
+      'Lehká rovinka (easy) musí vynechat strmé vrcholy a skály s velkým převýšením'
+    );
+
+    // Offline / lokální vyhledání města v ČR pro scénář „Plánuji dopředu z domova“
+    const pisekResults = await searchPlaceNominatim('Písek');
+    assert.ok(pisekResults.length >= 1);
+    assert.match(pisekResults[0].label, /Písek/i);
+
+    // Vykreslení živého Avatara se zlatou směrovou šipkou
+    const avatarHtml = renderPlayerAvatarMarkerHtml({ avatarId: 'liska', bearingDeg: 135, isWalking: true });
+    assert.match(avatarHtml, /player-avatar-marker is-walking/);
+    assert.match(avatarHtml, /avatar-direction-pointer/);
+    assert.match(avatarHtml, /rotate\(135deg\)/);
+  });
+
+  it('v1.0 (ZADÁNÍ #08 — Bod 3 & 5): Stopy pohorek střídají L/R a blednou podle stáří; odbočovací navigace a návrat na start fungují ze společné pěší trasy', async () => {
+    let trail: any[] = [];
+    trail = appendTrail(trail, { lat: 49.6010, lng: 13.8630 }, 1000);
+    trail = appendTrail(trail, { lat: 49.6014, lng: 13.8630 }, 5000);
+    trail = appendTrail(trail, { lat: 49.6018, lng: 13.8630 }, 9000);
+    assert.equal(trail.length, 3);
+    assert.equal(trail[0].isLeft, true);
+    assert.equal(trail[1].isLeft, false);
+    assert.equal(trail[2].isLeft, true);
+    assert.ok(trail[2].opacity >= trail[0].opacity, 'Nejnovější stopa má vyšší krytí než starší stopy');
+
+    const bootSvgLeft = renderBootFootprintSvg('L', 45, 0.75);
+    const bootSvgRight = renderBootFootprintSvg('R', 45, 0.40);
+    assert.match(bootSvgLeft, /footprint-marker/);
+    assert.match(bootSvgRight, /scaleX\(-1\)/);
+
+    const origin = { id: 'namesti', label: 'Rožmitál — náměstí', lat: 49.6018, lng: 13.8635 };
+    const stopA = { id: 'stop-a', title: 'Alej Johanky z Rožmitálu', lat: 49.5991, lng: 13.8518 };
+    const sharedRoute = buildLocalRoutedGeometry([origin, stopA]);
+    assert.ok(Array.isArray(sharedRoute.steps) && sharedRoute.steps.length >= 1, 'Pěší trasa musí obsahovat odbočovací kroky (steps)');
+
+    const turnInfo = computeActiveTurnInstruction(sharedRoute, origin, [stopA], new Set());
+    assert.ok(turnInfo.icon.length >= 1);
+    assert.match(turnInfo.text, /Směr: Alej Johanky z Rožmitálu/);
+
+    const returnRoute = await buildReturnToOriginRoute(stopA, origin);
+    assert.ok(returnRoute.distanceM > 500, 'Trasa návratu na start musí mít reálnou pěší délku');
+    assert.ok(returnRoute.coordinates.length >= 2);
+  });
 });
+
 
