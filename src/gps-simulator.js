@@ -402,6 +402,9 @@ export class GpsSimulator {
       this.panelEl.remove();
       this.panelEl = null;
     }
+    if (this.container && this.container.id === 'simulator-test-zone') {
+      this.container.hidden = true;
+    }
     this.onClose();
   }
 
@@ -982,8 +985,12 @@ export class GpsSimulator {
       </div>
     `;
 
-    const mapWrap = document.querySelector('.walk-map-wrap') || this.container;
-    mapWrap.appendChild(this.panelEl);
+    const targetContainer = this.container || document.querySelector('#simulator-test-zone') || document.querySelector('.walk-map-wrap') || document.body;
+    targetContainer.appendChild(this.panelEl);
+    if (targetContainer.id === 'simulator-test-zone') {
+      targetContainer.hidden = false;
+      targetContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
 
     this.wirePanelEvents();
   }

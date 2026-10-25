@@ -733,6 +733,7 @@ export function autoSuggestTrip({
     const emptyAnalysis = analyzePlannedRoute(center, [], companionMode, { returnToOrigin: true, terrainDifficulty: difficulty });
     return {
       found: false,
+      origin: center,
       returnToOrigin: true,
       targetKm: target,
       terrainDifficulty: difficulty,
@@ -830,6 +831,7 @@ export function autoSuggestTrip({
 
   return {
     found: true,
+    origin: center,
     returnToOrigin: true,
     targetKm: target,
     terrainDifficulty: difficulty,

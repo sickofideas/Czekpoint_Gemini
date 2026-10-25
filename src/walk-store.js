@@ -10,6 +10,19 @@ export const COMPANION_MODES = ['solo', 'dog', 'stroller', 'family'];
 export const EXPLORATION_MODES = ['compass', 'focus', 'radar'];
 export const MAX_STICK_BADGES = 200;
 
+export const DEFAULT_APP_SETTINGS = Object.freeze({
+  fogParchment: true,     // 📜 Tajemný pergamen (odkrývání mlhy)
+  kctTrails: true,        // 🥾 Turistické značky KČT a stezky
+  contours: true,         // ⛰️ Vrstevnice a terén
+  footprints: true,       // 👣 Stopy pohorek za mnou
+  orbitalArrow: true,     // 🎯 Zlatá směrová šipka u Avatara
+  voiceNav: true,         // 🗣️ Česká hlasová navigace
+  soundFx: true,          // 🔊 Zvukové efekty a fanfáry
+  keepAwake: true,        // 📱 Držet rozsvícený displej
+  autoSortStops: true,    // 🔄 Chytré řazení zastávek podle pěší trasy
+  gameMode: 'gamified',   // 'explorer' (Objevitel) | 'gamified' (Výprava s gamifikací) | 'casual' (Pohodová procházka)
+});
+
 export const emptyState = () => ({
   schemaVersion: 2,
   revision: 1,
@@ -40,7 +53,8 @@ export const emptyState = () => ({
   plannedRoute: null,
   confirmedStopIds: [],
   savedTrips: [],
-  voiceNavEnabled: false,
+  voiceNavEnabled: true,
+  appSettings: { ...DEFAULT_APP_SETTINGS },
 });
 
 export function sanitizeWalkSegments(segments) {
@@ -200,7 +214,11 @@ export function loadState() {
         plannedRoute: data.plannedRoute && typeof data.plannedRoute === 'object' ? data.plannedRoute : null,
         confirmedStopIds: Array.isArray(data.confirmedStopIds) ? [...new Set(data.confirmedStopIds)] : [],
         savedTrips: Array.isArray(data.savedTrips) ? data.savedTrips.slice(0, 50) : [],
-        voiceNavEnabled: typeof data.voiceNavEnabled === 'boolean' ? data.voiceNavEnabled : false,
+        voiceNavEnabled: typeof data.voiceNavEnabled === 'boolean' ? data.voiceNavEnabled : true,
+        appSettings: {
+          ...DEFAULT_APP_SETTINGS,
+          ...(data.appSettings && typeof data.appSettings === 'object' ? data.appSettings : {}),
+        },
         storageCorrupted: false,
         storageError: '',
       };
@@ -364,7 +382,11 @@ export function saveState(state, options = {}) {
       plannedRoute: state.plannedRoute && typeof state.plannedRoute === 'object' ? state.plannedRoute : null,
       confirmedStopIds: Array.isArray(state.confirmedStopIds) ? [...new Set(state.confirmedStopIds)] : [],
       savedTrips: Array.isArray(state.savedTrips) ? state.savedTrips.slice(0, 50) : [],
-      voiceNavEnabled: typeof state.voiceNavEnabled === 'boolean' ? state.voiceNavEnabled : false,
+      voiceNavEnabled: typeof state.voiceNavEnabled === 'boolean' ? state.voiceNavEnabled : true,
+      appSettings: {
+        ...DEFAULT_APP_SETTINGS,
+        ...(state.appSettings && typeof state.appSettings === 'object' ? state.appSettings : {}),
+      },
       revision: nextRevision,
     };
     delete nextState.storageCorrupted;
@@ -415,8 +437,8 @@ export function clearState() {
 /**
  * Exports personal exploration state as a formatted JSON string.
  */
-export function exportStateJson() {
-  const state = loadState();
+export function exportStateJson(passedState) {
+  const state = passedState || loadState();
   const exportPayload = {
     exportedAt: new Date().toISOString(),
     appName: 'czekpoint',
@@ -593,7 +615,11 @@ export function importStateJson(jsonString) {
     plannedRoute: d.plannedRoute && typeof d.plannedRoute === 'object' ? d.plannedRoute : null,
     confirmedStopIds: Array.isArray(d.confirmedStopIds) ? [...new Set(d.confirmedStopIds)] : [],
     savedTrips: Array.isArray(d.savedTrips) ? d.savedTrips.slice(0, 50) : [],
-    voiceNavEnabled: typeof d.voiceNavEnabled === 'boolean' ? d.voiceNavEnabled : false,
+    voiceNavEnabled: typeof d.voiceNavEnabled === 'boolean' ? d.voiceNavEnabled : true,
+    appSettings: {
+      ...DEFAULT_APP_SETTINGS,
+      ...(d.appSettings && typeof d.appSettings === 'object' ? d.appSettings : {}),
+    },
   };
 
   return saveState(newState, { allowOverwriteCorrupted: true });

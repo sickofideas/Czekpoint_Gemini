@@ -11,6 +11,7 @@ import {
   exportStateJson,
   previewImportState,
   importStateJson,
+  DEFAULT_APP_SETTINGS,
 } from './walk-store.js';
 import { ALLOWED_AVATARS, avatarUrl } from './avatars.js';
 import { generatePostcardDataUrl, generatePostcardBlob } from './postcard.js';
@@ -604,6 +605,111 @@ function renderAbout() {
     </div>`;
 }
 
+function renderSettingsPage() {
+  let s = loadState();
+  const cfg = s.appSettings || DEFAULT_APP_SETTINGS;
+  const gameMode = cfg.gameMode || 'gamified';
+
+  const SETTINGS_LIST = [
+    { key: 'fogParchment', icon: '📜', label: 'Tajemný pergamen (odkrývání mlhy)', desc: 'Neznámá místa na mapě skrývá pergamen a odkrývají se tvou chůzí s měkkým rozsvěcením.', val: cfg.fogParchment },
+    { key: 'kctTrails', icon: '🥾', label: 'Turistické značky KČT a naučné stezky', desc: 'Zobrazuje oficiální červené, modré, zelené a žluté pěší značky na mapě.', val: cfg.kctTrails },
+    { key: 'contours', icon: '⛰️', label: 'Vrstevnice a terén (OpenTopoMap)', desc: 'Zapne vrstevnicový podklad s kopci a výškami.', val: cfg.contours },
+    { key: 'footprints', icon: '👣', label: 'Stopy pohorek za mnou', desc: 'Kreslí střídavé otisky podrážek levé a pravé boty natočené ve směru chůze.', val: cfg.footprints },
+    { key: 'orbitalArrow', icon: '🎯', label: 'Zlatá směrová šipka u Avatara', desc: 'Ukazuje přímý směr k dalšímu checkpointu po obvodu tvé postavičky.', val: cfg.orbitalArrow },
+    { key: 'voiceNav', icon: '🗣️', label: 'Česká hlasová navigace', desc: 'Hlasové pokyny před odbočkou a fanfára při získání razítka.', val: cfg.voiceNav },
+    { key: 'soundFx', icon: '🔊', label: 'Zvukové efekty a fanfáry', desc: 'Zvuk při potvrzení cíle, cinknutí hole v pasu a kliknutí.', val: cfg.soundFx },
+    { key: 'keepAwake', icon: '📱', label: 'Držet rozsvícený displej', desc: 'Při chůzi s telefonem v ruce zabrání automatickému zhasnutí obrazovky.', val: cfg.keepAwake },
+    { key: 'autoSortStops', icon: '🔄', label: 'Chytré řazení zastávek', desc: 'Automaticky seřadí vybraná místa podle pěší trasy bez zbytečných zacházek.', val: cfg.autoSortStops },
+  ];
+
+  main.innerHTML = `
+    <div class="settings-page-shell">
+      <div class="settings-page-head">
+        <span class="settings-eyebrow">⚙️ Nastavení mimo hlavní mapu</span>
+        <h1 class="settings-main-title" tabindex="-1">Nastavení aplikace a herního stylu</h1>
+        <p class="settings-lead">Ve výchozím nastavení je zapnuto vše pro gamifikaci. Pokud chceš cokoliv vypnout (např. pergamen, turistické značky, zvuky), jednoduše přepni pilulku na <strong>Vypnuto</strong>.</p>
+      </div>
+
+      <!-- 3 striktní herní módy -->
+      <section class="settings-card">
+        <div class="settings-card-head">
+          <span class="settings-card-badge">Herní režim</span>
+          <h2>3 hlavní herní styly výpravy</h2>
+          <p class="small-note">Vyber si režim, který ti nejlépe vyhovuje. Každý režim automaticky nastaví mlhu i zobrazení trasy.</p>
+        </div>
+
+        <div class="game-mode-grid" role="radiogroup" aria-label="Výběr herního stylu">
+          <button type="button" class="game-mode-card ${gameMode === 'explorer' ? 'active' : ''}" data-setting-mode="explorer">
+            <span class="gmc-icon">🧭</span>
+            <strong>1. Objevitel (Dobrodruh)</strong>
+            <p>Zahalená mapa pergamenem, ŽÁDNÁ narýsovaná čára trasy na zemi. Orientuješ se podle kompasu a objevuješ krajinu na vlastní pěst.</p>
+            <span class="gmc-badge">${gameMode === 'explorer' ? '✓ Aktivní styl' : 'Zvolit tento styl'}</span>
+          </button>
+
+          <button type="button" class="game-mode-card ${gameMode === 'gamified' ? 'active' : ''}" data-setting-mode="gamified">
+            <span class="gmc-icon">🥾</span>
+            <strong>2. Výprava s gamifikací</strong>
+            <p>Poloprůhledná pergamenová mapa s měkkým rozsvěcením, vypočtená pěší trasa po cestách, stopy pohorek, Avatar se šipkou a razítka.</p>
+            <span class="gmc-badge">${gameMode === 'gamified' ? '✓ Aktivní styl' : 'Zvolit tento styl'}</span>
+          </button>
+
+          <button type="button" class="game-mode-card ${gameMode === 'casual' ? 'active' : ''}" data-setting-mode="casual">
+            <span class="gmc-icon">🗺️</span>
+            <strong>3. Pohodová procházka</strong>
+            <p>Úplně čistá otevřená mapa bez jakékoliv mlhy, zřetelně vyznačená trasa i checkpointy. Vhodné pro děti i seniory.</p>
+            <span class="gmc-badge">${gameMode === 'casual' ? '✓ Aktivní styl' : 'Zvolit tento styl'}</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- Přepínače jednotlivých funkcí (Pilulky Ano / Ne) -->
+      <section class="settings-card">
+        <div class="settings-card-head">
+          <span class="settings-card-badge">Jednotlivé prvky</span>
+          <h2>Přizpůsobení zobrazení a chování</h2>
+        </div>
+
+        <div class="settings-pills-list">
+          ${SETTINGS_LIST.map(item => `
+            <div class="settings-pill-row">
+              <div class="settings-pill-info">
+                <span class="settings-icon-bubble">${item.icon}</span>
+                <div>
+                  <strong>${e(item.label)}</strong>
+                  <p>${e(item.desc)}</p>
+                </div>
+              </div>
+              <div class="settings-pill-switch" role="radiogroup" aria-label="${e(item.label)}">
+                <button type="button" class="settings-pill-btn ${item.val ? 'is-active' : ''}" data-action="toggle-setting" data-key="${item.key}" data-val="true">
+                  ✓ Zapnuto
+                </button>
+                <button type="button" class="settings-pill-btn ${!item.val ? 'is-active' : ''}" data-action="toggle-setting" data-key="${item.key}" data-val="false">
+                  Vypnuto
+                </button>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+
+        <div class="settings-card-footer">
+          <button type="button" class="button small ghost" data-action="reset-app-settings">↺ Obnovit výchozí herní nastavení (vše zapnuto)</button>
+          <a href="#/" class="button primary">▶ Přejít na mapu a vyrazit</a>
+        </div>
+      </section>
+
+      <div class="about-foot" style="margin-top:20px">
+        <div class="data-actions">
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+            <button type="button" class="button small" data-action="export-state">${icon('arrow')}Exportovat zálohu průzkumu (JSON)</button>
+            <button type="button" class="button small" data-action="import-state">${icon('book')}Obnovit průzkum ze zálohy (JSON)</button>
+          </div>
+          <button type="button" class="button danger small" data-action="clear-local">${icon('trash')}Vymazat lokální data a resetovat průzkum</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function renderNotFound() {
   main.innerHTML = `<div class="empty-state">${icon('pin')}<h1 tabindex="-1">Tuhle cestu zatím neznáme.</h1><p>Odkaz neodpovídá žádnému dostupnému výletu.</p><a class="button primary" href="#/">Zpět na výlety</a></div>`;
 }
@@ -621,7 +727,7 @@ async function renderPage({ focus = false } = {}) {
   const renderId = ++state.renderId;
   const parts = location.hash.replace(/^#\/?/, '').split('/');
   const view = parts[0] || '';
-  state.view = (view === '' || view === 'prochazka') ? 'walk' : view === 'katalog' ? 'catalog' : view === 'pas' ? 'passport' : view === 'o-projektu' ? 'about' : view === 'trasa' ? 'detail' : 'unknown';
+  state.view = (view === '' || view === 'prochazka') ? 'walk' : view === 'katalog' ? 'catalog' : view === 'pas' ? 'passport' : view === 'nastaveni' ? 'settings' : view === 'o-projektu' ? 'about' : view === 'trasa' ? 'detail' : 'unknown';
   document.title = 'Czekpoint — Začni cestu s přehledem';
   document.querySelectorAll('[data-nav]').forEach(link => {
     const active = link.dataset.nav === state.view || (state.view === 'detail' && link.dataset.nav === 'catalog');
@@ -650,6 +756,7 @@ async function renderPage({ focus = false } = {}) {
     }
   }
   else if (view === 'pas') renderPassport();
+  else if (view === 'nastaveni') renderSettingsPage();
   else if (view === 'o-projektu') renderAbout();
   else renderNotFound();
   if (focus && renderId === state.renderId) { window.scrollTo(0, 0); main.querySelector('h1')?.focus({ preventScroll: true }); }

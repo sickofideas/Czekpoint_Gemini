@@ -2306,6 +2306,350 @@
   }
 }
 
+/* ==========================================================================
+   ZADÁNÍ #08 & v1.0: 3 herní styly, Hero karta dalšího checkpointu,
+   Persistentní detail místa, Testovací simulátor pod mapou a Nastavení pilulkami
+   ========================================================================== */
+
+/* 3 herní styly */
+.wizard-mode-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  margin-top: 8px;
+}
+.wizard-mode-btn {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.7);
+  border: 2px solid #d4c5a9;
+  border-radius: 14px;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  color: #2b2118;
+}
+.wizard-mode-btn:hover {
+  background: #ffffff;
+  border-color: #8da949;
+  transform: translateY(-1px);
+}
+.wizard-mode-btn.active {
+  background: #fbf7ee;
+  border-color: #3c6e47;
+  box-shadow: 0 4px 14px rgba(60, 110, 71, 0.2), inset 0 0 0 1px #3c6e47;
+}
+.wizard-mode-btn .wmode-icon {
+  font-size: 1.8rem;
+  line-height: 1;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.wizard-mode-btn .wmode-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.wizard-mode-btn .wmode-text strong {
+  font-size: 0.98rem;
+  color: #1e2d24;
+}
+.wizard-mode-btn .wmode-text small {
+  font-size: 0.8rem;
+  color: #55483a;
+  line-height: 1.35;
+}
+
+/* Výrazná Hero karta dalšího checkpointu přímo nad mapou */
+.next-checkpoint-hero-card {
+  margin-bottom: 8px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #1e2e22 0%, #283e2e 100%);
+  color: #f7f9ed;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22);
+  border: 1.5px solid #5a7d62;
+  overflow: hidden;
+  transition: all 0.2s ease;
+}
+.hero-card-inner {
+  padding: 12px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.hero-card-target-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1 1 280px;
+}
+.hero-card-step-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #ffd25a;
+}
+.hero-dir-pill {
+  background: rgba(255, 210, 90, 0.18);
+  border: 1px solid rgba(255, 210, 90, 0.4);
+  color: #ffe68a;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: 0.72rem;
+}
+.hero-card-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.hero-kind-icon {
+  font-size: 1.3rem;
+  line-height: 1;
+}
+.hero-checkpoint-name {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 850;
+  color: #ffffff;
+  letter-spacing: -0.01em;
+}
+.hero-card-stats-chips {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+.hero-stat-chip {
+  font-size: 0.82rem;
+  background: rgba(255, 255, 255, 0.1);
+  padding: 3px 9px;
+  border-radius: 8px;
+  color: #e5ecd6;
+}
+.hero-stat-chip strong {
+  color: #ffffff;
+}
+.hero-stat-chip.dist strong {
+  color: #ffd25a;
+}
+.hero-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.hero-free-walk, .hero-complete {
+  padding: 12px 16px;
+}
+.hero-card-badge {
+  display: inline-block;
+  font-size: 0.76rem;
+  font-weight: 800;
+  color: #c9db98;
+  margin-bottom: 2px;
+}
+.hero-card-badge.completed {
+  color: #ffd25a;
+}
+.hero-card-title {
+  display: block;
+  font-size: 1.05rem;
+  color: #ffffff;
+}
+.hero-card-sub {
+  display: block;
+  font-size: 0.82rem;
+  color: #d1dcbe;
+  margin-top: 2px;
+}
+
+/* Persistentní detail místa */
+.place-detail-sheet {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  right: 12px;
+  z-index: 1000;
+  max-width: 480px;
+  margin: 0 auto;
+  pointer-events: auto;
+}
+.pds-card {
+  background: rgba(24, 38, 29, 0.96);
+  backdrop-filter: blur(14px);
+  border: 1.5px solid #8da949;
+  border-radius: 16px;
+  padding: 14px 16px;
+  color: #f7f9ed;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.45);
+  animation: pdsSlideUp 0.22s ease-out;
+}
+@keyframes pdsSlideUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.pds-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+.pds-kind-badge {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 750;
+  color: #c9db98;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 2px;
+}
+.pds-title {
+  margin: 0;
+  font-size: 1.15rem;
+  color: #ffffff;
+}
+.pds-close-btn {
+  padding: 2px 8px !important;
+  font-size: 1rem !important;
+  color: #c9db98 !important;
+}
+.pds-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 8px 0;
+  font-size: 0.84rem;
+  color: #d7e2c6;
+}
+.pds-stamp-badge {
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  border-radius: 8px;
+  font-weight: 700;
+}
+.pds-stamp-badge.visited {
+  background: #2a5a36;
+  color: #bbf7d0;
+}
+.pds-stamp-badge.lifetime {
+  background: #684a20;
+  color: #fed7aa;
+}
+.pds-stamp-badge.pending {
+  background: rgba(255, 255, 255, 0.12);
+  color: #e2e8f0;
+}
+.pds-desc {
+  margin: 6px 0 10px;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  color: #c2cfb4;
+}
+.pds-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+/* Testovací simulátor pod mapou (nepřekrývá mapu) */
+.simulator-test-zone {
+  margin: 12px 0 16px;
+  padding: 12px 14px;
+  background: linear-gradient(135deg, #18261c 0%, #223727 100%);
+  border: 2px dashed #648a6a;
+  border-radius: 16px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+}
+.simulator-test-zone .fake-gps-panel {
+  position: static !important;
+  top: auto !important;
+  right: auto !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  padding: 0 !important;
+  border: none !important;
+}
+
+/* Nastavení pilulkovými přepínači [ ✓ Zapnuto ] [ Vypnuto ] */
+.settings-pills-container {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.settings-pill-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.65);
+  border: 1px solid #dcd1be;
+  border-radius: 12px;
+  flex-wrap: wrap;
+}
+.settings-pill-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 240px;
+}
+.settings-pill-icon {
+  font-size: 1.4rem;
+  flex-shrink: 0;
+}
+.settings-pill-texts {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.settings-pill-texts strong {
+  font-size: 0.92rem;
+  color: #1e2d24;
+}
+.settings-pill-texts small {
+  font-size: 0.78rem;
+  color: #5d5142;
+}
+.settings-pill-buttons {
+  display: inline-flex;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1.5px solid #2d4533;
+  flex-shrink: 0;
+}
+.settings-pill-btn {
+  padding: 6px 14px;
+  font-size: 0.82rem;
+  font-weight: 750;
+  border: none;
+  cursor: pointer;
+  background: #f4efe4;
+  color: #4a3e30;
+  transition: all 0.15s ease;
+}
+.settings-pill-btn.btn-on.selected {
+  background: #2f6b3b;
+  color: #ffffff;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+.settings-pill-btn.btn-off.selected {
+  background: #8b3a30;
+  color: #ffffff;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+
 
 
 

@@ -23,6 +23,7 @@ import {
 import {
   STATE_KEY,
   CORRUPTED_BACKUP_KEY,
+  DEFAULT_APP_SETTINGS,
   loadState,
   saveState,
   previewImportState,
@@ -111,19 +112,19 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
     assert.equal(restored.meters, 920);
 
     // Záporná vzdálenost nebo poškozená data nikdy nevytvoří záporné skóre
-    const negScore = totalScore({ cells: [], discoveries: [], meters: -5000 });
+    const negScore = totalScore({ cells: [], discoveries: [], meters: -5000 } as any);
     assert.equal(negScore, 0);
 
     // Poškozený JSON v úložišti se zazálohuje a označí příznakem storageCorrupted
     store.set(STATE_KEY, '{neplatny-json');
-    const corruptedLoad = loadState();
+    const corruptedLoad: any = loadState();
     assert.equal(corruptedLoad.storageCorrupted, true);
     assert.equal(store.get(CORRUPTED_BACKUP_KEY), '{neplatny-json');
   });
 
   it('5. Automatický návrh výletu počítá plný okruh včetně návratu na start a neslibuje falešný okruh mimo toleranci', () => {
     const origin = { id: 'rozmital-namesti', label: 'Rožmitál — náměstí', lat: 49.6014, lng: 13.8644 };
-    const places = PILOT_ROUTES.filter(r => r.pointKind === 'place').map(r => ({
+    const places = PILOT_ROUTES.filter(r => r.pointKind === 'place').map((r: any) => ({
       id: r.id,
       title: r.title,
       lat: r.location.lat,
@@ -138,7 +139,7 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
       origin,
       targetKm: 5,
       companionMode: 'solo',
-      availablePlaces: places,
+      availablePlaces: places as any,
       discoveries: [],
     });
     assert.equal(trip5.found, true);
@@ -152,7 +153,7 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
       origin,
       targetKm: 10,
       companionMode: 'solo',
-      availablePlaces: tinyPool,
+      availablePlaces: tinyPool as any,
       discoveries: [],
     });
     assert.equal(impossible.found, false);
@@ -161,7 +162,7 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
 
   it('7. Sjednocuje body ve shrnutí výpravy s přírůstkem v pasu a nezdvojuje bonus za staré razítko', () => {
     const startProgress = { cells: ['55110:10870'], meters: 500, discoveries: ['zamek-rozmital'] };
-    const scoreBefore = totalScore(startProgress);
+    const scoreBefore = totalScore(startProgress as any);
 
     const endProgress = {
       cells: ['55110:10870', '55111:10870', '55112:10870'],
@@ -176,9 +177,9 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
         startMeters: startProgress.meters,
         startDiscoveries: startProgress.discoveries.length,
       },
-      endProgress
+      endProgress as any
     );
-    assert.equal(totalScore(endProgress) - scoreBefore, delta);
+    assert.equal(totalScore(endProgress as any) - scoreBefore, delta);
   });
 
   it('8. Zpracování GPS rozlišuje čerstvý záznam způsobilý pro návštěvu (eligibleForVisit)', () => {
@@ -211,10 +212,10 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
     const code = encodeRouteShareCode(plan, stops);
     const catalogOnly = [{ id: 'zamek-rozmital', title: 'Zámek Rožmitál', lat: 49.6024, lng: 13.8636 }];
 
-    const decoded = decodeRouteShareCode(code, catalogOnly);
+    const decoded = decodeRouteShareCode(code, catalogOnly as any);
     assert.ok(decoded);
     assert.equal(decoded.embeddedStops.length, 2);
-    assert.equal(validateDecodedRoutePlan(decoded, catalogOnly), true);
+    assert.equal(validateDecodedRoutePlan(decoded, catalogOnly as any), true);
 
     // Kód s neznámým ID bez vložených souřadnic musí být odmítnut
     const incompleteCode = encodeRouteShareCode(
@@ -222,7 +223,7 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
       []
     );
     assert.throws(
-      () => decodeRouteShareCode(incompleteCode, catalogOnly),
+      () => decodeRouteShareCode(incompleteCode, catalogOnly as any),
       /Sdílená trasa je neúplná/
     );
   });
@@ -233,7 +234,7 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
 
     const w0 = emptyWalk();
     const badFix = { lat: 49.6014, lng: 13.8644, accuracy: 55, timestamp: 1000 };
-    const resBad = acceptFix(w0, null, badFix, 1000);
+    const resBad: any = acceptFix(w0, null, badFix, 1000);
     assert.equal(resBad.accepted, false);
     assert.equal(resBad.pausedByAccuracy, true);
     assert.match(resBad.reason, /55 m/);
@@ -308,17 +309,17 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
     assert.deepEqual(removePlannedStop(initial, 1), ['a', 'c']);
 
     const stops = [{ id: 'stop-1', title: 'Zastávka 1', lat: 49.60141, lng: 13.86441 }];
-    const tracker = {};
-    const confirmed = new Set();
+    const tracker: any = {};
+    const confirmed: any = new Set();
 
     // 1. První přesný fix (< 20 m) — jeden skok ještě nestačí
     const fix1 = { lat: 49.60145, lng: 13.86441, accuracy: 8, timestamp: 10000 };
-    const eval1 = evaluateStopConfirmation(fix1, stops, tracker, confirmed, 10000);
+    const eval1 = evaluateStopConfirmation(fix1, stops as any, tracker, confirmed, 10000);
     assert.equal(eval1.newlyConfirmedIds.length, 0);
 
     // 2. Druhý čerstvý a přesný fix (< 20 m) po 4 sekundách — zastávka se potvrdí
     const fix2 = { lat: 49.60143, lng: 13.86441, accuracy: 8, timestamp: 14000 };
-    const eval2 = evaluateStopConfirmation(fix2, stops, tracker, confirmed, 14000);
+    const eval2 = evaluateStopConfirmation(fix2, stops as any, tracker, confirmed, 14000);
     assert.deepEqual(eval2.newlyConfirmedIds, ['stop-1']);
   });
 
@@ -331,7 +332,7 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
     const unknownParsed = parseOsmcSymbol('', '');
     assert.equal(unknownParsed.known, false);
 
-    const svg = renderOsmcBadgeSvg('blue:white:blue_bar', 'blue');
+    const svg = renderOsmcBadgeSvg('blue:white:blue_bar', 16);
     assert.match(svg, /<svg/);
     assert.match(svg, /#1d6fd8/);
   });
@@ -502,10 +503,10 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
 
     // Zastávka na opačném (západním) břehu Podzámeckého rybníka se NEPOTVRDÍ z východního břehu, přestože je rybník vizuálně odhalený
     const oppositeShoreStop = [{ id: 'opp-shore', title: 'Západní břeh', lat: 49.60610, lng: 13.85480 }];
-    const tracker = {};
-    const confirmed = new Set();
-    const evalOpp1 = evaluateStopConfirmation(shoreFix, oppositeShoreStop, tracker, confirmed, 1000);
-    const evalOpp2 = evaluateStopConfirmation(shoreFix, oppositeShoreStop, tracker, confirmed, 5000);
+    const tracker: any = {};
+    const confirmed: any = new Set();
+    const evalOpp1 = evaluateStopConfirmation(shoreFix, oppositeShoreStop as any, tracker, confirmed, 1000);
+    const evalOpp2 = evaluateStopConfirmation(shoreFix, oppositeShoreStop as any, tracker, confirmed, 5000);
     assert.equal(evalOpp1.newlyConfirmedIds.length, 0);
     assert.equal(evalOpp2.newlyConfirmedIds.length, 0, 'Odhalení vodní plochy nesmí potvrdit zastávku na protějším břehu');
   });
@@ -524,7 +525,7 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
       targetKm: 5,
       companionMode: 'solo',
       terrainDifficulty: 'easy',
-      availablePlaces: candidatePlaces,
+      availablePlaces: candidatePlaces as any,
       discoveries: [],
     });
     assert.equal(easyTrip.found, true);
@@ -540,7 +541,7 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
     assert.match(pisekResults[0].label, /Písek/i);
 
     // Vykreslení živého Avatara se zlatou směrovou šipkou
-    const avatarHtml = renderPlayerAvatarMarkerHtml({ avatarId: 'liska', bearingDeg: 135, isWalking: true });
+    const avatarHtml = (renderPlayerAvatarMarkerHtml as any)({ avatarId: 'liska', bearingDeg: 135, isWalking: true });
     assert.match(avatarHtml, /player-avatar-marker is-walking/);
     assert.match(avatarHtml, /avatar-direction-pointer/);
     assert.match(avatarHtml, /rotate\(135deg\)/);
@@ -567,13 +568,41 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
     const sharedRoute = buildLocalRoutedGeometry([origin, stopA]);
     assert.ok(Array.isArray(sharedRoute.steps) && sharedRoute.steps.length >= 1, 'Pěší trasa musí obsahovat odbočovací kroky (steps)');
 
-    const turnInfo = computeActiveTurnInstruction(sharedRoute, origin, [stopA], new Set());
+    const turnInfo = computeActiveTurnInstruction(sharedRoute as any, origin as any, [stopA] as any, new Set() as any);
     assert.ok(turnInfo.icon.length >= 1);
     assert.match(turnInfo.text, /Směr: Alej Johanky z Rožmitálu/);
 
     const returnRoute = await buildReturnToOriginRoute(stopA, origin);
     assert.ok(returnRoute.distanceM > 500, 'Trasa návratu na start musí mít reálnou pěší délku');
     assert.ok(returnRoute.coordinates.length >= 2);
+  });
+
+  it('v1.0 (Zjednodušení a 3 herní módy): DEFAULT_APP_SETTINGS má ve výchozím stavu zapnutou veškerou gamifikaci a 3 herní módy odpovídají zadání', () => {
+    // 1. Všechny gamifikační přepínače jsou ve výchozím stavu zapnuté
+    assert.equal(DEFAULT_APP_SETTINGS.fogParchment, true);
+    assert.equal(DEFAULT_APP_SETTINGS.kctTrails, true);
+    assert.equal(DEFAULT_APP_SETTINGS.contours, true);
+    assert.equal(DEFAULT_APP_SETTINGS.footprints, true);
+    assert.equal(DEFAULT_APP_SETTINGS.orbitalArrow, true);
+    assert.equal(DEFAULT_APP_SETTINGS.voiceNav, true);
+    assert.equal(DEFAULT_APP_SETTINGS.gameMode, 'gamified');
+
+    // 2. Tři striktní herní módy (Objevitel, Výprava s gamifikací, Pohodová procházka)
+    const validModes = ['explorer', 'gamified', 'casual'];
+    assert.ok(validModes.includes(DEFAULT_APP_SETTINGS.gameMode));
+
+    // 3. Dynamický start: pokud uživatel nevybral město ručně, trasa začíná na aktuální GPS hráče
+    const liveGps = { id: 'gps-live', label: 'Moje GPS', lat: 49.6105, lng: 13.8800 };
+    const stopCandidate = { id: 'stop-x', title: 'Vyhlídka', lat: 49.6150, lng: 13.8850 };
+    const liveTrip = autoSuggestTrip({
+      origin: liveGps,
+      targetKm: 2,
+      companionMode: 'solo',
+      availablePlaces: [stopCandidate] as any,
+      discoveries: [],
+    });
+    assert.equal(liveTrip.origin?.lat, liveGps.lat);
+    assert.equal(liveTrip.origin?.lng, liveGps.lng);
   });
 });
 
