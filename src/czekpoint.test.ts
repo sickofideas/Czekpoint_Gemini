@@ -42,6 +42,11 @@ import {
   computeActiveTurnInstruction,
   searchPlaceNominatim,
   buildReturnToOriginRoute,
+  computeQuadrantSector,
+  sortPlacesClockwise,
+  computeLateralLoopWaypoint,
+  ensureLoopDetourWaypoints,
+  insertStopAtBestPosition,
 } from './planner.js';
 import {
   renderBootFootprintSvg,
@@ -637,6 +642,48 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
     );
     assert.match(instrNext.text, /Alej Johanky/);
     assert.equal(/Podbrdské muzeum/i.test(instrNext.text), false, 'Už navštívený cíl se nesmí opakovat');
+  });
+
+  it('v1.1 (ZADÁNÍ #09 — Fáze 2 & 3): Kruhové rozdělení na 4 výseče (Koláč), seřazení po směru hodinových ručiček (Math.atan2), boční průjezdní bod proti návratu stejnou cestou a vložení zastávky po cestě', () => {
+    const origin = { id: 'start', title: 'Start', lat: 49.6014, lng: 13.8644 };
+
+    // 1. Kruhové výseče ('NE'=SV, 'SE'=JV, 'SW'=JZ, 'NW'=SZ)
+    const pNE = { id: 'ne', title: 'Severovýchod', lat: 49.6060, lng: 13.8720 };
+    const pSE = { id: 'se', title: 'Jihovýchod', lat: 49.5960, lng: 13.8720 };
+    const pSW = { id: 'sw', title: 'Jihozápad', lat: 49.5960, lng: 13.8560 };
+    const pNW = { id: 'nw', title: 'Severozápad', lat: 49.6060, lng: 13.8560 };
+
+    assert.equal(computeQuadrantSector(origin, pNE).sector, 'NE');
+    assert.equal(computeQuadrantSector(origin, pSE).sector, 'SE');
+    assert.equal(computeQuadrantSector(origin, pSW).sector, 'SW');
+    assert.equal(computeQuadrantSector(origin, pNW).sector, 'NW');
+
+    // 2. Seřazení po směru hodinových ručiček (Math.atan2)
+    const scrambled = [pSW, pNE, pNW, pSE];
+    const clockwise = sortPlacesClockwise(origin, scrambled);
+    assert.equal(clockwise.length, 4);
+    // Ověříme cyklické pořadí NE -> SE -> SW -> NW
+    const ids = clockwise.map((p: any) => p.id);
+    const doubled = [...ids, ...ids].join(',');
+    assert.ok(doubled.includes('ne,se,sw,nw'), `Očekáváno hodinové pořadí ne,se,sw,nw, ale získáno: ${ids.join(',')}`);
+
+    // 3. Kontrola překryvu v OSRM: okruh s 1 nebo 2 zastávkami automaticky přidá boční průjezdní bod (~400 m vedle)
+    const singleStopLoop = [origin, pNE, origin];
+    const detoured = ensureLoopDetourWaypoints(singleStopLoop);
+    assert.equal(detoured.length, 4, 'Okruh s 1 zastávkou musí automaticky dostat boční průjezdní bod pro návrat jinou cestou');
+    assert.equal((detoured[2] as any).isAuxiliaryVia, true);
+
+    const lateralPt = computeLateralLoopWaypoint(origin, pNE, [pNE]);
+    assert.ok(lateralPt && Number.isFinite(lateralPt.lat) && Number.isFinite(lateralPt.lng));
+
+    // 4. Fáze 3: Vložení nové zastávky mezi nejvhodnější dva body na trase (minimální zajížďka)
+    const existingStops = [pNE, pSE, pSW];
+    const newStopBetweenSEandSW = { id: 'mid-south', title: 'Jižní vyhlídka', lat: 49.5955, lng: 13.8640 };
+    const updatedStops = insertStopAtBestPosition(origin, existingStops, newStopBetweenSEandSW, {
+      returnToOrigin: true,
+    });
+    assert.equal(updatedStops.length, 4);
+    assert.ok(updatedStops.some((s: any) => s.id === 'mid-south'));
   });
 });
 

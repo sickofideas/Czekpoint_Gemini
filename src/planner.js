@@ -349,7 +349,7 @@ export function computeLocalWalkingLeg(fromPoint, toPoint, options = {}) {
       const b = waypoints[i + 1];
       trailAligned.push(a);
       const directDist = haversineMeters(a, b) ?? 0;
-      if (directDist >= 120) {
+      if (directDist >= 450) {
         for (const trail of trails) {
           if (!Array.isArray(trail.coordinates) || trail.coordinates.length < 3) continue;
           let idxA = -1, minDA = Infinity;
@@ -361,7 +361,7 @@ export function computeLocalWalkingLeg(fromPoint, toPoint, options = {}) {
             if (dA < minDA) { minDA = dA; idxA = t; }
             if (dB < minDB) { minDB = dB; idxB = t; }
           }
-          if (minDA <= 280 && minDB <= 280 && idxA !== -1 && idxB !== -1 && Math.abs(idxA - idxB) >= 1) {
+          if (minDA <= 85 && minDB <= 85 && idxA !== -1 && idxB !== -1 && Math.abs(idxA - idxB) >= 1) {
             const step = idxA < idxB ? 1 : -1;
             const intermediate = [];
             for (let k = idxA; k !== idxB + step; k += step) {
@@ -372,7 +372,7 @@ export function computeLocalWalkingLeg(fromPoint, toPoint, options = {}) {
             for (let m = 0; m < intermediate.length - 1; m++) {
               trailDist += haversineMeters(intermediate[m], intermediate[m + 1]) ?? 0;
             }
-            if (trailDist <= directDist * 1.55) {
+            if (trailDist <= directDist * 1.25) {
               for (const ip of intermediate) {
                 if ((haversineMeters(a, ip) ?? 0) > 18 && (haversineMeters(b, ip) ?? 0) > 18) {
                   trailAligned.push(ip);
@@ -549,13 +549,145 @@ export function optimizeRouteOrder(origin, places, options = {}) {
 
   search(0, 0, 0);
 
-  const orderedPool = bestOrderIndices.map(nodeIdx => pool[nodeIdx - 1]);
+  let orderedPool = bestOrderIndices.map(nodeIdx => pool[nodeIdx - 1]);
+  // Pokud jde o okruh zpět na start (returnToOrigin) s >= 3 body, zkontrolujeme úhlové řazení po směru hodinových ručiček (Math.atan2),
+  // aby se cesta nikdy nekřížila
+  if (returnToOrigin && !fixedLastStop && orderedPool.length >= 3) {
+    const cwPool = sortPlacesClockwise(startPoint, orderedPool);
+    const cwNodes = [startPoint, ...cwPool, loopEndPoint];
+    const cwMatrix = buildWalkingDistanceMatrix(cwNodes, options);
+    let cwCost = 0;
+    for (let i = 0; i < cwNodes.length - 1; i++) cwCost += cwMatrix[i][i + 1];
+    // Pokud je hodinové seřazení bez křížení srovnatelné (do 12 % od TSP minima), použijeme čistý nezkřížený polygon
+    if (cwCost <= bestCost * 1.12) {
+      orderedPool = cwPool;
+    }
+  }
+
   return fixedLastStop
     ? [...visitedPlaces, ...orderedPool, fixedLastStop]
     : [...visitedPlaces, ...orderedPool];
 }
 
 export const optimizeRouteOrderByWalking = optimizeRouteOrder;
+
+/**
+ * ZADÁNÍ #09 (Fáze 2): Kruhové rozdělení na 4 směrové výseče (Koláč: SV, JV, JZ, SZ).
+ * Vrací kvadrant ('NE', 'SE', 'SW', 'NW') a azimut ve stupních (0..360, 0 = sever, 90 = východ).
+ */
+export function computeQuadrantSector(center, point) {
+  if (!center || !point || !Number.isFinite(center.lat) || !Number.isFinite(point.lat)) {
+    return { sector: 'NE', bearingDeg: 0 };
+  }
+  const cosLat = Math.cos((center.lat * Math.PI) / 180);
+  const dy = point.lat - center.lat;
+  const dx = (point.lng - center.lng) * cosLat;
+  // atan2(dx, dy) dává 0 pro sever, +90 pro východ
+  const bearingDeg = ((Math.atan2(dx, dy) * 180) / Math.PI + 360) % 360;
+  let sector = 'NE';
+  if (bearingDeg >= 0 && bearingDeg < 90) sector = 'NE';
+  else if (bearingDeg >= 90 && bearingDeg < 180) sector = 'SE';
+  else if (bearingDeg >= 180 && bearingDeg < 270) sector = 'SW';
+  else sector = 'NW';
+  return { sector, bearingDeg };
+}
+
+/**
+ * ZADÁNÍ #09 (Fáze 2): Seřazení bodů po směru hodinových ručiček podle úhlu (Math.atan2)
+ * kolem společného těžiště mezi startem a vybranými body. Zabraňuje křížení trasy.
+ */
+export function sortPlacesClockwise(origin, places = []) {
+  const valid = (places || []).filter(p => p && Number.isFinite(p.lat) && Number.isFinite(p.lng));
+  if (valid.length <= 2) return [...valid];
+
+  const hasOrigin = origin && Number.isFinite(origin.lat) && Number.isFinite(origin.lng);
+  const allPts = hasOrigin ? [origin, ...valid] : [...valid];
+  const centerLat = allPts.reduce((acc, p) => acc + p.lat, 0) / allPts.length;
+  const centerLng = allPts.reduce((acc, p) => acc + p.lng, 0) / allPts.length;
+  const cosLat = Math.cos((centerLat * Math.PI) / 180);
+
+  // Po směru hodinových ručiček: úhel od severu (0..2π) = atan2(dx, dy)upravený do <0, 2π)
+  const cwAngle = pt => {
+    const dy = pt.lat - centerLat;
+    const dx = (pt.lng - centerLng) * cosLat;
+    return (Math.atan2(dx, dy) + 2 * Math.PI) % (2 * Math.PI);
+  };
+
+  const originAngle = hasOrigin ? cwAngle(origin) : 0;
+
+  return [...valid].sort((a, b) => {
+    const relA = (cwAngle(a) - originAngle + 2 * Math.PI) % (2 * Math.PI);
+    const relB = (cwAngle(b) - originAngle + 2 * Math.PI) % (2 * Math.PI);
+    return relA - relB;
+  });
+}
+
+/**
+ * ZADÁNÍ #09 (Fáze 2): Kontrola překryvu v OSRM pro krátké trasy (1 až 2 zastávky).
+ * Vytvoří boční průjezdní bod (~400 m kolmo na spojnici poslední zastávky a startu),
+ * aby pěší router OSRM vedl zpáteční cestu po vedlejší lesní cestě a nevracel uživatele po vlastních stopách.
+ */
+export function computeLateralLoopWaypoint(origin, lastStop, existingStops = []) {
+  if (!origin || !lastStop || !Number.isFinite(origin.lat) || !Number.isFinite(lastStop.lat)) {
+    return null;
+  }
+  const distM = haversineMeters(origin, lastStop) ?? 0;
+  if (distM < 180) return null;
+
+  const midLat = (origin.lat + lastStop.lat) / 2;
+  const midLng = (origin.lng + lastStop.lng) / 2;
+  const cosLat = Math.cos((midLat * Math.PI) / 180);
+
+  // Směrový vektor z lastStop do origin v metrech
+  const dyM = (origin.lat - lastStop.lat) * 111320;
+  const dxM = (origin.lng - lastStop.lng) * 111320 * cosLat;
+  const len = Math.hypot(dxM, dyM) || 1;
+
+  // Kolmý jednotkový vektor (doprava po směru hodinových ručiček od návratového směru)
+  const perpXM = dyM / len;
+  const perpYM = -dxM / len;
+
+  // Boční odstup ~380 m (nebo 35 % vzdálenosti u kratších tras, max 450 m)
+  const offsetM = Math.min(450, Math.max(240, Math.round(distM * 0.36)));
+
+  const candidateLat = Number((midLat + (perpYM * offsetM) / 111320).toFixed(6));
+  const candidateLng = Number((midLng + (perpXM * offsetM) / (111320 * cosLat)).toFixed(6));
+
+  const ponds = BUILTIN_NATURAL_FEATURES.filter(f => f.kind === 'water');
+  const rawPt = {
+    id: 'via-loop-detour',
+    title: 'Lesní odbočka (návrat jinou cestou)',
+    lat: candidateLat,
+    lng: candidateLng,
+    isAuxiliaryVia: true,
+    isLateralDetour: true,
+    collectible: false,
+  };
+  const safePt = resolveAccessibleStopLocation(rawPt, ponds) || rawPt;
+  return {
+    ...rawPt,
+    lat: Number(safePt.lat.toFixed(6)),
+    lng: Number(safePt.lng.toFixed(6)),
+  };
+}
+
+/**
+ * ZADÁNÍ #09 (Fáze 3): Automaticky vloží novou zastávku na nejvhodnější místo v trase
+ * a přeskládá nenavštívené body tak, aby se cesta nekřížila.
+ */
+export function insertStopAtBestPosition(origin, currentPlaces = [], newPlace, options = {}) {
+  if (!newPlace || !Number.isFinite(newPlace.lat) || !Number.isFinite(newPlace.lng)) {
+    return [...(currentPlaces || [])];
+  }
+  const existing = (currentPlaces || []).filter(p => p && p.id !== newPlace.id);
+  const combined = [...existing, newPlace];
+  return optimizeRouteOrder(origin, combined, {
+    returnToOrigin: options.returnToOrigin !== false,
+    visitedStopIds: options.visitedStopIds,
+    currentPosition: options.currentPosition,
+    keepLastStopFixed: Boolean(options.keepLastStopFixed),
+  });
+}
 
 /**
  * Přehled plánované trasy (Bod 5, 6, 13, 15, 27, 28):
@@ -774,7 +906,8 @@ export function autoSuggestTrip({
       const dist = haversineMeters(center, p) ?? 0;
       const isVisited = visitedSet.has(p.id) || visitedSet.has(`catalog:${p.id}`);
       const isPeak = isPeakOrSteepPlace(p) || p.kind === 'view';
-      return { ...p, _dist: dist, _visited: isVisited, _isPeak: isPeak };
+      const { sector, bearingDeg } = computeQuadrantSector(center, p);
+      return { ...p, _dist: dist, _visited: isVisited, _isPeak: isPeak, _sector: sector, _bearingDeg: bearingDeg };
     })
     .filter(p => p._dist >= 40 && p._dist <= targetMeters * 0.75);
 
@@ -808,7 +941,31 @@ export function autoSuggestTrip({
     return a._dist - b._dist;
   });
 
-  const pool = sortedByRing.slice(0, 14);
+  // ZADÁNÍ #09 (Fáze 2): Kruhové rozdělení na 4 směrové výseče (Koláč: SV, JV, JZ, SZ),
+  // aby výběr tvořil otevřený trojúhelník nebo čtyřúhelník a nevracel se stejnou cestou („nudlí“)
+  const bySector = { NE: [], SE: [], SW: [], NW: [] };
+  for (const item of sortedByRing) {
+    if (bySector[item._sector]) bySector[item._sector].push(item);
+  }
+  const pool = [];
+  const usedIds = new Set();
+  for (let round = 0; round < 4 && pool.length < 14; round++) {
+    for (const sec of ['NE', 'SE', 'SW', 'NW']) {
+      const cand = bySector[sec][round];
+      if (cand && !usedIds.has(cand.id)) {
+        usedIds.add(cand.id);
+        pool.push(cand);
+      }
+    }
+  }
+  for (const item of sortedByRing) {
+    if (pool.length >= 14) break;
+    if (!usedIds.has(item.id)) {
+      usedIds.add(item.id);
+      pool.push(item);
+    }
+  }
+
   let bestCandidate = null;
   let bestScore = Infinity;
 
@@ -818,9 +975,13 @@ export function autoSuggestTrip({
       delete copy._dist;
       delete copy._visited;
       delete copy._isPeak;
+      delete copy._sector;
+      delete copy._bearingDeg;
       return copy;
     });
-    const ordered = optimizeRouteOrder(center, cleanSubset, { returnToOrigin: true });
+    // Seřadíme podle hodinových ručiček (Math.atan2) + pěší optimalizace
+    const cwSorted = sortPlacesClockwise(center, cleanSubset);
+    const ordered = optimizeRouteOrder(center, cwSorted, { returnToOrigin: true });
     const analysis = analyzePlannedRoute(center, ordered, companionMode, {
       returnToOrigin: true,
       terrainDifficulty: difficulty,
@@ -836,8 +997,13 @@ export function autoSuggestTrip({
         : difficulty === 'easy'
         ? peakCount * 0.45 + Math.min(0.35, (analysis.estimatedElevationGainM || 0) / 300)
         : 0;
+
+    // Bonus za rozprostření do více směrových výsečí (otevřený okruh místo přímky tam a zpět)
+    const distinctSectors = new Set(subset.map(p => p._sector)).size;
+    const sectorBonus = distinctSectors >= 3 ? -0.16 : distinctSectors === 2 ? -0.08 : 0.10;
+
     const inTolerance = walkM >= minAcceptableM && walkM <= maxAcceptableM;
-    const scoreVal = diffRatio + visitedPenalty + terrainBonusOrPenalty + (inTolerance ? 0 : 2);
+    const scoreVal = diffRatio + visitedPenalty + terrainBonusOrPenalty + sectorBonus + (inTolerance ? 0 : 2);
 
     if (scoreVal < bestScore) {
       bestScore = scoreVal;
@@ -1273,16 +1439,51 @@ export async function buildReturnToOriginRoute(currentPos, origin, fetchImpl = t
 }
 
 /**
+ * ZADÁNÍ #09 (Fáze 2): Pokud je trasa okruhem zpět na start a má jen 1 nebo 2 zastávky,
+ * automaticky vloží 1 boční průjezdní bod (cca 380–400 m vedle), aby pěší router OSRM
+ * vedl zpáteční cestu jinudy a nevracel uživatele po vlastních stopách.
+ */
+export function ensureLoopDetourWaypoints(waypoints = []) {
+  const valid = (waypoints || []).filter(p => p && Number.isFinite(p.lat) && Number.isFinite(p.lng));
+  if (valid.length < 3) return valid;
+
+  const first = valid[0];
+  const last = valid[valid.length - 1];
+  const isClosedLoop = (haversineMeters(first, last) ?? 999) < 35;
+  if (!isClosedLoop) return valid;
+
+  const innerStops = valid.slice(1, valid.length - 1).filter(p => !p.isAuxiliaryVia);
+  if (innerStops.length === 1) {
+    const via = computeLateralLoopWaypoint(first, innerStops[0], innerStops);
+    if (via) {
+      return [first, innerStops[0], via, last];
+    }
+  } else if (innerStops.length === 2) {
+    // Zkontrolujeme, zda 2 body neleží v úzké přímce („nudli“) ze startu
+    const s1 = computeQuadrantSector(first, innerStops[0]);
+    const s2 = computeQuadrantSector(first, innerStops[1]);
+    const angleDiff = Math.abs(((s2.bearingDeg - s1.bearingDeg + 540) % 360) - 180);
+    if (angleDiff < 38) {
+      const via = computeLateralLoopWaypoint(first, innerStops[1], innerStops);
+      if (via) {
+        return [first, innerStops[0], innerStops[1], via, last];
+      }
+    }
+  }
+  return valid;
+}
+
+/**
  * Sestaví plnou společnou pěší trasu (`sharedWalkingRoute`), kterou sdílejí:
  * 1) Vykreslení na mapě a plánovač
  * 2) Simulátor chůze (autopilot se pohybuje přesně po jejích úsecích, mostech a březích)
  * 3) Výpočet zbývající vzdálenosti a času k další zastávce i do cíle (Body 26, 27, 28).
  */
 export function buildLocalRoutedGeometry(waypoints, options = {}) {
-  const valid = (waypoints || []).filter(p => p && Number.isFinite(p.lat) && Number.isFinite(p.lng));
-  if (valid.length < 2) {
+  const rawValid = (waypoints || []).filter(p => p && Number.isFinite(p.lat) && Number.isFinite(p.lng));
+  if (rawValid.length < 2) {
     return {
-      coordinates: valid.map(p => [p.lat, p.lng]),
+      coordinates: rawValid.map(p => [p.lat, p.lng]),
       distanceM: 0,
       legs: [],
       steps: [],
@@ -1292,6 +1493,8 @@ export function buildLocalRoutedGeometry(waypoints, options = {}) {
       canSimulate: false,
     };
   }
+
+  const valid = options.disableLoopDetour ? rawValid : ensureLoopDetourWaypoints(rawValid);
 
   const coordinates = [];
   const legs = [];
@@ -1309,6 +1512,7 @@ export function buildLocalRoutedGeometry(waypoints, options = {}) {
       originalLat: w.lat,
       originalLng: w.lng,
       isShoreAccess: Boolean(accessible?.isShoreAccess),
+      isAuxiliaryVia: Boolean(w.isAuxiliaryVia),
       waypointIndex: i,
       coordIndex: 0,
     });
@@ -1364,10 +1568,10 @@ export async function fetchWalkingGeometry(waypoints, fetchImpl = typeof fetch !
   if (!Array.isArray(waypoints) || waypoints.length === 0) {
     return { coordinates: [], distanceM: 0, legs: [], steps: [], stopTargets: [], mode: 'empty', isFallback: false, canSimulate: false };
   }
-  const valid = waypoints.filter(p => p && Number.isFinite(p.lat) && Number.isFinite(p.lng));
-  if (valid.length < 2) {
+  const rawValid = waypoints.filter(p => p && Number.isFinite(p.lat) && Number.isFinite(p.lng));
+  if (rawValid.length < 2) {
     return {
-      coordinates: valid.map(p => [p.lat, p.lng]),
+      coordinates: rawValid.map(p => [p.lat, p.lng]),
       distanceM: 0,
       legs: [],
       steps: [],
@@ -1377,6 +1581,8 @@ export async function fetchWalkingGeometry(waypoints, fetchImpl = typeof fetch !
       canSimulate: false,
     };
   }
+
+  const valid = options.disableLoopDetour ? rawValid : ensureLoopDetourWaypoints(rawValid);
 
   // Převod zastávek uprostřed rybníka na přístupný bod na břehu (Bod 26)
   const accessibleWaypoints = valid.map(w => {
