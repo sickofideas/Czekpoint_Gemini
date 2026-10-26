@@ -698,27 +698,38 @@ export function mountWalk(root, routes, config, actions = {}) {
         <button type="button" class="button small map-tool-btn" id="walk-contours-toggle" aria-pressed="false" title="Zobrazit/skrýt vrstevnice a terén">⛰️ Vrstevnice</button>
       </div>
 
-      <!-- ZADÁNÍ #09 (Fáze 4): Jediné spodní tlačítko během chůze [ 🏁 Dokončit / Zkrátit ] + 2 jasné možnosti -->
-      <div class="phase4-finish-bar" id="phase4-finish-bar" hidden role="region" aria-label="Dokončení nebo zkrácení trasy">
-        <div class="phase4-options-sheet" id="phase4-options-sheet" hidden>
-          <button type="button" class="phase4-option-btn shorten" id="btn-phase4-shorten">
-            <span class="p4-opt-icon">🏠</span>
-            <span class="p4-opt-text">
-              <strong>Už chci do cíle (Zkrátit trasu)</strong>
-              <small>Vyškrtne zbývající zastávky a navede tě nejkratší pěší cestou rovnou do cíle.</small>
-            </span>
+      <!-- TRVALE VIDITELNÁ AKČNÍ LIŠTA PŘÍMO U MAPY (.map-action-bar — ZADÁNÍ FLASH #09) -->
+      <div class="map-action-bar" id="map-action-bar" role="region" aria-label="Hlavní ovládání výpravy">
+        <!-- Stav 1 — Výprava ještě neběží (!active) -->
+        <div class="mab-inactive-group" id="mab-inactive-group">
+          <button type="button" class="button mab-btn mab-start-btn" id="walk-start-unified">
+            ▶ VYRAZIT NA VÝPRAVU
           </button>
-          <button type="button" class="phase4-option-btn finish-now" id="btn-phase4-finish-now">
-            <span class="p4-opt-icon">⏹</span>
-            <span class="p4-opt-text">
-              <strong>Ukončit výpravu hned tady</strong>
-              <small>Započítá všechny ušlé km, odkrytou mapu i razítka a vygeneruje pohlednici a štítek.</small>
-            </span>
+          <button type="button" class="button mab-btn mab-planner-btn" id="btn-toggle-quick-planner">
+            ✨ Rychlý návrh trasy
           </button>
         </div>
-        <button type="button" class="button phase4-main-trigger-btn" id="btn-phase4-toggle" aria-expanded="false" aria-controls="phase4-options-sheet">
-          🏁 Dokončit / Zkrátit
-        </button>
+        <!-- Stav 2 — Výprava běží (active === true nebo Test GPS Simulátor) -->
+        <div class="mab-active-group" id="mab-active-group" hidden>
+          <button type="button" class="button mab-btn mab-finish-btn" id="walk-finish">
+            ⏹ Ukončit výpravu (Dokončit)
+          </button>
+          <button type="button" class="button mab-btn mab-shorten-btn" id="walk-shorten-to-start">
+            🏠 Zkrátit zpět na start
+          </button>
+          <button type="button" class="button mab-btn mab-pause-btn" id="walk-pause">
+            ⏸ Pauza
+          </button>
+        </div>
+      </div>
+
+      <!-- Kompatibilní skryté prvky pro Fázi 4 -->
+      <div class="phase4-finish-bar" id="phase4-finish-bar" hidden style="display:none !important">
+        <div class="phase4-options-sheet" id="phase4-options-sheet" hidden>
+          <button type="button" class="phase4-option-btn shorten" id="btn-phase4-shorten">🏠 Zkrátit</button>
+          <button type="button" class="phase4-option-btn finish-now" id="btn-phase4-finish-now">⏹ Ukončit</button>
+        </div>
+        <button type="button" class="button phase4-main-trigger-btn" id="btn-phase4-toggle">Dokončit</button>
       </div>
     </div>
 
@@ -1370,8 +1381,12 @@ export function mountWalk(root, routes, config, actions = {}) {
       ictx.setTransform(ratio, 0, 0, ratio, 0, 0);
       ictx.clearRect(0, 0, size.x, size.y);
 
-      const refLat = map.getCenter()?.lat || 49.6018;
-      const radPx = metersToPx(refLat, FOG_REVEAL_RADIUS_M);
+      const refCenter = map.getCenter() || { lat: 49.6018, lng: 13.8644 };
+      const refLat = refCenter.lat || 49.6018;
+      const curPos = lastFix || telemetry.lastKnownPosition || refCenter;
+      const nearbyPoiCount = getAllAvailablePlaces().filter(p => (haversineMeters(curPos, p) ?? Infinity) <= 1500).length;
+      const effectiveRevealRadiusM = nearbyPoiCount <= 2 ? 85 : FOG_REVEAL_RADIUS_M;
+      const radPx = metersToPx(refLat, effectiveRevealRadiusM);
 
       // Pomocná funkce pro vykreslení celé sjednocené geometrie do daného kontextu (pro vnější jemný okraj a vnitřní čistý střed)
       const drawUnifiedShapes = (targetCtx, expandPx = 0) => {
@@ -2848,10 +2863,10 @@ export function mountWalk(root, routes, config, actions = {}) {
       : `
         <div class="pds-actions phase3-bubble-actions">
           <button type="button" class="button lime phase3-action-btn" id="btn-p3-insert-stop" data-place-id="${e(p.id)}">
-            ➕ Přidat jako zastávku po cestě
+            ➕ Přidat do trasy
           </button>
           <button type="button" class="button primary phase3-action-btn" id="btn-p3-set-end" data-place-id="${e(p.id)}">
-            🏁 Nastavit jako nový konec trasy
+            🏁 Nastavit jako konečný cíl
           </button>
         </div>
       `;
@@ -3263,23 +3278,29 @@ export function mountWalk(root, routes, config, actions = {}) {
     const statePill = $('walk-state-pill');
 
     if (hasExpedition) {
-      $('walk-stop').hidden = false;
-      $('walk-end').hidden = false;
+      if ($('walk-stop')) $('walk-stop').hidden = false;
+      if ($('walk-end')) $('walk-end').hidden = false;
       if (active || starting) {
         const waitingForFix = starting || (!lastFix && !simSandboxActive && !demo);
-        $('walk-start').textContent = waitingForFix ? '📡 Hledám polohu' : '▶ Procházka běží';
-        $('walk-start').disabled = true;
-        $('walk-stop').disabled = false;
-        $('walk-end').disabled = false;
+        const startBtn = $('walk-start');
+        if (startBtn) {
+          startBtn.textContent = waitingForFix ? '📡 Hledám polohu' : '▶ Procházka běží';
+          startBtn.disabled = true;
+        }
+        if ($('walk-stop')) $('walk-stop').disabled = false;
+        if ($('walk-end')) $('walk-end').disabled = false;
         if (statePill) {
           statePill.className = 'telemetry-pill state-running';
           statePill.textContent = waitingForFix ? '📡 Hledám polohu' : '▶ Procházka běží';
         }
       } else if (isPaused) {
-        $('walk-start').textContent = '▶ Pokračovat v procházce';
-        $('walk-start').disabled = starting || demo || Boolean(storageError);
-        $('walk-stop').disabled = true;
-        $('walk-end').disabled = false;
+        const startBtn = $('walk-start');
+        if (startBtn) {
+          startBtn.textContent = '▶ Pokračovat v procházce';
+          startBtn.disabled = starting || demo || Boolean(storageError);
+        }
+        if ($('walk-stop')) $('walk-stop').disabled = true;
+        if ($('walk-end')) $('walk-end').disabled = false;
         if (statePill) {
           statePill.className = 'telemetry-pill state-paused';
           statePill.textContent = '⏸ Pozastaveno';
@@ -3288,38 +3309,45 @@ export function mountWalk(root, routes, config, actions = {}) {
     } else {
       const planned = getPlannedPlaces();
       const startBtn = $('walk-start');
-      if (planned.length > 0) {
-        const isLoop = plannedRoute.routeType === 'loop' && planned.length >= 2;
-        const routedM = lastRoutedGeometry && !lastRoutedGeometry.isFallback ? lastRoutedGeometry.distanceM : null;
-        const est = analyzePlannedRoute(plannedRoute.origin, planned, stateObj.companionMode, {
-          returnToOrigin: isLoop,
-          routedDistanceM: routedM,
-        });
-        const km = ((est?.estimatedWalkDistanceM || 0) / 1000).toFixed(1).replace('.', ',');
-        startBtn.textContent = `▶ Začít procházku (${planned.length} zastávek · ~${km} km)`;
-      } else {
-        startBtn.textContent = '▶ Začít procházku';
+      if (startBtn) {
+        if (planned.length > 0) {
+          const isLoop = plannedRoute.routeType === 'loop' && planned.length >= 2;
+          const routedM = lastRoutedGeometry && !lastRoutedGeometry.isFallback ? lastRoutedGeometry.distanceM : null;
+          const est = analyzePlannedRoute(plannedRoute.origin, planned, stateObj.companionMode, {
+            returnToOrigin: isLoop,
+            routedDistanceM: routedM,
+          });
+          const km = ((est?.estimatedWalkDistanceM || 0) / 1000).toFixed(1).replace('.', ',');
+          startBtn.textContent = `▶ Začít procházku (${planned.length} zastávek · ~${km} km)`;
+        } else {
+          startBtn.textContent = '▶ Začít procházku';
+        }
+        startBtn.disabled = active || starting || demo || Boolean(storageError);
       }
-      startBtn.disabled = active || starting || demo || Boolean(storageError);
-      $('walk-stop').disabled = true;
-      $('walk-end').disabled = true;
-      $('walk-stop').hidden = true;
-      $('walk-end').hidden = true;
+      if ($('walk-stop')) {
+        $('walk-stop').disabled = true;
+        $('walk-stop').hidden = true;
+      }
+      if ($('walk-end')) {
+        $('walk-end').disabled = true;
+        $('walk-end').hidden = true;
+      }
       if (statePill) {
         statePill.className = 'telemetry-pill state-ready';
         statePill.textContent = storageError ? '⚠️ Uložení se nezdařilo' : '● Připraveno';
       }
     }
 
-    $('walk-step').hidden = !demo;
-    $('walk-demo-banner').hidden = !demo;
-    $('walk-demo').textContent = demo ? 'Ukončit ukázku' : 'Ukázka pohybu';
+    if ($('walk-step')) $('walk-step').hidden = !demo;
+    if ($('walk-demo-banner')) $('walk-demo-banner').hidden = !demo;
+    if ($('walk-demo')) $('walk-demo').textContent = demo ? 'Ukončit ukázku' : 'Ukázka pohybu';
 
     renderPlannerBasketAndXray();
     scheduleFog();
     renderTrail();
     renderNextCheckpointHero(lastFix || telemetry.lastKnownPosition);
     renderPhase1AndPhase4Ui(lastFix || telemetry.lastKnownPosition);
+    updateMapActionBar();
   }
 
   function showPostcardModal(summary) {
@@ -3443,10 +3471,19 @@ export function mountWalk(root, routes, config, actions = {}) {
     }
   }
 
-  function finishExpedition() {
+  function finishUnifiedExpedition() {
     fakeGpsSim?.stopMovement?.();
     phase4MenuOpen = false;
-    pauseSession();
+    if (watch !== null) {
+      try { navigator.geolocation?.clearWatch?.(watch); } catch {}
+      watch = null;
+    }
+    stopWatchdog();
+    releaseWake();
+    active = false;
+    starting = false;
+
+    // ZADÁNÍ FLASH #09: Nikdy tiše neskončit na chybějící currentExpedition!
     if (!currentExpedition) {
       currentExpedition = createExpedition({ progress, goal: DEFAULT_GOALS[0] });
     }
@@ -3456,21 +3493,34 @@ export function mountWalk(root, routes, config, actions = {}) {
     const gainedS = Math.max(0, progress.discoveries.length - (currentExpedition.startDiscoveries || 0));
     const earnedPoints = expeditionPointsDelta(currentExpedition, progress);
 
-    const endResult = endExpedition({
-      expedition: currentExpedition,
-      currentProgress: progress,
-      pointsEarned: earnedPoints,
+    let endResult = null;
+    try {
+      endResult = endExpedition({
+        expedition: currentExpedition,
+        currentProgress: progress,
+        pointsEarned: earnedPoints,
+        avatarId: stateObj.profile?.avatarId || 'liska',
+      });
+    } catch {}
+
+    const summary = endResult?.summary || {
+      id: currentExpedition.id,
+      date: new Date().toISOString(),
+      distanceMeters: gainedM,
+      cellsCount: gainedC,
+      stampsCount: gainedS,
+      durationMs: Math.max(60000, Date.now() - (currentExpedition.createdAt || Date.now())),
+      activeDurationMs: Math.max(60000, Date.now() - (currentExpedition.createdAt || Date.now())),
+      pointsEarned: earnedPoints || 10,
+      goal: currentExpedition.goal || DEFAULT_GOALS[0],
       avatarId: stateObj.profile?.avatarId || 'liska',
-    });
+      companionMode: 'solo',
+    };
 
-    if (!endResult) return;
-
-    const { summary } = endResult;
     const prevStateSnapshot = { ...stateObj };
     const prevExpeditionSnapshot = currentExpedition;
     const history = [summary, ...(stateObj.expeditionHistory || [])].slice(0, 100);
 
-    // ZADÁNÍ #09 (Fáze 4): Žádná penalizace — vždy vygenerujeme štítek na hůl i pohlednici z dnešní cesty
     const badge = createStickBadge({
       expId: currentExpedition.id,
       distanceMeters: gainedM,
@@ -3506,14 +3556,64 @@ export function mountWalk(root, routes, config, actions = {}) {
     if (gainedM > 0 || gainedS > 0) {
       playStampChord(stateObj.soundEnabled);
     }
+    updateMapActionBar();
+    updateTopBarUi();
     stats();
     const statePill = $('walk-state-pill');
     if (statePill) {
       statePill.className = 'telemetry-pill state-ready';
       statePill.textContent = simSandboxActive ? '🧪 Simulace dokončena' : '✓ Výprava uložena';
     }
-    status(simSandboxActive ? 'Testovací výprava v simulátoru ukončena (skutečný profil nezměněn).' : 'Výprava uložena.');
+    status(simSandboxActive ? 'Testovací výprava v simulátoru ukončena.' : 'Výprava byla úspěšně uložena.');
     showPostcardModal(summary);
+  }
+  const finishExpedition = finishUnifiedExpedition;
+
+  function shortenRouteToStart() {
+    const curPos = lastFix || telemetry.lastKnownPosition || getRouteOriginPoint();
+    if (!curPos) return;
+    const startOrigin = getRouteOriginPoint();
+    const returnStopId = 'return-to-start-stop';
+    const returnStopObj = {
+      id: returnStopId,
+      title: `Cíl: ${startOrigin.label || 'Návrat na start'}`,
+      lat: startOrigin.lat,
+      lng: startOrigin.lng,
+      kind: 'route-start',
+      category: 'nature',
+      pointKind: 'route-start',
+    };
+    plannedRoute.embeddedStops = [
+      ...(plannedRoute.embeddedStops || []).filter(item => item.id !== returnStopId),
+      returnStopObj,
+    ];
+    const visitedIds = (plannedRoute.selectedPlaceIds || []).filter(id => confirmedStopIds.has(id));
+    plannedRoute.selectedPlaceIds = [...visitedIds, returnStopId];
+    plannedRoute.routeType = 'oneway';
+    lastRoutedGeometry = null;
+    recalculateRemainingRoute('🏠 Trasa zkrácena: zbývající zastávky vyškrtnuty, navádím rovnou do cíle.');
+    playStampChord(stateObj.soundEnabled);
+  }
+
+  function togglePauseUnified() {
+    if (!currentExpedition) return;
+    if (currentExpedition.state === 'paused') {
+      currentExpedition = resumeExpedition(currentExpedition);
+      stateObj.activeExpedition = currentExpedition;
+      telemetry.lastTickMs = Date.now();
+      status('▶ Výprava pokračuje.');
+    } else {
+      currentExpedition = pauseExpedition(currentExpedition);
+      stateObj.activeExpedition = currentExpedition;
+      status('⏸ Výprava pozastavena. Průzkum je uložený.');
+    }
+    if (canPersistRealState()) {
+      try { stateObj = saveState(stateObj); } catch {}
+    }
+    updateMapActionBar();
+    updateTopBarUi();
+    stats();
+    playTick(stateObj.soundEnabled);
   }
 
   let watchdogTimer = null;
@@ -3816,10 +3916,30 @@ export function mountWalk(root, routes, config, actions = {}) {
     justConfirmedStopId = null;
   }
 
-  async function start() {
-    if (active || starting || demo || disposed) return;
+  function updateTopBarUi() {
+    renderPhase1AndPhase4Ui(lastFix || telemetry.lastKnownPosition);
+  }
 
-    // Bod 25: Při zahájení procházky vždy zapneme sledování hráče a vycentrujeme nad spodní panel
+  function updateMapActionBar() {
+    const isRunning = Boolean(active || demo || simSandboxActive || (currentExpedition && currentExpedition.state !== 'ended'));
+    const inactiveGrp = $('mab-inactive-group');
+    const activeGrp = $('mab-active-group');
+    if (inactiveGrp) inactiveGrp.hidden = isRunning;
+    if (activeGrp) activeGrp.hidden = !isRunning;
+
+    const pauseBtn = $('walk-pause');
+    if (pauseBtn) {
+      const isPaused = currentExpedition?.state === 'paused';
+      pauseBtn.textContent = isPaused ? '▶ Pokračovat' : '⏸ Pauza';
+    }
+  }
+
+  async function startUnifiedExpedition(source = 'button') {
+    if (disposed) return;
+    if (active && currentExpedition && currentExpedition.state === 'active') {
+      return;
+    }
+
     follow = true;
     updateFollowUi();
 
@@ -3837,17 +3957,16 @@ export function mountWalk(root, routes, config, actions = {}) {
       active = true;
       anchor = null;
       if (lastFix) centerMapOnPlayer(lastFix, false);
+      updateMapActionBar();
+      updateTopBarUi();
       stats();
-      status('Procházka běží (testovací simulátor v izolovaném režimu).');
+      status('Výprava běží (testovací simulátor GPS v izolovaném režimu).');
       return;
     }
 
-    if (!isSecureContext || !navigator.geolocation) {
-      status('GPS vyžaduje HTTPS a podporovaný prohlížeč. Pro test na počítači použij tlačítko 🧪 Testovací simulátor GPS.');
-      return;
-    }
-
-    starting = true; stats(); status('Hledám polohu…');
+    starting = true;
+    stats();
+    status('Hledám polohu a startuji výpravu…');
 
     stateObj = loadState();
     progress = {
@@ -3884,19 +4003,32 @@ export function mountWalk(root, routes, config, actions = {}) {
       }
     }
 
-    starting = false; active = true; anchor = null; follow = true;
+    starting = false;
+    active = true;
+    anchor = null;
+    follow = true;
     updateFollowUi();
     if (lastFix || telemetry.lastKnownPosition) {
       centerMapOnPlayer(lastFix || telemetry.lastKnownPosition, false);
     }
+    updateMapActionBar();
+    updateTopBarUi();
     stats();
-    status(`Hledám polohu (požadována přesnost GPS ≤ ${MAX_GPS_ACCURACY_M} m, dosah odkrývání ${FOG_REVEAL_RADIUS_M} m)…`);
+    playStampChord(stateObj.soundEnabled);
 
-    lastFixReceivedAt = Date.now();
-    restartGpsWatch();
-    startWatchdog();
-    holdWake();
+    if (source !== 'sim') {
+      if (isSecureContext && navigator.geolocation) {
+        status(`Výprava odstartována! Hledám polohu (přesnost GPS ≤ ${MAX_GPS_ACCURACY_M} m, dosah odkrývání ${FOG_REVEAL_RADIUS_M} m)…`);
+        lastFixReceivedAt = Date.now();
+        restartGpsWatch();
+        startWatchdog();
+        holdWake();
+      } else {
+        status('Výprava odstartována. Pro pohyb v mapě na PC použij 🧪 Testovací simulátor GPS.');
+      }
+    }
   }
+  const start = startUnifiedExpedition;
 
   // Inicializace mapy Leaflet (ZADÁNÍ #09 Fáze 1: Automatické oddálení na okruh cca 3 km kolem uživatele)
   if (L) {
@@ -3931,6 +4063,14 @@ export function mountWalk(root, routes, config, actions = {}) {
       opacity: 0.92,
       pane: 'hiking-trails-pane',
       attribution: '&copy; <a href="https://hiking.waymarkedtrails.org">Waymarked Trails</a>',
+    });
+    let waymarkedFallbackTriggered = false;
+    waymarkedHikingLayer.on('tileerror', () => {
+      if (waymarkedFallbackTriggered || !map) return;
+      waymarkedFallbackTriggered = true;
+      if (waymarkedHikingLayer && map.hasLayer(waymarkedHikingLayer)) {
+        map.removeLayer(waymarkedHikingLayer);
+      }
     });
     if (showHikingTrails) {
       waymarkedHikingLayer.addTo(map);
@@ -4084,18 +4224,7 @@ export function mountWalk(root, routes, config, actions = {}) {
         enterSimulatorSandbox();
         const simMoved = !lastFix || (haversineMeters(lastFix, fix) ?? 1) > 0.5;
         if (!active && !starting && simMoved) {
-          if (!currentExpedition || currentExpedition.state === 'ended') {
-            confirmedStopIds = new Set();
-            stateObj.confirmedStopIds = [];
-            telemetry = createTelemetryState(fix.timestamp || Date.now());
-            currentExpedition = createExpedition({ progress, goal: DEFAULT_GOALS[0] });
-          } else if (currentExpedition.state === 'paused') {
-            currentExpedition = resumeExpedition(currentExpedition);
-          }
-          stateObj.activeExpedition = currentExpedition;
-          active = true;
-          anchor = null;
-          stats();
+          startUnifiedExpedition('sim');
         }
         handleGpsFix({ ...fix, simulated: true });
         if (heading != null && Number.isFinite(heading)) {
@@ -4475,21 +4604,23 @@ export function mountWalk(root, routes, config, actions = {}) {
     }, 400);
   }
 
-  $('walk-start').addEventListener('click', start);
-  $('walk-stop').addEventListener('click', () => pauseSession('Pozastaveno. Průzkum je uložený.'));
-  $('walk-end').addEventListener('click', finishExpedition);
-  $('walk-awake').addEventListener('change', () => { $('walk-awake').checked ? holdWake() : releaseWake(); });
-  $('walk-sound').addEventListener('change', (ev) => {
+  $('walk-start')?.addEventListener('click', start);
+  $('walk-stop')?.addEventListener('click', () => pauseSession('Pozastaveno. Průzkum je uložený.'));
+  $('walk-end')?.addEventListener('click', finishExpedition);
+  $('walk-awake')?.addEventListener('change', () => { $('walk-awake')?.checked ? holdWake() : releaseWake(); });
+  $('walk-sound')?.addEventListener('change', (ev) => {
     stateObj.soundEnabled = ev.target.checked;
     saveAppState();
   });
 
   // Bod 25: Při sbalení/rozbalení spodního panelu nebo otočení telefonu znovu vycentrujeme hráče do viditelné části mapy
-  $('sheet-toggle-btn').addEventListener('click', () => {
+  $('sheet-toggle-btn')?.addEventListener('click', () => {
     sheetCollapsed = !sheetCollapsed;
-    $('walk-bottom-sheet').classList.toggle('collapsed', sheetCollapsed);
-    $('sheet-toggle-btn').setAttribute('aria-expanded', String(!sheetCollapsed));
-    $('sheet-toggle-btn').textContent = sheetCollapsed ? '⬆ Rozbalit panel' : '⬇ Sbalit panel';
+    $('walk-bottom-sheet')?.classList.toggle('collapsed', sheetCollapsed);
+    $('sheet-toggle-btn')?.setAttribute('aria-expanded', String(!sheetCollapsed));
+    if ($('sheet-toggle-btn')) {
+      $('sheet-toggle-btn').textContent = sheetCollapsed ? '⬆ Rozbalit panel' : '⬇ Sbalit panel';
+    }
     if (follow && (lastFix || telemetry.lastKnownPosition)) {
       centerMapOnPlayer(lastFix || telemetry.lastKnownPosition, false);
     }
@@ -5259,6 +5390,29 @@ export function mountWalk(root, routes, config, actions = {}) {
   $('btn-phase4-finish-now')?.addEventListener('click', () => {
     phase4MenuOpen = false;
     finishExpedition();
+  });
+
+  // ZADÁNÍ FLASH #09 (Bod 1): Přímé akce z trvale viditelné lišty přímo u mapy (.map-action-bar)
+  $('walk-start-unified')?.addEventListener('click', () => {
+    startUnifiedExpedition('bar');
+  });
+
+  $('btn-toggle-quick-planner')?.addEventListener('click', () => {
+    p1PlannerCollapsed = !p1PlannerCollapsed;
+    renderPhase1AndPhase4Ui(lastFix || plannedRoute.origin);
+    playTick(stateObj.soundEnabled);
+  });
+
+  $('walk-finish')?.addEventListener('click', () => {
+    finishUnifiedExpedition();
+  });
+
+  $('walk-shorten-to-start')?.addEventListener('click', () => {
+    shortenRouteToStart();
+  });
+
+  $('walk-pause')?.addEventListener('click', () => {
+    togglePauseUnified();
   });
 
   // Přepínač vrstvy turistických tras KČT (Waymarked Trails + lokální trasy OSM)

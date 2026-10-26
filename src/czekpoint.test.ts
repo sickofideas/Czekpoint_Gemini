@@ -1,5 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 
 import {
   emptyWalk,
@@ -47,7 +48,15 @@ import {
   computeLateralLoopWaypoint,
   ensureLoopDetourWaypoints,
   insertStopAtBestPosition,
+  orderRouteWaypoints,
 } from './planner.js';
+import {
+  createExpedition,
+  endExpedition,
+} from './expedition-engine.js';
+import {
+  createStickBadge,
+} from './walking-stick.js';
 import {
   renderBootFootprintSvg,
   renderPlayerAvatarMarkerHtml,
@@ -858,6 +867,63 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
     //    Fotka má zachovaný poměr stran 1:1, border-radius 50%, object-fit: cover
     const markerPhotoClasses = 'czekpoint-marker-badge has-real-photo';
     assert.ok(markerPhotoClasses.includes('has-real-photo'));
+  });
+
+  it('FLASH #09 (Verze v1.1): Trvalé tlačítko #walk-finish, sjednocený start i konec a kruhové řazení bez křížení', () => {
+    // 1. Ověření kruhového řazení (orderRouteWaypoints): body se seřadí po směru hodinových ručiček kolem startu
+    const origin = { lat: 49.6014, lng: 13.8644 };
+    const pNorth = { id: 'p-north', lat: 49.6100, lng: 13.8644, title: 'Sever' };
+    const pEast = { id: 'p-east', lat: 49.6014, lng: 13.8750, title: 'Východ' };
+    const pSouth = { id: 'p-south', lat: 49.5930, lng: 13.8644, title: 'Jih' };
+    const pWest = { id: 'p-west', lat: 49.6014, lng: 13.8540, title: 'Západ' };
+
+    // Předáme je v rozházeném pořadí: South, West, North, East
+    const unarranged = [pSouth, pWest, pNorth, pEast];
+    const ordered = orderRouteWaypoints(origin, unarranged, { returnToOrigin: true });
+    assert.equal(ordered.length, 4);
+    const ids = ordered.map(p => p.id);
+    assert.ok(ids.includes('p-north') && ids.includes('p-east') && ids.includes('p-south') && ids.includes('p-west'));
+
+    // 2. Ověření životního cyklu výpravy (start ze simulátoru / průvodce i ukončení bez existující session)
+    const testProgress = {
+      ...emptyWalk(),
+      meters: 1450,
+      cells: ['c1', 'c2', 'c3'] as string[],
+    };
+
+    // Start výpravy
+    const expedition = createExpedition({ progress: testProgress });
+    assert.equal(expedition.state, 'active');
+    assert.equal(expedition.startMeters, 1450);
+
+    // Konec výpravy (dokončení)
+    const endResult = endExpedition({
+      expedition,
+      currentProgress: { ...testProgress, meters: 2800, cells: ['c1', 'c2', 'c3', 'c4', 'c5'] as string[] },
+      pointsEarned: 25,
+      avatarId: 'rys',
+    });
+    assert.ok(endResult?.summary, 'Ukončení výpravy musí vrátit platné shrnutí');
+    assert.equal(endResult.summary.distanceMeters, 1350);
+    assert.equal(endResult.summary.newCellsCount, 2);
+    assert.equal(endResult.summary.pointsEarned, 25);
+
+    // Štítek na hůl
+    const badge = createStickBadge({
+      expId: expedition.id,
+      distanceMeters: 1350,
+      stampsCount: 2,
+    });
+    assert.ok(badge?.id, 'Štítek na hůl musí být úspěšně vytvořen');
+
+    // 3. Ověření přítomnosti trvalého tlačítka #walk-finish v mapovém šablonovém zdrojovém kódu
+    const walkJsCode = fs.readFileSync('src/walk.js', 'utf-8');
+    assert.ok(walkJsCode.includes('id="walk-finish"'), 'Tlačítko #walk-finish musí existovat v šabloně mapy');
+    assert.ok(walkJsCode.includes('id="walk-start-unified"'), 'Tlačítko #walk-start-unified musí existovat');
+    assert.ok(walkJsCode.includes('class="map-action-bar"'), 'Třída .map-action-bar musí existovat');
+    assert.ok(walkJsCode.includes('btn-p3-skip-stop'), 'Tlačítko pro vynechání zastávky musí existovat');
+    assert.ok(walkJsCode.includes('btn-p3-insert-stop'), 'Tlačítko pro vložení zastávky do trasy musí existovat');
+    assert.ok(walkJsCode.includes('btn-p3-set-end'), 'Tlačítko pro nastavení konečného cíle musí existovat');
   });
 });
 

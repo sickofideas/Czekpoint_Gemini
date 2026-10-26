@@ -10,7 +10,7 @@
 import { haversineMeters } from './domain.js';
 import { MAX_GPS_ACCURACY_M } from './walk-engine.js';
 
-export const SHORE_APPROACH_RADIUS_M = 35; // Vzdálenost k břehu/okraji pro odhalení přírodního objektu
+export const SHORE_APPROACH_RADIUS_M = 45; // Vzdálenost k břehu/okraji pro odhalení přírodního objektu (45 m)
 export const MAX_FULL_REVEAL_POND_AREA_M2 = 250000; // Max rozloha malého rybníka pro celé odhalení (25 ha)
 export const MAX_FULL_REVEAL_FAR_POINT_M = 650; // Max vzdálenost nejvzdálenějšího bodu malého rybníka (650 m)
 export const FOREST_LOCAL_REVEAL_RADIUS_M = 135; // Rozšířený lokální poloměr odkrytí uvnitř lesa (135 m)

@@ -624,6 +624,15 @@ export function sortPlacesClockwise(origin, places = []) {
 }
 
 /**
+ * ZADÁNÍ FLASH #09 (Bod 2): Sjednocené seřazení bodů trasy po směru hodinových ručiček
+ * kolem středu výpravy tak, aby tvořily otevřený okruh bez křížení.
+ */
+export function orderRouteWaypoints(origin, places = [], options = {}) {
+  const cw = sortPlacesClockwise(origin, places);
+  return optimizeRouteOrder(origin, cw, options);
+}
+
+/**
  * ZADÁNÍ #09 (Fáze 2): Kontrola překryvu v OSRM pro krátké trasy (1 až 2 zastávky).
  * Vytvoří boční průjezdní bod (~400 m kolmo na spojnici poslední zastávky a startu),
  * aby pěší router OSRM vedl zpáteční cestu po vedlejší lesní cestě a nevracel uživatele po vlastních stopách.
