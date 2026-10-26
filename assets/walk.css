@@ -3214,23 +3214,62 @@
 
 /* Ověřené reálné fotky bodů zájmu (Wikimedia Commons CC/PD) s fallbackem na bitmap/ilustraci */
 .czekpoint-marker-badge.has-real-photo {
-  padding: 2px;
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  min-height: 32px;
+  max-width: 32px;
+  max-height: 32px;
+  padding: 0;
+  margin: 0;
+  box-sizing: border-box;
+  border: 2px solid #ffffff;
+  border-radius: 50%;
+  background: #17382c;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   overflow: visible;
+  flex-shrink: 0;
+  aspect-ratio: 1 / 1;
 }
 .czekpoint-marker-photo-wrap {
-  display: block;
-  width: 34px;
-  height: 34px;
+  width: 100%;
+  height: 100%;
+  min-width: 100%;
+  min-height: 100%;
+  max-width: 100%;
+  max-height: 100%;
   border-radius: 50%;
   overflow: hidden;
   background: #1c2c20;
-  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  flex-shrink: 0;
+  aspect-ratio: 1 / 1;
+  position: relative;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.45);
 }
 .czekpoint-marker-photo-img {
   width: 100%;
   height: 100%;
+  min-width: 100%;
+  min-height: 100%;
+  max-width: 100%;
+  max-height: 100%;
   object-fit: cover;
+  object-position: center;
   display: block;
+  border-radius: 50%;
+  flex-shrink: 0;
+  aspect-ratio: 1 / 1;
+}
+.czekpoint-marker-badge.has-real-photo .czekpoint-marker-order {
+  top: -4px;
+  right: -4px;
+  z-index: 10;
 }
 
 .pds-media-box {
@@ -3247,7 +3286,12 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
+  object-position: center;
   display: block;
+}
+.pds-photo-img.is-fallback-bitmap {
+  object-fit: contain;
+  padding: 16px;
 }
 .pds-photo-source-badge {
   position: absolute;

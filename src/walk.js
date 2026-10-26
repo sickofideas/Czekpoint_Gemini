@@ -262,6 +262,9 @@ export function mountWalk(root, routes, config, actions = {}) {
   let plannedRouteCoords = null;
   let lastRoutedGeometry = null;
   let autoPlacesLoading = false;
+  let autoPanFetchTimer = null;
+  let lastAutoPanCenter = null;
+  let pendingAutoPanCenter = null;
   let radiusCircle = null;
   let fakeGpsSim = null;
 
@@ -2583,6 +2586,10 @@ export function mountWalk(root, routes, config, actions = {}) {
     if ($('nearby-origin')) {
       $('nearby-origin').textContent = demo
         ? 'Vzdálenosti od simulovaného bodu.'
+        : lastFix && follow
+        ? 'Vzdálenosti od tvé aktuální polohy.'
+        : map && !follow
+        ? 'Zobrazená část mapy ČR (posunem načteš další místa).'
         : lastFix
         ? 'Vzdálenosti od poslední přijaté polohy.'
         : map
@@ -2597,45 +2604,79 @@ export function mountWalk(root, routes, config, actions = {}) {
       : null;
     renderCompass(normalized);
 
-    const radiusM = (plannedRoute.radiusKm || 10) * 1000;
-    const centerPoint = plannedRoute.origin || normalized || { lat: 49.6014, lng: 13.8644 };
+    const mapCenter = map ? map.getCenter() : null;
+    const viewCenter = (!follow && mapCenter)
+      ? mapCenter
+      : (normalized || plannedRoute.origin || { lat: 49.6014, lng: 13.8644 });
 
-    const list = all
+    const plannedPlaces = getPlannedPlaces();
+    const plannedPlaceIds = new Set(plannedRoute.selectedPlaceIds || []);
+
+    // 1. Zjistíme viditelné hranice mapy (s mírným paddingem, aby značky nevyskakovaly těsně u okraje)
+    const mapBounds = map ? map.getBounds().pad(0.35) : null;
+
+    // 2. Mapové značky (placesLayer):
+    //    Zobrazíme všechny body, které:
+    //    a) leží ve viditelném výřezu mapy, NEBO
+    //    b) jsou v naplánované trase (aby byly vždy vidět se svým číslem zastávky), NEBO
+    //    c) jsou do 8 km od uživatele (pokud je poloha známá).
+    //    DŮLEŽITÉ: Mapové značky se NIKDY nefiltrují natvrdo rádiusem od startu,
+    //    aby uživatel mohl posouvat mapu po celé ČR a vybírat si vzdálenější body!
+    const mapPlaces = all.filter(p => {
+      if (plannedPlaceIds.has(p.id)) return true;
+      if (
+        plannedRoute.categories.length > 0 &&
+        p.category &&
+        !plannedRoute.categories.includes(p.category)
+      ) {
+        return false;
+      }
+      if (mapBounds && mapBounds.contains([p.lat, p.lng])) return true;
+      if (normalized && (haversineMeters(normalized, p) ?? Infinity) < 8000) return true;
+      return false;
+    });
+
+    // 3. Seznam pro panel (#walk-places):
+    //    Seřazený podle vzdálenosti od referenčního středu (střed mapy při prohlížení, jinak uživatel/start)
+    const sidebarList = all
       .map(p => ({
         ...p,
         distanceFromUser: normalized ? (haversineMeters(normalized, p) ?? Infinity) : Infinity,
-        distanceFromOrigin: haversineMeters(centerPoint, p) ?? Infinity,
+        distanceFromView: haversineMeters(viewCenter, p) ?? Infinity,
       }))
       .filter(p => {
-        if (p.distanceFromOrigin > radiusM && !(plannedRoute.selectedPlaceIds || []).includes(p.id)) return false;
+        if (plannedPlaceIds.has(p.id)) return true;
         if (
           plannedRoute.categories.length > 0 &&
           p.category &&
-          !plannedRoute.categories.includes(p.category) &&
-          !(plannedRoute.selectedPlaceIds || []).includes(p.id)
+          !plannedRoute.categories.includes(p.category)
         ) {
           return false;
         }
-        return true;
+        if (mapBounds && mapBounds.contains([p.lat, p.lng])) return true;
+        if (p.distanceFromView <= 30000) return true;
+        return false;
       })
-      .sort((a, b) => a.distanceFromUser - b.distanceFromUser);
+      .sort((a, b) => a.distanceFromView - b.distanceFromView);
 
     if ($('walk-places')) {
-      $('walk-places').innerHTML = list.slice(0, 15).map(p => {
+      $('walk-places').innerHTML = sidebarList.slice(0, 16).map(p => {
         const visitedToday = isStopVisitedInSession(p);
         const earlierStamp = !visitedToday && hasLifetimeStamp(p);
         const isRouteStart = p.pointKind === 'route-start';
-        const isPlanned = (plannedRoute.selectedPlaceIds || []).includes(p.id);
+        const isPlanned = plannedPlaceIds.has(p.id);
         const distText = Number.isFinite(p.distanceFromUser)
           ? `${Math.round(p.distanceFromUser)} m od tebe`
-          : 'Poloha není určena';
+          : Number.isFinite(p.distanceFromView)
+          ? `${(p.distanceFromView / 1000).toFixed(1)} km od zobrazení`
+          : 'Vzdálenost neurčena';
         const statusText = visitedToday
           ? '✓ Navštíveno v této výpravě'
           : earlierStamp
-          ? '📜 Razítko v pasu z dřívějška (dnes zatím nenavštíveno)'
+          ? '📜 Razítko v pasu z dřívějška'
           : isRouteStart
-          ? '🥾 Začátek trasy / okruhu'
-          : `📍 Samostatné místo · potvrzení pod ${STOP_CONFIRM_RADIUS_M} m`;
+          ? '🥾 Začátek trasy'
+          : `📍 Samostatné místo`;
 
         return `<div class="nearby-place">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
@@ -2645,20 +2686,24 @@ export function mountWalk(root, routes, config, actions = {}) {
             </button>
           </div>
           <span>${distText} · ${statusText}</span>
-          <a href="${e(p.url)}" ${p.url?.startsWith('#') ? '' : 'target="_blank" rel="noopener"'}>Detail místa ↗</a>
+          <div style="display:flex;gap:8px;align-items:center;margin-top:4px">
+            <button type="button" class="button ghost small open-map-detail-btn" data-place-id="${e(p.id)}">
+              🔍 Detail & v mapě
+            </button>
+            <a href="${e(p.url)}" ${p.url?.startsWith('#') ? '' : 'target="_blank" rel="noopener"'}>Článek ↗</a>
+          </div>
         </div>`;
-      }).join('') || '<p class="small-note">V zadaném okruhu a filtrech zatím není žádné místo.</p>';
+      }).join('') || '<p class="small-note">V této části mapy zatím nejsou žádná místa. Posuň mapu nebo chvíli počkej na automatické načtení.</p>';
     }
 
     if (!map) return;
 
-    const plannedPlaces = getPlannedPlaces();
     const nextUnvisitedStop = plannedPlaces.find(p => !isStopVisited(p));
 
-    for (const p of list) {
+    for (const p of mapPlaces) {
       const visited = isStopVisitedInSession(p);
       const isRouteStart = p.pointKind === 'route-start';
-      const isPlanned = (plannedRoute.selectedPlaceIds || []).includes(p.id);
+      const isPlanned = plannedPlaceIds.has(p.id);
       const isNextTarget = nextUnvisitedStop && nextUnvisitedStop.id === p.id;
       const isJustConfirmed = justConfirmedStopId === p.id;
       const isFirstAppear = !appearedPlaceIds.has(p.id);
@@ -2738,10 +2783,10 @@ export function mountWalk(root, routes, config, actions = {}) {
 
     renderPlannedRouteOnMap();
 
-    // Asynchronně ověříme reálné fotky (CC0 / Public Domain / CC BY / CC BY-SA z Wikimedia Commons) pro body na mapě
-    prefetchVerifiedPhotosForPlaces([...plannedPlaces, ...list.slice(0, 10)], {
+    // Asynchronně ověříme reálné fotky (CC0 / Public Domain / CC BY / CC BY-SA z Wikimedia Commons) pro zobrazené body na mapě
+    prefetchVerifiedPhotosForPlaces([...plannedPlaces, ...mapPlaces.slice(0, 18)], {
       signal: aborter.signal,
-      maxCount: 10,
+      maxCount: 18,
       onBatchUpdated: () => {
         if (disposed) return;
         renderPlaces();
@@ -3916,16 +3961,48 @@ export function mountWalk(root, routes, config, actions = {}) {
       }),
     }).addTo(map);
 
+    function scheduleMapPanAutoFetch() {
+      if (!map) return;
+      if (autoPanFetchTimer) clearTimeout(autoPanFetchTimer);
+      autoPanFetchTimer = setTimeout(async () => {
+        if (disposed || !map) return;
+        const c = map.getCenter();
+        if (!c || !Number.isFinite(c.lat) || !Number.isFinite(c.lng)) return;
+        const currentCenter = { lat: Number(c.lat.toFixed(4)), lng: Number(c.lng.toFixed(4)) };
+        const distFromLast = lastAutoPanCenter
+          ? (haversineMeters(lastAutoPanCenter, currentCenter) ?? Infinity)
+          : Infinity;
+
+        // Pokud se uživatel posunul po mapě o více než 1200 metrů, automaticky načteme nová místa v ČR
+        if (distFromLast >= 1200) {
+          if (autoPlacesLoading) {
+            pendingAutoPanCenter = currentCenter;
+            return;
+          }
+          lastAutoPanCenter = currentCenter;
+          await refreshAutoPlaces(currentCenter, {
+            silent: true,
+            autoPlan: false,
+            forceRefresh: false,
+          });
+        }
+      }, 450);
+    }
+
     map.on('move zoom viewreset resize', scheduleFog);
-    map.on('zoomend', renderTrail);
+    map.on('zoomend', () => {
+      renderTrail();
+      renderPlaces();
+    });
     // Bod 25: Ruční posun mapy dočasně přepne do prohlížení a zobrazí výrazné „Zpět na mou polohu“
     map.on('dragstart', () => {
       follow = false;
       updateFollowUi();
     });
     map.on('moveend', () => {
-      if (!lastFix) renderPlaces();
+      renderPlaces();
       updateScanMapAreaButtonState();
+      scheduleMapPanAutoFetch();
     });
 
     map.on('click', ev => {
@@ -4618,7 +4695,7 @@ export function mountWalk(root, routes, config, actions = {}) {
         for (const p of nearby) {
           if (p && p.id && !mergedById.has(p.id)) mergedById.set(p.id, p);
         }
-        nearby = [...mergedById.values()].slice(0, 260);
+        nearby = [...mergedById.values()].slice(0, 800);
         renderPlaces();
         if (myReqId === autoPlacesReqId && opts.autoPlan && !active && !demo) {
           applyPhase1QuickSelection(Boolean(opts.silent));
@@ -4636,6 +4713,11 @@ export function mountWalk(root, routes, config, actions = {}) {
         if (scanBtn) scanBtn.classList.remove('is-loading');
         if (p1ScanBtn) p1ScanBtn.classList.remove('is-loading');
         updateScanMapAreaButtonState();
+        if (pendingAutoPanCenter && !disposed) {
+          const nextCenter = pendingAutoPanCenter;
+          pendingAutoPanCenter = null;
+          refreshAutoPlaces(nextCenter, { silent: true, autoPlan: false, forceRefresh: false });
+        }
       }
     }
   }
@@ -5880,6 +5962,22 @@ export function mountWalk(root, routes, config, actions = {}) {
         recalculateRemainingRoute('Zastávka přidána do plánu. Zbývající trasa přepočítána.');
       }
       playTick(stateObj.soundEnabled);
+      return;
+    }
+
+    const openMapDetailBtn = event.target.closest('.open-map-detail-btn');
+    if (openMapDetailBtn) {
+      const placeId = openMapDetailBtn.dataset.placeId;
+      const targetPlace = getAllAvailablePlaces().find(item => item.id === placeId);
+      if (targetPlace) {
+        if (map) {
+          follow = false;
+          updateFollowUi();
+          map.setView([targetPlace.lat, targetPlace.lng], Math.max(map.getZoom(), 14));
+        }
+        openPlaceDetail(targetPlace);
+        playTick(stateObj.soundEnabled);
+      }
       return;
     }
 

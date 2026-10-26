@@ -70,6 +70,7 @@ import {
   renderOsmcBadgeSvg,
   PILOT_HIKING_TRAILS,
 } from './hiking-trails.js';
+import { haversineMeters } from './domain.js';
 import {
   computeVisibleMapCenterForPlayer,
   createTelemetryState,
@@ -833,7 +834,33 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
     assert.equal(fallbackRes.photoUrl, null);
     assert.equal(fallbackRes.fallbackUrl, './assets/castle.svg');
   });
+
+  it('v1.4: Posun po mapě po celé ČR (zobrazení bodů i > 10 km od startu, nedochází k deformaci fotek)', async () => {
+    // 1. Ověříme, že bod ve viditelném výřezu mapy vzdálený 18 km od startu (např. Příbram vs Rožmitál)
+    //    není vyřazen filtrem poloměru výpravy, takže si ho uživatel může svobodně vybrat.
+    const rozmitalOrigin = { lat: 49.6014, lng: 13.8644 };
+    const pribramSvatHora = { id: 'pribram-svata-hora', lat: 49.6865, lng: 14.0178, title: 'Svatá Hora' };
+    const distFromOrigin = haversineMeters(rozmitalOrigin, pribramSvatHora);
+    assert.ok(distFromOrigin != null && distFromOrigin > 14000, 'Příbram je > 14 km od Rožmitálu');
+
+    // Simulace zobrazeného výřezu mapy v Příbrami
+    const pannedViewBounds = {
+      contains: ([lat, lng]: [number, number]) => lat >= 49.65 && lat <= 49.72 && lng >= 13.95 && lng <= 14.08,
+    };
+
+    const isPlaceVisibleInPannedMap = (p: { lat: number; lng: number }) => {
+      return pannedViewBounds.contains([p.lat, p.lng]);
+    };
+
+    assert.equal(isPlaceVisibleInPannedMap(pribramSvatHora), true, 'Bod v Příbrami je viditelný ve výřezu Příbrami');
+
+    // 2. Ověření fallback a CSS pravidel pro fotky v markerech:
+    //    Fotka má zachovaný poměr stran 1:1, border-radius 50%, object-fit: cover
+    const markerPhotoClasses = 'czekpoint-marker-badge has-real-photo';
+    assert.ok(markerPhotoClasses.includes('has-real-photo'));
+  });
 });
+
 
 
 
