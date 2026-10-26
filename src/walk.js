@@ -281,7 +281,8 @@ export function mountWalk(root, routes, config, actions = {}) {
   showContourLayer = false;
 
   // UI stavy a Průvodce výpravou
-  let sheetCollapsed = true;
+  let sheetCollapsed = false;
+  let p1PlannerCollapsed = false;
   let zenMode = false;
   let pickingStartOnMap = false;
   let pickingCustomEndOnMap = false;
@@ -361,16 +362,94 @@ export function mountWalk(root, routes, config, actions = {}) {
   root.innerHTML = `
     <h1 tabindex="-1" class="visually-hidden">Mapa objevování a procházka · Czekpoint v1.1</h1>
 
-    <!-- ZADÁNÍ #09 (Fáze 1 & Fáze 3): Horní lišta s okamžitým výpočtem a potvrzením [ ▶ VYRAZIT ] / odpočtem za chůze -->
-    <section class="phase1-top-bar" id="phase1-top-bar" aria-label="Souhrn trasy a okamžité spuštění výpravy">
-      <div class="p1-top-summary" id="phase1-top-summary" role="status" aria-live="polite">
-        <span class="p1-top-icon">🕒</span>
-        <span class="p1-top-text" id="phase1-top-text">Půjdeš <strong>~1 hod 30 min (6,0 km)</strong> · <strong>4 zastávky</strong></span>
+    <!-- Horní přehledový panel trasy + Vizuální plán cesty (jaké body jsou v trase a kam jdu) -->
+    <section class="phase1-top-bar" id="phase1-top-bar" aria-label="Souhrn trasy, plán zastávek a spuštění výpravy">
+      <div class="p1-top-main-row">
+        <div class="p1-top-summary" id="phase1-top-summary" role="status" aria-live="polite">
+          <span class="p1-top-icon">🧭</span>
+          <span class="p1-top-text" id="phase1-top-text">Půjdeš <strong>~1 hod 30 min (6,0 km)</strong> · <strong>4 zastávky v trase</strong></span>
+        </div>
+        <div class="p1-top-actions" id="phase1-top-actions">
+          <button type="button" class="button accent-action-btn phase1-go-btn" id="btn-phase1-go">
+            ▶ VYRAZIT NA TRASU
+          </button>
+          <button type="button" class="button small dark-ctrl-btn" id="btn-top-pause" hidden>
+            ⏸ Pozastavit
+          </button>
+          <button type="button" class="button small dark-ctrl-btn" id="btn-top-fullscreen" title="Zvětšit mapu na celou obrazovku">
+            🔍 Celá obrazovka
+          </button>
+          <button type="button" class="button small dark-ctrl-btn" id="btn-top-edit-walk" title="Podrobně upravit zastávky a parametry trasy">
+            ✏️ Upravit body
+          </button>
+          <button type="button" class="button small dark-ctrl-btn" id="btn-top-settings" title="Nastavení aplikace a herního stylu">
+            ⚙️ Nastavení
+          </button>
+        </div>
       </div>
-      <div class="p1-top-actions" id="phase1-top-actions">
-        <button type="button" class="button accent-action-btn phase1-go-btn" id="btn-phase1-go">
-          ▶ VYRAZIT
-        </button>
+
+      <!-- Vizuální plán dnešní cesty: všechny zastávky v pořadí 1 -> 2 -> 3 přímo na očích -->
+      <div class="top-route-itinerary-wrap" id="top-route-itinerary-wrap">
+        <div class="top-itinerary-header">
+          <span class="top-itinerary-label" id="top-itinerary-label">🗺️ Plán dnešní cesty a zastávky (kliknutím ukážeš místo na mapě):</span>
+          <button type="button" class="top-itinerary-toggle-btn" id="btn-toggle-p1-bar" aria-expanded="true">
+            ▲ Sbalit volby trasy
+          </button>
+        </div>
+        <div class="top-route-itinerary-strip" id="top-route-itinerary-strip" role="list" aria-label="Body na naplánované trase"></div>
+      </div>
+    </section>
+
+    <!-- Panel výběru 3 herních režimů, témat, délky a startu (umístěný přehledně nad mapou, nezakrývá mapu) -->
+    <section class="phase1-bottom-bar phase1-planner-card" id="phase1-bottom-bar" role="region" aria-label="Výběr herního režimu a parametrů trasy">
+      <div class="p1-row">
+        <span class="p1-row-label">1. Herní režim:</span>
+        <div class="p1-btn-group" role="group" aria-label="Výběr ze 3 herních režimů">
+          <button type="button" class="p1-choice-btn ${appSettings.gameMode === 'explorer' ? 'active' : ''}" data-p1-gamemode="explorer" aria-pressed="${appSettings.gameMode === 'explorer'}" title="Zahalená mapa s mlhou, objevování podle kompasu a vlastních kroků">
+            🧭 1. Objevitel (Mlha + kompas)
+          </button>
+          <button type="button" class="p1-choice-btn ${appSettings.gameMode === 'gamified' ? 'active' : ''}" data-p1-gamemode="gamified" aria-pressed="${appSettings.gameMode === 'gamified'}" title="Doporučeno: KCD2 pergamen s odkrýváním, stopy pohorek, KČT značky a razítka">
+            🥾 2. Výprava s pergamenem (KCD2)
+          </button>
+          <button type="button" class="p1-choice-btn ${appSettings.gameMode === 'casual' ? 'active' : ''}" data-p1-gamemode="casual" aria-pressed="${appSettings.gameMode === 'casual'}" title="Čistá otevřená turistická mapa bez mlhy, vrstevnice a KČT stezky">
+            🗺️ 3. Čistá turistická mapa
+          </button>
+        </div>
+      </div>
+
+      <div class="p1-row">
+        <span class="p1-row-label">2. Co chci vidět:</span>
+        <div class="p1-btn-group" role="group" aria-label="Co chci vidět">
+          <button type="button" class="p1-choice-btn active" data-p1-theme="all" aria-pressed="true">✨ Vše zajímavé</button>
+          <button type="button" class="p1-choice-btn" data-p1-theme="castles" aria-pressed="false">🏰 Památky a hrady</button>
+          <button type="button" class="p1-choice-btn" data-p1-theme="nature" aria-pressed="false">🌲 Příroda a vyhlídky</button>
+          <button type="button" class="p1-choice-btn" data-p1-theme="water" aria-pressed="false">💧 Voda a rybníky</button>
+        </div>
+      </div>
+
+      <div class="p1-row">
+        <span class="p1-row-label">3. Délka a cíl:</span>
+        <div class="p1-btn-group" role="group" aria-label="Délka procházky a zakončení">
+          <button type="button" class="p1-choice-btn ${phase1DurationKm === 3 ? 'active' : ''}" data-p1-dur="3" aria-pressed="${phase1DurationKm === 3}">🕒 ~1 hod (3 km)</button>
+          <button type="button" class="p1-choice-btn ${phase1DurationKm === 6 ? 'active' : ''}" data-p1-dur="6" aria-pressed="${phase1DurationKm === 6}">🕒 ~2 hod (6 km)</button>
+          <button type="button" class="p1-choice-btn ${phase1DurationKm === 9 ? 'active' : ''}" data-p1-dur="9" aria-pressed="${phase1DurationKm === 9}">🕒 ~3 hod (9 km)</button>
+          <span class="p1-divider" aria-hidden="true">|</span>
+          <button type="button" class="p1-choice-btn ${phase1EndMode === 'loop' ? 'active' : ''}" data-p1-end="loop" aria-pressed="${phase1EndMode === 'loop'}">🔄 Okruh zpět sem</button>
+          <button type="button" class="p1-choice-btn ${phase1EndMode === 'custom' ? 'active' : ''}" data-p1-end="custom" aria-pressed="${phase1EndMode === 'custom'}">🏁 Jiný cíl (kliknu do mapy)</button>
+        </div>
+      </div>
+
+      <div class="p1-row">
+        <span class="p1-row-label">4. Start výpravy:</span>
+        <div class="p1-btn-group" role="group" aria-label="Odkud vyrážím">
+          <button type="button" class="p1-choice-btn ${!userExplicitlyPickedOrigin ? 'active' : ''}" data-p1-origin="my-gps">📍 Moje GPS / Rožmitál</button>
+          ${CZECH_PLACE_PRESETS.slice(0, 6).map(preset => `
+            <button type="button" class="p1-choice-btn ${plannedRoute.origin?.id === preset.id ? 'active' : ''}" data-p1-preset="${e(preset.id)}">
+              ${e(preset.label.split('—')[0].trim())}
+            </button>
+          `).join('')}
+          <button type="button" class="p1-choice-btn" id="btn-p1-pick-start-map">🗺️ Zvolit start v mapě</button>
+        </div>
       </div>
     </section>
 
@@ -515,16 +594,16 @@ export function mountWalk(root, routes, config, actions = {}) {
     <div id="walk-demo-banner" class="notice" hidden>UKÁZKA · Simulovaný pohyb v Rožmitále. Žádná GPS, žádné ukládání bodů.</div>
     <div id="walk-radar-banner" class="walk-radar-banner" hidden></div>
 
-    <div id="next-checkpoint-hero-card" class="next-checkpoint-hero-card" hidden role="region" aria-label="Následující cíl trasy"></div>
+    <div id="next-checkpoint-hero-card" class="next-checkpoint-hero-card" role="region" aria-label="Následující cíl trasy"></div>
 
-    <!-- Hlavní mapa zabírající většinu obrazovky (ZADÁNÍ #09) -->
+    <!-- Hlavní mapa zabírající většinu obrazovky -->
     <div class="walk-map-wrap" id="walk-map-wrap">
       <div id="walk-map" aria-label="Interaktivní Mapa objevování"></div>
 
-      <!-- ZADÁNÍ #09 (Fáze 3): Bublina po kliknutí na ikonu v mapě (Vynechat zastávku / Přidat po cestě / Nastavit jako nový konec) -->
+      <!-- Bublina po kliknutí na ikonu v mapě (Vynechat zastávku / Přidat po cestě / Nastavit jako nový konec) -->
       <div id="place-detail-sheet" class="place-detail-sheet" hidden role="dialog" aria-label="Úprava bodu na trase"></div>
 
-      <!-- Bod 25: Výrazné tlačítko „Zpět na mou polohu“ při ručním posunu mapy -->
+      <!-- Výrazné tlačítko „Zpět na mou polohu“ při ručním posunu mapy -->
       <button type="button" id="btn-return-to-gps" class="return-to-gps-btn" hidden title="Obnovit automatické sledování tvé polohy">
         📍 Zpět na mou polohu
       </button>
@@ -583,49 +662,19 @@ export function mountWalk(root, routes, config, actions = {}) {
         </div>
       </div>
 
-      <button type="button" id="zen-close-btn" class="zen-close-btn" hidden>✕ Zmenšit mapu</button>
+      <button type="button" id="zen-close-btn" class="zen-close-btn" hidden>× Zmenšit mapu z celé obrazovky</button>
       <button type="button" id="zen-follow-btn" class="zen-follow-fab is-following" hidden title="Vycentrovat a sledovat moji polohu na mapě">
         <span class="zen-fab-icon">◎</span>
         <span class="zen-fab-label" id="zen-follow-label">Sleduji polohu</span>
       </button>
 
-      <!-- ZADÁNÍ #09 (Bod 1): V rohu mapy jen malá ikonka 🗺️ (pro přepnutí pergamen / obyčejná mapa) a ◎ Moje poloha -->
-      <div class="walk-map-toolbar walk-map-toolbar-compact">
-        <button type="button" class="button small map-tool-btn map-corner-icon-btn" id="walk-fog-toggle" title="Přepnout KCD2 pergamen / obyčejnou mapu">🗺️</button>
-        <button type="button" class="button small map-tool-btn map-corner-icon-btn" id="walk-center" title="Vycentrovat na moji polohu">◎</button>
-        <button type="button" class="button small map-tool-btn active" id="walk-trails-toggle" hidden aria-pressed="true">🥾 KČT</button>
-        <button type="button" class="button small map-tool-btn" id="walk-contours-toggle" hidden aria-pressed="false">⛰️</button>
-        <button type="button" class="button small map-tool-btn" id="walk-zen-toggle" hidden aria-pressed="false">⛶</button>
-      </div>
-
-      <!-- ZADÁNÍ #09 (Fáze 1): Spodní lišta rychlého výběru (vše předvybrané, zmizí po kliknutí na ▶ VYRAZIT) -->
-      <div class="phase1-bottom-bar" id="phase1-bottom-bar" role="region" aria-label="Rychlý výběr trasy na 3 kliknutí">
-        <div class="p1-row">
-          <span class="p1-row-label">Co chci vidět:</span>
-          <div class="p1-btn-group" role="group" aria-label="Co chci vidět">
-            <button type="button" class="p1-choice-btn active" data-p1-theme="all" aria-pressed="true">✨ Vše zajímavé</button>
-            <button type="button" class="p1-choice-btn" data-p1-theme="castles" aria-pressed="false">🏰 Památky</button>
-            <button type="button" class="p1-choice-btn" data-p1-theme="nature" aria-pressed="false">🌲 Příroda a vyhlídky</button>
-            <button type="button" class="p1-choice-btn" data-p1-theme="water" aria-pressed="false">💧 Voda a klid</button>
-          </div>
-        </div>
-
-        <div class="p1-row">
-          <span class="p1-row-label">Délka:</span>
-          <div class="p1-btn-group" role="group" aria-label="Délka procházky v čase">
-            <button type="button" class="p1-choice-btn ${phase1DurationKm === 3 ? 'active' : ''}" data-p1-dur="3" aria-pressed="${phase1DurationKm === 3}">🕒 ~1 hod (3 km)</button>
-            <button type="button" class="p1-choice-btn ${phase1DurationKm === 6 ? 'active' : ''}" data-p1-dur="6" aria-pressed="${phase1DurationKm === 6}">🕒 ~2 hod (6 km)</button>
-            <button type="button" class="p1-choice-btn ${phase1DurationKm === 9 ? 'active' : ''}" data-p1-dur="9" aria-pressed="${phase1DurationKm === 9}">🕒 ~3 hod (9 km)</button>
-          </div>
-        </div>
-
-        <div class="p1-row">
-          <span class="p1-row-label">Kde končím:</span>
-          <div class="p1-btn-group" role="group" aria-label="Kde končím">
-            <button type="button" class="p1-choice-btn ${phase1EndMode === 'loop' ? 'active' : ''}" data-p1-end="loop" aria-pressed="${phase1EndMode === 'loop'}">🔄 Okruh zpět sem</button>
-            <button type="button" class="p1-choice-btn ${phase1EndMode === 'custom' ? 'active' : ''}" data-p1-end="custom" aria-pressed="${phase1EndMode === 'custom'}">🏁 Jiný cíl (kliknu do mapy)</button>
-          </div>
-        </div>
+      <!-- Ovládací lišta přímo v rohu mapy: Celá obrazovka, Pergamen/Mapa, KČT trasy, Vrstevnice, Moje poloha -->
+      <div class="walk-map-toolbar">
+        <button type="button" class="button small map-tool-btn" id="walk-zen-toggle" aria-pressed="false" title="Zvětšit mapu na celou obrazovku">🔍 Celá obrazovka</button>
+        <button type="button" class="button small map-tool-btn" id="walk-center" title="Vycentrovat na moji polohu">◎ Moje poloha</button>
+        <button type="button" class="button small map-tool-btn active" id="walk-fog-toggle" title="Přepnout KCD2 pergamen / obyčejnou mapu / mlhu">📜 Pergamen</button>
+        <button type="button" class="button small map-tool-btn active" id="walk-trails-toggle" aria-pressed="true" title="Zobrazit/skrýt české turistické značky KČT">🥾 KČT: ZAP</button>
+        <button type="button" class="button small map-tool-btn" id="walk-contours-toggle" aria-pressed="false" title="Zobrazit/skrýt vrstevnice a terén">⛰️ Vrstevnice</button>
       </div>
 
       <!-- ZADÁNÍ #09 (Fáze 4): Jediné spodní tlačítko během chůze [ 🏁 Dokončit / Zkrátit ] + 2 jasné možnosti -->
@@ -665,16 +714,16 @@ export function mountWalk(root, routes, config, actions = {}) {
     <div id="simulator-test-zone" class="simulator-test-zone" hidden></div>
     <p id="tile-status" class="small-note" role="status"></p>
 
-    <!-- Sbalitelný spodní panel (skrytý ve zjednodušeném režimu ZADÁNÍ #09) -->
-    <section class="bottom-sheet collapsed" id="walk-bottom-sheet" hidden aria-label="Plán a zastávky procházky">
+    <!-- Podrobný plán a zastávky výpravy pod mapou (vždy přístupný a přehledný) -->
+    <section class="bottom-sheet" id="walk-bottom-sheet" aria-label="Plán a zastávky procházky">
       <div class="bottom-sheet-bar">
         <div class="sheet-header-summary">
-          <strong>🧭 Plán a zastávky výpravy (<span id="basket-count">${plannedRoute.selectedPlaceIds.length}</span>)</strong>
+          <strong>🧭 Podrobný itinerář a zastávky na trase (<span id="basket-count">${plannedRoute.selectedPlaceIds.length}</span>)</strong>
           <span class="sheet-header-sub" id="sheet-header-sub">Potvrzení návštěvy automaticky pod ${STOP_CONFIRM_RADIUS_M} m</span>
         </div>
         <div class="sheet-bar-actions">
           <button type="button" class="button small primary" id="btn-sheet-edit-walk">✏️ Upravit procházku</button>
-          <button type="button" class="button small ghost sheet-toggle-btn" id="sheet-toggle-btn" aria-expanded="false">⬆ Rozbalit panel</button>
+          <button type="button" class="button small ghost sheet-toggle-btn" id="sheet-toggle-btn" aria-expanded="true">⬇ Sbalit panel</button>
         </div>
       </div>
 
@@ -1701,17 +1750,37 @@ export function mountWalk(root, routes, config, actions = {}) {
     return `${n} zastávek`;
   }
 
+  function getCategoryIconForPlace(p) {
+    if (!p) return '📍';
+    if (p.category === 'castles' || p.kind === 'culture' || p.kind === 'castle' || p.kind === 'heritage') return '🏰';
+    if (p.category === 'views' || p.kind === 'view' || p.kind === 'peak') return '🔭';
+    if (p.category === 'water' || p.kind === 'water' || p.kind === 'spring') return '💧';
+    if (p.category === 'nature' || p.kind === 'forest' || p.kind === 'nature') return '🌲';
+    return '📍';
+  }
+
   function renderPhase1AndPhase4Ui(origin = lastFix) {
     const topBar = $('phase1-top-bar');
     const topText = $('phase1-top-text');
     const goBtn = $('btn-phase1-go');
+    const pauseBtn = $('btn-top-pause');
+    const fsBtn = $('btn-top-fullscreen');
+    const toggleP1Btn = $('btn-toggle-p1-bar');
+    const itineraryStrip = $('top-route-itinerary-strip');
     const bottomBar = $('phase1-bottom-bar');
     const phase4Bar = $('phase4-finish-bar');
     if (!topBar || !topText) return;
 
     const isWalking = Boolean(active || demo);
     topBar.classList.toggle('is-walking', isWalking);
-    if (bottomBar) bottomBar.hidden = isWalking;
+    if (bottomBar) {
+      bottomBar.hidden = isWalking || p1PlannerCollapsed;
+    }
+    if (toggleP1Btn) {
+      toggleP1Btn.hidden = isWalking;
+      toggleP1Btn.setAttribute('aria-expanded', String(!p1PlannerCollapsed));
+      toggleP1Btn.textContent = p1PlannerCollapsed ? '▼ Rozbalit volby trasy' : '▲ Sbalit volby trasy';
+    }
     if (phase4Bar) {
       phase4Bar.hidden = !isWalking;
       if (!isWalking) {
@@ -1723,14 +1792,78 @@ export function mountWalk(root, routes, config, actions = {}) {
       if (toggleBtn) toggleBtn.setAttribute('aria-expanded', String(Boolean(isWalking && phase4MenuOpen)));
     }
     if (goBtn) goBtn.hidden = isWalking;
+    const isPaused = Boolean(!isWalking && currentExpedition && currentExpedition.state === 'paused');
+    if (pauseBtn) {
+      pauseBtn.hidden = !isWalking && !isPaused;
+      pauseBtn.textContent = isPaused ? '▶ Pokračovat' : '⏸ Pauza';
+    }
+    if (fsBtn) {
+      fsBtn.setAttribute('aria-pressed', String(zenMode));
+      fsBtn.textContent = zenMode ? '× Zmenšit mapu' : '🔍 Celá obrazovka';
+    }
 
     const plannedPlaces = getPlannedPlaces();
     const currentOrigin = getRouteOriginPoint();
     const isLoop = plannedRoute.routeType === 'loop' && plannedPlaces.length >= 1;
     const speedKmH = getCompanionSpeedKmH();
 
-    // Aktualizace aktivních tlačítek ve Fázi 1
-    if (bottomBar && !isWalking) {
+    // Vizuální itinerář zastávek přímo v horní liště (aby turista vždy viděl, jaká je trasa a jaké body v ní jsou)
+    if (itineraryStrip) {
+      const startLabel = plannedRoute.origin?.label
+        ? plannedRoute.origin.label.split('—')[0].trim()
+        : 'Start (Rožmitál)';
+      if (plannedPlaces.length === 0) {
+        itineraryStrip.innerHTML = `
+          <span class="itinerary-empty">Žádné vybrané zastávky — klikni na místo v mapě nebo vyber téma a délku níže.</span>
+        `;
+      } else {
+        let firstUnvisitedFound = false;
+        let prevPt = currentOrigin;
+        const stopPillsHtml = plannedPlaces.map((p, idx) => {
+          const visited = isStopVisited(p);
+          const isNext = !visited && !firstUnvisitedFound;
+          if (isNext) firstUnvisitedFound = true;
+          const legM = prevPt ? haversineMeters(prevPt, p) : null;
+          prevPt = p;
+          const legStr = legM != null ? formatDistanceLabel(legM) : '';
+          const catIcon = getCategoryIconForPlace(p);
+          const stateBadge = visited ? '✓ ' : (isNext ? '🎯 ' : '');
+          const stateCls = visited ? 'is-visited' : (isNext ? 'is-next' : '');
+          return `
+            <span class="itinerary-arrow" aria-hidden="true">→</span>
+            <div class="itinerary-stop-pill ${stateCls}" data-itinerary-stop-id="${e(p.id)}" title="Klikni pro zobrazení místa na mapě a detailu">
+              <button type="button" class="itinerary-stop-main" data-itinerary-focus="${e(p.id)}">
+                <span class="itinerary-stop-num">${idx + 1}.</span>
+                <span class="itinerary-stop-icon">${catIcon}</span>
+                <span class="itinerary-stop-title">${stateBadge}${e(p.title)}</span>
+                ${legStr ? `<small class="itinerary-stop-dist">(${e(legStr)})</small>` : ''}
+              </button>
+              <button type="button" class="itinerary-stop-remove" data-itinerary-remove="${idx}" title="Vynechat tuto zastávku z trasy" aria-label="Vynechat zastávku ${e(p.title)}">×</button>
+            </div>
+          `;
+        }).join('');
+
+        const endLabel = isLoop
+          ? `<span class="itinerary-arrow" aria-hidden="true">→</span><span class="itinerary-end-pill loop" title="Trasa se vrací jinou cestou zpět na start">🔄 Okruh zpět (${e(startLabel)})</span>`
+          : `<span class="itinerary-arrow" aria-hidden="true">→</span><span class="itinerary-end-pill oneway">🏁 Cíl v poslední zastávce</span>`;
+
+        itineraryStrip.innerHTML = `
+          <button type="button" class="itinerary-start-pill" data-itinerary-start="1" title="Vycentrovat mapu na start výpravy">
+            🚩 Start: <strong>${e(startLabel)}</strong>
+          </button>
+          ${stopPillsHtml}
+          ${endLabel}
+        `;
+      }
+    }
+
+    // Aktualizace aktivních tlačítek ve Fázi 1 (3 režimy, témata, délka, konec, start)
+    if (bottomBar) {
+      bottomBar.querySelectorAll('[data-p1-gamemode]').forEach(btn => {
+        const isAct = btn.dataset.p1Gamemode === (stateObj.gameMode || 'gamified');
+        btn.classList.toggle('active', isAct);
+        btn.setAttribute('aria-pressed', String(isAct));
+      });
       bottomBar.querySelectorAll('[data-p1-theme]').forEach(btn => {
         const isAct = btn.dataset.p1Theme === phase1Theme;
         btn.classList.toggle('active', isAct);
@@ -1746,11 +1879,25 @@ export function mountWalk(root, routes, config, actions = {}) {
         btn.classList.toggle('active', isAct);
         btn.setAttribute('aria-pressed', String(isAct));
       });
+      const isGpsOrigin = !plannedRoute.origin || plannedRoute.origin.id === 'my-gps' || plannedRoute.origin.id === 'rozmital-namesti';
+      bottomBar.querySelectorAll('[data-p1-origin="gps"]').forEach(btn => {
+        btn.classList.toggle('active', isGpsOrigin);
+        btn.setAttribute('aria-pressed', String(isGpsOrigin));
+      });
+      bottomBar.querySelectorAll('[data-p1-preset]').forEach(btn => {
+        const isAct = plannedRoute.origin?.id === btn.dataset.p1Preset;
+        btn.classList.toggle('active', isAct);
+        btn.setAttribute('aria-pressed', String(isAct));
+      });
     }
 
     if (!isWalking) {
       if (pickingCustomEndOnMap) {
         topText.innerHTML = `🏁 <strong>Klikni do mapy nebo na ikonu místa</strong>, kde chceš dnešní trasu zakončit…`;
+        return;
+      }
+      if (pickingStartOnMap) {
+        topText.innerHTML = `🗺️ <strong>Klikni kamkoliv do mapy</strong> pro nastavení nového startu výpravy…`;
         return;
       }
       const routedM = lastRoutedGeometry && !lastRoutedGeometry.isFallback ? lastRoutedGeometry.distanceM : null;
@@ -1764,7 +1911,12 @@ export function mountWalk(root, routes, config, actions = {}) {
       const mins = Math.max(5, Math.round((distM / 1000) / speedKmH * 60));
       const timeStr = formatDurationCz(mins);
       const stopsStr = formatStopsCountCz(plannedPlaces.length);
-      topText.innerHTML = `Půjdeš <strong>${e(timeStr)} (${e(kmStr)} km)</strong> · <strong>${e(stopsStr)}</strong>`;
+      const modeName = stateObj.gameMode === 'explorer'
+        ? '🧭 Objevitel'
+        : stateObj.gameMode === 'casual'
+          ? '🗺️ Čistá mapa'
+          : '🥾 Výprava KCD2';
+      topText.innerHTML = `Půjdeš <strong>${e(timeStr)} (${e(kmStr)} km)</strong> · <strong>${e(stopsStr)}</strong> · <span class="p1-mode-badge">${e(modeName)}</span>`;
       return;
     }
 
@@ -2061,8 +2213,8 @@ export function mountWalk(root, routes, config, actions = {}) {
       updatePlayerLead(origin || lastFix);
       return;
     }
-    // Ve zjednodušeném rozhraní ZADÁNÍ #09 zobrazujeme souhrn v horní liště #phase1-top-bar
-    hudPanel.hidden = true;
+    // V režimu celé obrazovky (zenMode) zobrazíme plovoucí Quest HUD přímo na mapě
+    hudPanel.hidden = !zenMode;
 
     const currentPos = origin || lastFix || telemetry.lastKnownPosition || plannedRoute.origin || { lat: 49.6014, lng: 13.8644 };
     const isLoop = plannedRoute.routeType === 'loop' && plannedPlaces.length >= 2;
@@ -3726,8 +3878,9 @@ export function mountWalk(root, routes, config, actions = {}) {
           plannedRoute.origin = customOrigin;
           wizardScenario = 'from-home';
           renderTripWizardUi();
-          recalculateRemainingRoute('Startovní bod nastaven kliknutím do mapy.');
           refreshAutoPlaces();
+          applyPhase1QuickSelection(true);
+          recalculateRemainingRoute('Startovní bod nastaven kliknutím do mapy a trasa přepočítána.');
         }
         playTick(stateObj.soundEnabled);
       }
@@ -4179,9 +4332,15 @@ export function mountWalk(root, routes, config, actions = {}) {
   function updateZenMode() {
     $('walk-map-wrap').classList.toggle('zen-mode', zenMode);
     $('zen-close-btn').hidden = !zenMode;
+    if ($('zen-follow-btn')) $('zen-follow-btn').hidden = !zenMode;
+    if ($('quest-hud-panel')) $('quest-hud-panel').hidden = !zenMode || getPlannedPlaces().length === 0;
     $('walk-zen-toggle').setAttribute('aria-pressed', String(zenMode));
-    $('walk-zen-toggle').textContent = zenMode ? '⛶ Zmenšit mapu' : '⛶ Zvětšit mapu';
-    $('map-command-bar').hidden = zenMode;
+    $('walk-zen-toggle').textContent = zenMode ? '× Zmenšit mapu' : '🔍 Celá obrazovka';
+    if ($('btn-top-fullscreen')) {
+      $('btn-top-fullscreen').setAttribute('aria-pressed', String(zenMode));
+      $('btn-top-fullscreen').textContent = zenMode ? '× Zmenšit mapu' : '🔍 Celá obrazovka';
+    }
+    $('map-command-bar').hidden = true;
     $('walk-bottom-sheet').hidden = zenMode;
     if (zenMode) {
       follow = true;
@@ -4365,20 +4524,27 @@ export function mountWalk(root, routes, config, actions = {}) {
     }
   });
 
-  // ZADÁNÍ #09 (Bod 1): V rohu mapy jen malá ikonka 🗺️ pro přepnutí mezi KCD2 pergamenem a obyčejnou mapou
-  const FOG_MODE_ORDER = ['explore', 'none'];
+  // Přepínač mapového stylu / mlhy (Pergamen / Čistá mapa / Plná mlha)
+  const FOG_MODE_ORDER = ['explore', 'none', 'full'];
   function updateFogToggleLabel() {
     const btn = $('walk-fog-toggle');
     if (!btn) return;
-    btn.textContent = '🗺️';
+    if (fogMode === 'none') {
+      btn.textContent = '🗺️ Čistá mapa';
+      btn.title = 'Čistá turistická mapa bez mlhy (kliknutím přepneš na KCD2 pergamen)';
+    } else if (fogMode === 'full') {
+      btn.textContent = '🌑 Plná mlha';
+      btn.title = 'Režim Objevitel: plná mlha (kliknutím přepneš na KCD2 pergamen)';
+    } else {
+      btn.textContent = '📜 Pergamen';
+      btn.title = 'KCD2 pergamen s měkkým odkrýváním (kliknutím přepneš na čistou mapu)';
+    }
     btn.dataset.fogMode = fogMode;
     btn.classList.toggle('active', fogMode !== 'none');
-    btn.title = fogMode === 'none'
-      ? 'Obyčejná mapa (kliknutím zapneš KCD2 pergamen)'
-      : 'KCD2 pergamen s měkkým odkrýváním (kliknutím přepneš na obyčejnou mapu)';
   }
   $('walk-fog-toggle').addEventListener('click', () => {
-    fogMode = fogMode === 'none' ? 'explore' : 'none';
+    const idx = FOG_MODE_ORDER.indexOf(fogMode);
+    fogMode = FOG_MODE_ORDER[(idx + 1) % FOG_MODE_ORDER.length];
     updateFogToggleLabel();
     playTick(stateObj.soundEnabled);
     scheduleFog();
@@ -4450,8 +4616,15 @@ export function mountWalk(root, routes, config, actions = {}) {
     );
   }
 
-  // Události Fáze 1: Spodní lišta rychlého výběru
+  // Události Fáze 1: Panel voleb trasy a 3 režimů (#phase1-bottom-bar)
   $('phase1-bottom-bar')?.addEventListener('click', (ev) => {
+    const gmBtn = ev.target.closest('[data-p1-gamemode]');
+    if (gmBtn) {
+      applyGameMode(gmBtn.dataset.p1Gamemode);
+      renderPhase1AndPhase4Ui(lastFix || telemetry.lastKnownPosition);
+      return;
+    }
+
     const themeBtn = ev.target.closest('[data-p1-theme]');
     if (themeBtn) {
       phase1Theme = themeBtn.dataset.p1Theme || 'all';
@@ -4486,12 +4659,137 @@ export function mountWalk(root, routes, config, actions = {}) {
         applyPhase1QuickSelection();
       }
       playTick(stateObj.soundEnabled);
+      return;
+    }
+
+    const origBtn = ev.target.closest('[data-p1-origin="gps"]');
+    if (origBtn) {
+      pickingStartOnMap = false;
+      userExplicitlyPickedOrigin = false;
+      if (lastFix) {
+        plannedRoute.origin = { id: 'my-gps', label: 'Moje aktuální GPS poloha', lat: lastFix.lat, lng: lastFix.lng };
+        if (map) centerMapOnPlayer(lastFix, false);
+      } else {
+        plannedRoute.origin = { ...START_PRESETS[0] };
+        if (map) map.setView([START_PRESETS[0].lat, START_PRESETS[0].lng], 13);
+      }
+      applyPhase1QuickSelection();
+      playTick(stateObj.soundEnabled);
+      return;
+    }
+
+    const presetBtn = ev.target.closest('[data-p1-preset]');
+    if (presetBtn) {
+      pickingStartOnMap = false;
+      const presetId = presetBtn.dataset.p1Preset;
+      const preset = CZECH_PLACE_PRESETS.find(p => p.id === presetId) || START_PRESETS.find(p => p.id === presetId);
+      if (preset) {
+        userExplicitlyPickedOrigin = true;
+        plannedRoute.origin = { id: preset.id, label: preset.label, lat: preset.lat, lng: preset.lng };
+        if (map) {
+          follow = false;
+          updateFollowUi();
+          map.setView([preset.lat, preset.lng], 13);
+        }
+        refreshAutoPlaces();
+        refreshWeatherStrip(preset);
+        applyPhase1QuickSelection();
+        status(`📍 Start výpravy nastaven na: ${preset.label}.`);
+        playTick(stateObj.soundEnabled);
+      }
+      return;
+    }
+
+    if (ev.target.closest('#btn-p1-pick-start-map')) {
+      pickingStartOnMap = true;
+      pickingCustomEndOnMap = false;
+      renderPhase1AndPhase4Ui(lastFix || telemetry.lastKnownPosition);
+      status('🗺️ Klikni kamkoliv do mapy pro nastavení nového startu výpravy…');
+      playTick(stateObj.soundEnabled);
     }
   });
 
-  // Událost Fáze 1: Horní tlačítko [ ▶ VYRAZIT ]
+  // Interaktivní itinerář zastávek v horní liště (#top-route-itinerary-strip)
+  $('top-route-itinerary-strip')?.addEventListener('click', (ev) => {
+    const removeBtn = ev.target.closest('[data-itinerary-remove]');
+    if (removeBtn) {
+      ev.stopPropagation();
+      const idx = Number(removeBtn.dataset.itineraryRemove);
+      const ids = plannedRoute.selectedPlaceIds || [];
+      const removedPlace = getAllAvailablePlaces().find(p => p.id === ids[idx]);
+      plannedRoute.selectedPlaceIds = removePlannedStop(ids, idx);
+      playTick(stateObj.soundEnabled);
+      recalculateRemainingRoute(`✕ Zastávka „${removedPlace?.title || ''}“ byla vynechána z trasy.`);
+      return;
+    }
+
+    const focusBtn = ev.target.closest('[data-itinerary-focus]');
+    if (focusBtn) {
+      const placeId = focusBtn.dataset.itineraryFocus;
+      const place = getAllAvailablePlaces().find(p => p.id === placeId);
+      if (place) {
+        if (map) {
+          follow = false;
+          updateFollowUi();
+          map.setView([place.lat, place.lng], Math.max(map.getZoom(), 15), { animate: true });
+        }
+        renderSelectedPlaceDetail(place);
+        playTick(stateObj.soundEnabled);
+      }
+      return;
+    }
+
+    if (ev.target.closest('[data-itinerary-start]')) {
+      const orig = getRouteOriginPoint();
+      if (map && orig) {
+        follow = false;
+        updateFollowUi();
+        map.setView([orig.lat, orig.lng], Math.max(map.getZoom(), 14), { animate: true });
+        playTick(stateObj.soundEnabled);
+      }
+    }
+  });
+
+  // Tlačítka v horní liště (#phase1-top-bar): Celá obrazovka, Upravit zastávky, Nastavení, Pauza, Sbalit volby
+  $('btn-top-fullscreen')?.addEventListener('click', () => {
+    zenMode = !zenMode;
+    updateZenMode();
+    playTick(stateObj.soundEnabled);
+  });
+
+  $('btn-top-edit-walk')?.addEventListener('click', () => {
+    openEditWalkModal();
+    playTick(stateObj.soundEnabled);
+  });
+
+  $('btn-top-settings')?.addEventListener('click', () => {
+    appSettingsModalOpen = true;
+    const modal = $('app-settings-modal');
+    if (modal) modal.hidden = false;
+    renderAppSettingsModalUi();
+    playTick(stateObj.soundEnabled);
+  });
+
+  $('btn-top-pause')?.addEventListener('click', () => {
+    if (!active && !demo) {
+      start();
+    } else {
+      pauseSession('Pozastaveno. Průzkum je uložený.');
+    }
+    renderPhase1AndPhase4Ui(lastFix || telemetry.lastKnownPosition);
+    playTick(stateObj.soundEnabled);
+  });
+
+  $('btn-toggle-p1-bar')?.addEventListener('click', () => {
+    p1PlannerCollapsed = !p1PlannerCollapsed;
+    renderPhase1AndPhase4Ui(lastFix || telemetry.lastKnownPosition);
+    playTick(stateObj.soundEnabled);
+  });
+
+  // Událost Fáze 1: Horní tlačítko [ ▶ VYRAZIT NA TRASU ]
   $('btn-phase1-go')?.addEventListener('click', () => {
     pickingCustomEndOnMap = false;
+    pickingStartOnMap = false;
     phase4MenuOpen = false;
     if (!plannedRoute.selectedPlaceIds || plannedRoute.selectedPlaceIds.length === 0) {
       applyPhase1QuickSelection(true);
