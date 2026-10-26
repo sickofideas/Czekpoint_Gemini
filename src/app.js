@@ -21,6 +21,7 @@ import { renderWalkingStickHtml } from './walking-stick.js';
 import { renderPilgrimsSection, renderSummitBook } from './pilgrims.js';
 import { playTick, playHammer, triggerHaptic, applyStaggerAnimation } from './fx.js';
 import { renderBrandLogoHtml, mountBrandLogo, mountAnimatedBrandLogo, mountAmbientBackground } from './brand-logo.js';
+import { getCachedPlacePhoto, resolveVerifiedPlacePhoto, prefetchVerifiedPhotosForPlaces } from './poi-photos.js';
 
 let disposeWalk = null;
 let disposeBrandLogo = null;
@@ -110,10 +111,16 @@ function renderCard(route, passport = false) {
     : '📍 Samostatné místo';
   const hasStamp = stateObj.discoveries?.includes(route.id) || stateObj.discoveries?.includes(`catalog:${route.id}`);
   const stampBadge = hasStamp ? '✓ GPS razítko v pasu' : '';
+  const cachedPhoto = getCachedPlacePhoto(route);
+  const fallbackBitmap = illustrationUrl(route);
+  const cardImgSrc = (cachedPhoto && cachedPhoto.photoUrl) ? cachedPhoto.photoUrl : fallbackBitmap;
+  const photoLicenseTag = (cachedPhoto && cachedPhoto.photoUrl)
+    ? `📸 Ověřená fotka (${cachedPhoto.license || 'Wikimedia'})`
+    : (isRoute ? '🥾 Trasa / okruh' : '📍 Místo (zastávka)');
 
   return `<article class="route-card" data-route-card="${e(route.id)}">
-    <div class="card-image"><a href="${routeLink(route)}" data-catalog-link="true" tabindex="-1" aria-hidden="true"><img src="${illustrationUrl(route)}" alt="" width="600" height="340" loading="lazy"></a>
-      <span class="image-label">${isRoute ? '🥾 Trasa / okruh' : '📍 Místo (zastávka)'}</span>
+    <div class="card-image"><a href="${routeLink(route)}" data-catalog-link="true" tabindex="-1" aria-hidden="true"><img src="${e(cardImgSrc)}" alt="" width="600" height="340" loading="lazy" onerror="this.onerror=null;this.src='${e(fallbackBitmap)}';"></a>
+      <span class="image-label">${e(photoLicenseTag)}</span>
       <button class="save-button ${saved ? 'saved' : ''}" type="button" data-action="save" data-id="${e(route.id)}" aria-pressed="${saved}" title="${saved ? 'Odebrat z oblíbených na později' : 'Uložit do oblíbených na později'}" aria-label="${saved ? 'Odebrat z oblíbených na později' : 'Uložit do oblíbených na později'}: ${e(route.title)}">${icon('heart')}</button>
     </div>
     <div class="card-content">
@@ -188,6 +195,17 @@ function renderExploreResults() {
   const routesCount = routes.filter(r => isActualRouteItem(r)).length;
   document.querySelector('#results-info').textContent = `Zobrazeno ${routes.length} z ${state.routes.length} položek (${placesCount} samostatných míst, ${routesCount} tras)${state.position ? ' · seřazeno podle vzdušné vzdálenosti' : ''}${state.filters.maxDistance ? ' · samostatná místa bez délky trasy jsou skrytá' : ''}`;
   grid.innerHTML = routes.length ? routes.map(route => renderCard(route)).join('') : `<div class="empty-state">${icon('search')}<h3>Tady je zatím ticho.</h3><p>Tomuto výběru žádné místo ani trasa neodpovídá. Zkus méně filtrů nebo jiné hledání.</p><button type="button" class="button" data-action="reset-filters">Zobrazit všechna místa a trasy</button></div>`;
+  prefetchVerifiedPhotosForPlaces(routes.slice(0, 12), {
+    maxCount: 12,
+    onPlaceResolved: (resolvedRoute, photoRes) => {
+      const cardEl = document.querySelector(`[data-route-card="${CSS.escape(resolvedRoute.id)}"]`);
+      if (!cardEl) return;
+      const img = cardEl.querySelector('.card-image img');
+      const lbl = cardEl.querySelector('.card-image .image-label');
+      if (img && photoRes.photoUrl) img.src = photoRes.photoUrl;
+      if (lbl && photoRes.license) lbl.textContent = `📸 Ověřená fotka (${photoRes.license})`;
+    },
+  });
 }
 
 function fact(label, value, ic) { return `<div class="fact"><span>${icon(ic)}${label}</span><strong class="${value == null ? 'unknown' : ''}">${value == null ? 'Zatím nezjištěno' : e(value)}</strong></div>`; }
@@ -208,6 +226,13 @@ async function renderDetail(id, renderId) {
     ? '<span class="detail-trophy-badge none">📍 Samostatné místo · Potvrzení zastávky na trase pod 20 m</span>'
     : '<span class="detail-trophy-badge none">🥾 Vycházková trasa / okruh</span>';
 
+  const cachedPhoto = getCachedPlacePhoto(route);
+  const fallbackBitmap = illustrationUrl(route);
+  const coverSrc = (cachedPhoto && cachedPhoto.photoUrl) ? cachedPhoto.photoUrl : fallbackBitmap;
+  const coverLabel = (cachedPhoto && cachedPhoto.photoUrl)
+    ? `📸 Ověřená fotka · Wikimedia Commons (${cachedPhoto.license || 'CC BY-SA'})`
+    : (isRoute ? '🥾 Trasa / okruh' : '📍 Samostatné místo');
+
   document.title = `${route.title} · Czekpoint`;
   main.innerHTML = `<a class="back-link" href="#/katalog" data-action="back-to-catalog">${icon('back')}Zpět do katalogu míst a tras</a>
     <div class="detail-header">
@@ -221,7 +246,7 @@ async function renderDetail(id, renderId) {
     </div>
     <div class="detail-grid">
       <div class="detail-main">
-        <div class="detail-cover"><img src="${illustrationUrl(route)}" width="600" height="340" alt="Ilustrace místa"><span class="image-label">${isRoute ? '🥾 Trasa / okruh' : '📍 Samostatné místo'}</span></div>
+        <div class="detail-cover"><img id="detail-cover-img" src="${e(coverSrc)}" width="600" height="340" alt="Fotografie nebo ilustrace místa" onerror="this.onerror=null;this.src='${e(fallbackBitmap)}';"><span class="image-label" id="detail-cover-label">${e(coverLabel)}</span></div>
         <section class="panel">
           <h2>O ${isRoute ? 'trase' : 'místě'}</h2>
           <p>${e(route.summary)}</p>
@@ -278,6 +303,18 @@ async function renderDetail(id, renderId) {
       </div>
       <div id="report-list" class="report-list"><p class="small-note" role="status">Hledáme existující záznamy…</p></div>
     </section>`;
+
+  if (!cachedPhoto) {
+    resolveVerifiedPlacePhoto(route).then(res => {
+      if (renderId !== state.renderId) return;
+      if (res && res.hasVerifiedPhoto && res.photoUrl) {
+        const imgEl = document.querySelector('#detail-cover-img');
+        const lblEl = document.querySelector('#detail-cover-label');
+        if (imgEl) imgEl.src = res.photoUrl;
+        if (lblEl) lblEl.textContent = `📸 Ověřená fotka · Wikimedia Commons (${res.license || 'CC BY-SA'})`;
+      }
+    }).catch(() => {});
+  }
 
   try {
     const reports = await state.repo.listReports(id);

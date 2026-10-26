@@ -3109,8 +3109,83 @@
 .phase4-options-sheet[hidden],
 .phase1-go-btn[hidden],
 .p1-top-util-btn[hidden],
-.p1-collapse-toggle-btn[hidden] {
+.p1-collapse-toggle-btn[hidden],
+.scan-map-area-btn[hidden] {
   display: none !important;
+}
+
+/* Tlačítko pro načtení zajímavých míst z aktuálního výřezu mapy (kdekoliv v ČR) */
+.scan-map-area-btn {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 680;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 2px solid #d8b25c;
+  background: rgba(24, 38, 28, 0.92);
+  color: #fef08a;
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  max-width: calc(100% - 110px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.scan-map-area-btn:hover {
+  background: #253d2c;
+  border-color: #fde047;
+  transform: translateY(-1px);
+}
+.scan-map-area-btn.is-panned-away {
+  background: linear-gradient(135deg, #b58938 0%, #e0b456 100%);
+  color: #1c1306;
+  border-color: #fef08a;
+  box-shadow: 0 8px 24px rgba(216, 178, 92, 0.55);
+}
+.scan-map-area-btn.is-loading,
+.p1-scan-map-btn.is-loading {
+  opacity: 0.75;
+  cursor: wait;
+}
+
+.p1-scan-map-btn {
+  border-color: #fde047 !important;
+  background: linear-gradient(135deg, rgba(216, 178, 92, 0.26), rgba(181, 137, 56, 0.42)) !important;
+  color: #fef08a !important;
+  font-weight: 800 !important;
+}
+.p1-scan-map-btn:hover {
+  background: linear-gradient(135deg, #d8b25c, #b58938) !important;
+  color: #1c1306 !important;
+}
+
+.p1-search-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.p1-search-input {
+  min-width: 220px;
+  padding: 6px 11px;
+  border-radius: 10px;
+  border: 1.5px solid rgba(216, 178, 92, 0.45);
+  background: rgba(15, 25, 18, 0.85);
+  color: #f8f5ec;
+  font-size: 0.82rem;
+}
+.p1-search-input::placeholder {
+  color: #9eb095;
+}
+.p1-search-input:focus {
+  outline: none;
+  border-color: #fde047;
+  box-shadow: 0 0 0 2px rgba(253, 224, 71, 0.25);
 }
 
 @media (max-width: 640px) {
@@ -3127,5 +3202,91 @@
   .p1-row-label {
     min-width: 100%;
   }
+  .scan-map-area-btn {
+    font-size: 0.76rem;
+    padding: 6px 12px;
+  }
+  .p1-search-input {
+    min-width: 160px;
+    flex: 1;
+  }
 }
+
+/* Ověřené reálné fotky bodů zájmu (Wikimedia Commons CC/PD) s fallbackem na bitmap/ilustraci */
+.czekpoint-marker-badge.has-real-photo {
+  padding: 2px;
+  overflow: visible;
+}
+.czekpoint-marker-photo-wrap {
+  display: block;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: #1c2c20;
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.45);
+}
+.czekpoint-marker-photo-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.pds-media-box {
+  position: relative;
+  width: 100%;
+  height: 148px;
+  border-radius: 12px;
+  overflow: hidden;
+  margin-bottom: 10px;
+  background: #152218;
+  border: 1.5px solid rgba(216, 178, 92, 0.38);
+}
+.pds-photo-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.pds-photo-source-badge {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+}
+.pds-photo-source-badge.is-verified {
+  background: rgba(20, 42, 26, 0.88);
+  color: #bbf7d0;
+  border: 1px solid #4ade80;
+}
+.pds-photo-source-badge.is-bitmap {
+  background: rgba(30, 38, 32, 0.84);
+  color: #e2e8f0;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+.hero-card-thumb-wrap {
+  width: 68px;
+  height: 68px;
+  border-radius: 12px;
+  overflow: hidden;
+  flex-shrink: 0;
+  border: 2px solid #d8b25c;
+  background: #16241a;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.32);
+}
+.hero-card-thumb-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+
 

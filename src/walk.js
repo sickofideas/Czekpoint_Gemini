@@ -48,6 +48,12 @@ import {
 import { renderPostcard, generatePostcardBlob, generatePostcardDataUrl } from './postcard.js';
 import { fetchNearby } from './nearby.js';
 import { loadAutoPlacesForArea } from './auto-places.js';
+import {
+  getFallbackBitmapUrl,
+  getCachedPlacePhoto,
+  resolveVerifiedPlacePhoto,
+  prefetchVerifiedPhotosForPlaces,
+} from './poi-photos.js';
 import { haversineMeters } from './domain.js';
 import { escapeHtml as e, number } from './ui.js';
 import { CHAPTERS, COLLECTIONS, RELICS } from './data.js';
@@ -440,15 +446,22 @@ export function mountWalk(root, routes, config, actions = {}) {
       </div>
 
       <div class="p1-row">
-        <span class="p1-row-label">4. Start výpravy:</span>
-        <div class="p1-btn-group" role="group" aria-label="Odkud vyrážím">
-          <button type="button" class="p1-choice-btn ${!userExplicitlyPickedOrigin ? 'active' : ''}" data-p1-origin="my-gps">📍 Moje GPS / Rožmitál</button>
-          ${CZECH_PLACE_PRESETS.slice(0, 6).map(preset => `
+        <span class="p1-row-label">4. Oblast v ČR &amp; start:</span>
+        <div class="p1-btn-group" role="group" aria-label="Odkud vyrážím a oblast mapy">
+          <button type="button" class="p1-choice-btn ${!userExplicitlyPickedOrigin ? 'active' : ''}" data-p1-origin="gps">📍 Moje GPS / Rožmitál</button>
+          ${CZECH_PLACE_PRESETS.slice(0, 8).map(preset => `
             <button type="button" class="p1-choice-btn ${plannedRoute.origin?.id === preset.id ? 'active' : ''}" data-p1-preset="${e(preset.id)}">
-              ${e(preset.label.split('—')[0].trim())}
+              ${e(preset.label.split('(')[0].trim())}
             </button>
           `).join('')}
-          <button type="button" class="p1-choice-btn" id="btn-p1-pick-start-map">🗺️ Zvolit start v mapě</button>
+          <button type="button" class="p1-choice-btn p1-scan-map-btn" id="btn-p1-scan-map" title="Vezme aktuálně zobrazenou část mapy kdekoliv v ČR, načte zajímavá místa v okolí a rovnou z nich postaví trasu">
+            ✨ Generovat trasu v aktuální mapě
+          </button>
+          <button type="button" class="p1-choice-btn" id="btn-p1-pick-start-map">🗺️ Kliknout start v mapě</button>
+          <div class="p1-search-inline">
+            <input type="search" id="p1-place-search-input" class="p1-search-input" placeholder="Jiné místo v ČR (např. Příbram, Karlštejn, Tábor…)" aria-label="Vyhledat libovolné město nebo místo v ČR" />
+            <button type="button" class="p1-choice-btn p1-search-submit-btn" id="btn-p1-search-place">🔍 Najít v ČR</button>
+          </div>
         </div>
       </div>
     </section>
@@ -606,6 +619,11 @@ export function mountWalk(root, routes, config, actions = {}) {
       <!-- Výrazné tlačítko „Zpět na mou polohu“ při ručním posunu mapy -->
       <button type="button" id="btn-return-to-gps" class="return-to-gps-btn" hidden title="Obnovit automatické sledování tvé polohy">
         📍 Zpět na mou polohu
+      </button>
+
+      <!-- Tlačítko pro načtení zajímavých bodů a vygenerování trasy přímo z aktuálního výřezu mapy kdekoliv v ČR -->
+      <button type="button" id="btn-scan-map-area" class="scan-map-area-btn" title="Načte zajímavá místa z právě zobrazené mapy (kdekoliv v ČR) a navrhne z nich trasu">
+        ✨ Načíst zajímavá místa v této oblasti mapy a navrhnout trasu
       </button>
 
       <!-- Aktivní otočný kompas -->
@@ -2669,18 +2687,28 @@ export function mountWalk(root, routes, config, actions = {}) {
         : '';
 
       const glyphHtml = renderCategoryMarkerGlyph(categoryKey, visited ? 'visited' : 'default');
+      const cachedPhoto = getCachedPlacePhoto(p);
+      const hasRealPhoto = Boolean(cachedPhoto && cachedPhoto.photoUrl);
+      const photoInnerHtml = hasRealPhoto
+        ? `
+            <span class="czekpoint-marker-photo-wrap">
+              <img class="czekpoint-marker-photo-img" src="${e(cachedPhoto.photoUrl)}" alt="" loading="lazy" onerror="this.parentElement.hidden=true;if(this.parentElement.nextElementSibling)this.parentElement.nextElementSibling.hidden=false;" />
+            </span>
+            <span class="czekpoint-marker-glyph kind-${e(categoryKey)}" hidden>${glyphHtml}</span>
+          `
+        : `<span class="czekpoint-marker-glyph kind-${e(categoryKey)}">${glyphHtml}</span>`;
 
       const marker = L.marker([p.lat, p.lng], {
         icon: L.divIcon({
           className: 'czekpoint-marker-anchor',
           html: `
-            <span class="czekpoint-marker-badge ${tierClass} ${animClass}" data-kind="${e(categoryKey)}">
-              <span class="czekpoint-marker-glyph kind-${e(categoryKey)}">${glyphHtml}</span>
+            <span class="czekpoint-marker-badge ${tierClass} ${animClass} ${hasRealPhoto ? 'has-real-photo' : 'has-bitmap-glyph'}" data-kind="${e(categoryKey)}">
+              ${photoInnerHtml}
               ${orderBadgeHtml}
             </span>
           `,
-          iconSize: [40, 40],
-          iconAnchor: [20, 20],
+          iconSize: [42, 42],
+          iconAnchor: [21, 21],
           popupAnchor: [0, -14],
         }),
         title: p.title,
@@ -2709,10 +2737,25 @@ export function mountWalk(root, routes, config, actions = {}) {
     }
 
     renderPlannedRouteOnMap();
+
+    // Asynchronně ověříme reálné fotky (CC0 / Public Domain / CC BY / CC BY-SA z Wikimedia Commons) pro body na mapě
+    prefetchVerifiedPhotosForPlaces([...plannedPlaces, ...list.slice(0, 10)], {
+      signal: aborter.signal,
+      maxCount: 10,
+      onBatchUpdated: () => {
+        if (disposed) return;
+        renderPlaces();
+        renderNextCheckpointHero(lastFix || telemetry.lastKnownPosition);
+        if (selectedDetailPlace && !$('place-detail-sheet')?.hidden) {
+          openPlaceDetail(selectedDetailPlace);
+        }
+      },
+    });
   }
 
   /**
    * ZADÁNÍ #09 (Fáze 3): Bublina po kliknutí na ikonu v mapě:
+   * - Zobrazí ověřenou reálnou fotku místa (pokud existuje a je komerčně použitelná), jinak dosavadní bitmap/ilustraci.
    * - Pokud bod UŽ JE v dnešní trase -> 1 velké tlačítko [ ✕ Vynechat tuto zastávku ]
    * - Pokud bod v trase NENÍ -> 2 jasné volby:
    *     [ ➕ Přidat jako zastávku po cestě ] (automaticky vloží na nejlepší místo bez křížení)
@@ -2741,6 +2784,14 @@ export function mountWalk(root, routes, config, actions = {}) {
       ? '<span class="pds-stamp-badge lifetime">📜 Razítko v pasu</span>'
       : `<span class="pds-stamp-badge pending">📍 ${distStr}${mins != null ? ` · ~${mins} min` : ''}</span>`;
 
+    const cachedPhoto = getCachedPlacePhoto(p);
+    const fallbackBitmapUrl = getFallbackBitmapUrl(p);
+    const hasVerified = Boolean(cachedPhoto && cachedPhoto.photoUrl);
+    const imgSrc = hasVerified ? cachedPhoto.photoUrl : fallbackBitmapUrl;
+    const badgeHtml = hasVerified
+      ? `<span class="pds-photo-source-badge is-verified" id="pds-photo-badge">📸 Ověřená fotka · ${e(cachedPhoto.license || 'Wikimedia')}</span>`
+      : `<span class="pds-photo-source-badge is-bitmap" id="pds-photo-badge">🎨 Ilustrace místa</span>`;
+
     const actionsHtml = isPlanned
       ? `
         <div class="pds-actions phase3-bubble-actions">
@@ -2763,6 +2814,17 @@ export function mountWalk(root, routes, config, actions = {}) {
     sheet.hidden = false;
     sheet.innerHTML = `
       <div class="pds-card phase3-bubble-card">
+        <div class="pds-media-box">
+          <img
+            id="pds-photo-img"
+            class="pds-photo-img ${hasVerified ? 'is-real-photo' : 'is-fallback-bitmap'}"
+            src="${e(imgSrc)}"
+            alt="${e(p.title)}"
+            loading="lazy"
+            onerror="this.onerror=null;this.src='${e(fallbackBitmapUrl)}';this.classList.remove('is-real-photo');this.classList.add('is-fallback-bitmap');const b=document.getElementById('pds-photo-badge');if(b){b.textContent='🎨 Ilustrace místa';b.className='pds-photo-source-badge is-bitmap';}"
+          />
+          ${badgeHtml}
+        </div>
         <div class="pds-header">
           <div class="pds-title-wrap">
             <span class="pds-kind-badge">${e(kindLabel)}</span>
@@ -2776,6 +2838,27 @@ export function mountWalk(root, routes, config, actions = {}) {
         ${actionsHtml}
       </div>
     `;
+
+    if (!hasVerified) {
+      resolveVerifiedPlacePhoto(p, { signal: aborter.signal }).then(res => {
+        if (disposed || !selectedDetailPlace || selectedDetailPlace.id !== p.id) return;
+        if (res && res.hasVerifiedPhoto && res.photoUrl) {
+          const imgEl = $('pds-photo-img');
+          const badgeEl = $('pds-photo-badge');
+          if (imgEl) {
+            imgEl.src = res.photoUrl;
+            imgEl.classList.remove('is-fallback-bitmap');
+            imgEl.classList.add('is-real-photo');
+          }
+          if (badgeEl) {
+            badgeEl.textContent = `📸 Ověřená fotka · ${res.license || 'Wikimedia'}`;
+            badgeEl.className = 'pds-photo-source-badge is-verified';
+          }
+          renderPlaces();
+          renderNextCheckpointHero(lastFix || telemetry.lastKnownPosition);
+        }
+      }).catch(() => {});
+    }
 
     $('btn-close-place-detail')?.addEventListener('click', closePlaceDetail);
 
@@ -2916,9 +2999,22 @@ export function mountWalk(root, routes, config, actions = {}) {
     }
 
     const kindGlyph = nextStop.kind === 'water' ? '🌊' : nextStop.kind === 'view' ? '⛰️' : nextStop.kind === 'culture' ? '🏰' : '🌲';
+    const nextPhoto = getCachedPlacePhoto(nextStop);
+    const nextFallback = getFallbackBitmapUrl(nextStop);
+    const nextThumbSrc = (nextPhoto && nextPhoto.photoUrl) ? nextPhoto.photoUrl : nextFallback;
+    const isNextReal = Boolean(nextPhoto && nextPhoto.photoUrl);
 
     heroCard.innerHTML = `
       <div class="hero-card-inner hero-active-target">
+        <div class="hero-card-thumb-wrap">
+          <img
+            class="hero-card-thumb-img ${isNextReal ? 'is-real-photo' : 'is-fallback-bitmap'}"
+            src="${e(nextThumbSrc)}"
+            alt="${e(nextStop.title)}"
+            loading="lazy"
+            onerror="this.onerror=null;this.src='${e(nextFallback)}';this.classList.remove('is-real-photo');"
+          />
+        </div>
         <div class="hero-card-target-info">
           <div class="hero-card-step-eyebrow">
             <span>🎯 DALŠÍ CÍL NA TRASE · Zastávka ${stopIdx + 1} z ${plannedPlaces.length}</span>
@@ -3827,7 +3923,10 @@ export function mountWalk(root, routes, config, actions = {}) {
       follow = false;
       updateFollowUi();
     });
-    map.on('moveend', () => { if (!lastFix) renderPlaces(); });
+    map.on('moveend', () => {
+      if (!lastFix) renderPlaces();
+      updateScanMapAreaButtonState();
+    });
 
     map.on('click', ev => {
       if (pickingCustomEndOnMap) {
@@ -3865,7 +3964,7 @@ export function mountWalk(root, routes, config, actions = {}) {
         userExplicitlyPickedOrigin = true;
         const customOrigin = {
           id: 'custom-map',
-          label: `Vybraný bod na mapě [${ev.latlng.lat.toFixed(4)}, ${ev.latlng.lng.toFixed(4)}]`,
+          label: `Bod v mapě [${ev.latlng.lat.toFixed(3)}, ${ev.latlng.lng.toFixed(3)}]`,
           lat: ev.latlng.lat,
           lng: ev.latlng.lng,
           custom: true,
@@ -3878,9 +3977,10 @@ export function mountWalk(root, routes, config, actions = {}) {
           plannedRoute.origin = customOrigin;
           wizardScenario = 'from-home';
           renderTripWizardUi();
-          refreshAutoPlaces();
+          refreshWeatherStrip(customOrigin);
           applyPhase1QuickSelection(true);
-          recalculateRemainingRoute('Startovní bod nastaven kliknutím do mapy a trasa přepočítána.');
+          refreshAutoPlaces(customOrigin, { autoPlan: true, forceRefresh: true });
+          status('📍 Start nastaven v mapě — načítám zajímavá místa v okolí a stavím trasu…');
         }
         playTick(stateObj.soundEnabled);
       }
@@ -4449,25 +4549,202 @@ export function mountWalk(root, routes, config, actions = {}) {
   });
 
   let autoPlacesQueued = false;
-  async function refreshAutoPlaces() {
-    if (autoPlacesLoading) { autoPlacesQueued = true; return; }
-    autoPlacesLoading = true;
-    const originPos = plannedRoute.origin || lastFix || { lat: 49.6014, lng: 13.8644 };
+  let queuedAutoPlacesTarget = null;
+  let queuedAutoPlacesOpts = {};
+
+  function getVisibleMapSearchRadiusM(centerPos) {
+    if (!map) return 6000;
     try {
-      const autoPlaces = await loadAutoPlacesForArea(originPos, routes, config, aborter.signal);
+      const bounds = map.getBounds();
+      const ne = bounds?.getNorthEast?.();
+      if (ne && centerPos) {
+        const dist = haversineMeters(centerPos, { lat: ne.lat, lng: ne.lng });
+        if (Number.isFinite(dist) && dist > 1000) {
+          return Math.max(4500, Math.min(12000, Math.round(dist * 0.9)));
+        }
+      }
+    } catch {}
+    return 6000;
+  }
+
+  function updateScanMapAreaButtonState() {
+    const scanBtn = $('btn-scan-map-area');
+    if (!scanBtn || !map) return;
+    const c = map.getCenter();
+    const curOrigin = getRouteOriginPoint();
+    const distFromOriginM = curOrigin ? (haversineMeters(curOrigin, { lat: c.lat, lng: c.lng }) ?? 0) : 0;
+    const pannedAway = distFromOriginM > 450;
+    scanBtn.classList.toggle('is-panned-away', pannedAway);
+    if (active || demo) {
+      scanBtn.hidden = !pannedAway;
+      scanBtn.textContent = '✨ Načíst zajímavá místa v této části mapy';
+    } else {
+      scanBtn.hidden = false;
+      scanBtn.textContent = pannedAway
+        ? '✨ Načíst zajímavá místa v této oblasti mapy a navrhnout trasu'
+        : '✨ Načíst další zajímavá místa z mapy v okolí';
+    }
+  }
+
+  let autoPlacesReqId = 0;
+
+  async function refreshAutoPlaces(targetPos = null, opts = {}) {
+    if (autoPlacesLoading && !opts.autoPlan && !opts.forceRefresh) {
+      return;
+    }
+    const myReqId = ++autoPlacesReqId;
+    autoPlacesLoading = true;
+    const originPos = targetPos || plannedRoute.origin || lastFix || { lat: 49.6014, lng: 13.8644 };
+    const radiusM = opts.radiusM || getVisibleMapSearchRadiusM(originPos);
+    const scanBtn = $('btn-scan-map-area');
+    const p1ScanBtn = $('btn-p1-scan-map');
+    if (scanBtn) scanBtn.classList.add('is-loading');
+    if (p1ScanBtn) p1ScanBtn.classList.add('is-loading');
+
+    try {
+      const autoPlaces = await loadAutoPlacesForArea(
+        originPos,
+        routes,
+        config,
+        aborter.signal,
+        fetch,
+        { radiusM, forceRefresh: Boolean(opts.forceRefresh) }
+      );
       if (!disposed && Array.isArray(autoPlaces) && autoPlaces.length > 0) {
-        nearby = autoPlaces;
+        const mergedById = new Map();
+        for (const p of autoPlaces) {
+          if (p && p.id) mergedById.set(p.id, p);
+        }
+        for (const p of nearby) {
+          if (p && p.id && !mergedById.has(p.id)) mergedById.set(p.id, p);
+        }
+        nearby = [...mergedById.values()].slice(0, 260);
         renderPlaces();
-        renderQuestHud(lastFix || plannedRoute.origin);
+        if (myReqId === autoPlacesReqId && opts.autoPlan && !active && !demo) {
+          applyPhase1QuickSelection(Boolean(opts.silent));
+          status(`✨ V oblasti „${plannedRoute.origin?.label || 'mapa'}“ nalezeno ${autoPlaces.length} zajímavých míst — trasa byla navržena!`);
+        } else if (myReqId === autoPlacesReqId) {
+          renderQuestHud(lastFix || plannedRoute.origin);
+        }
+      } else if (!disposed && myReqId === autoPlacesReqId && opts.autoPlan && !active && !demo) {
+        applyPhase1QuickSelection(Boolean(opts.silent));
       }
     } catch {}
     finally {
-      autoPlacesLoading = false;
-      if (autoPlacesQueued && !disposed) { autoPlacesQueued = false; refreshAutoPlaces(); }
+      if (myReqId === autoPlacesReqId) {
+        autoPlacesLoading = false;
+        if (scanBtn) scanBtn.classList.remove('is-loading');
+        if (p1ScanBtn) p1ScanBtn.classList.remove('is-loading');
+        updateScanMapAreaButtonState();
+      }
     }
   }
   refreshAutoPlaces();
   refreshWeatherStrip();
+
+  async function scanCurrentMapViewAndPlan() {
+    if (!map) return;
+    const c = map.getCenter();
+    const mapCenterPt = { lat: Number(c.lat.toFixed(5)), lng: Number(c.lng.toFixed(5)) };
+
+    // Pokud je blízko některého pojmenovaného presetu nebo místa v katalogu, převezmeme jeho pěkný název
+    let areaLabel = `Oblast v mapě [${mapCenterPt.lat.toFixed(3)}, ${mapCenterPt.lng.toFixed(3)}]`;
+    let areaId = 'map-view-origin';
+    for (const preset of CZECH_PLACE_PRESETS) {
+      if ((haversineMeters(mapCenterPt, preset) ?? Infinity) < 1800) {
+        areaLabel = preset.label.split('(')[0].trim();
+        areaId = preset.id;
+        break;
+      }
+    }
+    if (areaId === 'map-view-origin') {
+      const closestKnown = getAllAvailablePlaces()
+        .map(p => ({ p, d: haversineMeters(mapCenterPt, p) ?? Infinity }))
+        .sort((a, b) => a.d - b.d)[0];
+      if (closestKnown && closestKnown.d < 1600) {
+        areaLabel = `Okolí: ${closestKnown.p.title}`;
+      }
+    }
+
+    if (!active && !demo) {
+      pickingStartOnMap = false;
+      pickingCustomEndOnMap = false;
+      userExplicitlyPickedOrigin = true;
+      plannedRoute.origin = {
+        id: areaId,
+        label: areaLabel,
+        lat: mapCenterPt.lat,
+        lng: mapCenterPt.lng,
+        custom: true,
+      };
+      status(`🔍 Hledám zajímavá místa v této části mapy (${areaLabel}) a sestavuji trasu…`);
+      playTick(stateObj.soundEnabled);
+      refreshWeatherStrip(mapCenterPt);
+      await refreshAutoPlaces(mapCenterPt, { autoPlan: true, forceRefresh: true });
+    } else {
+      status(`🔍 Načítám zajímavá místa v zobrazené části mapy…`);
+      playTick(stateObj.soundEnabled);
+      await refreshAutoPlaces(mapCenterPt, { autoPlan: false, forceRefresh: true });
+    }
+  }
+
+  async function searchCzechPlaceAndPlan(rawQuery) {
+    const query = String(rawQuery || '').trim();
+    if (!query) {
+      status('Zadej název města nebo místa v ČR (např. Příbram, Brdy, Karlštejn, Tábor)…');
+      return;
+    }
+    const qNorm = query.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+    // 1. Zkontrolujeme nejdříve rychlé presety a vestavěný katalog (okamžitá odezva 0 ms)
+    const matchedPreset = CZECH_PLACE_PRESETS.find(p =>
+      p.label.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').includes(qNorm) ||
+      p.id.toLowerCase().includes(qNorm)
+    );
+    if (matchedPreset) {
+      userExplicitlyPickedOrigin = true;
+      plannedRoute.origin = { id: matchedPreset.id, label: matchedPreset.label, lat: matchedPreset.lat, lng: matchedPreset.lng };
+      if (map) {
+        follow = false;
+        updateFollowUi();
+        map.setView([matchedPreset.lat, matchedPreset.lng], 13);
+      }
+      refreshWeatherStrip(matchedPreset);
+      applyPhase1QuickSelection(true);
+      await refreshAutoPlaces(matchedPreset, { autoPlan: true, forceRefresh: true });
+      playStampChord(stateObj.soundEnabled);
+      return;
+    }
+
+    status(`🔍 Hledám „${query}“ na mapě ČR…`);
+    const results = await searchPlaceNominatim(query, aborter.signal);
+    if (Array.isArray(results) && results.length > 0) {
+      const best = results[0];
+      const targetOrigin = {
+        id: best.id || `cz-${Date.now()}`,
+        label: best.shortLabel || best.label || query,
+        lat: best.lat,
+        lng: best.lng,
+        custom: true,
+      };
+      userExplicitlyPickedOrigin = true;
+      plannedRoute.origin = targetOrigin;
+      if (map) {
+        follow = false;
+        updateFollowUi();
+        map.setView([targetOrigin.lat, targetOrigin.lng], 13);
+      }
+      refreshWeatherStrip(targetOrigin);
+      await refreshAutoPlaces(targetOrigin, { autoPlan: true, forceRefresh: true });
+      playStampChord(stateObj.soundEnabled);
+    } else {
+      status(`Místo „${query}“ se nepodařilo najít. Zkus jiný název obce nebo posuň mapu ručně.`);
+    }
+  }
+
+  $('btn-scan-map-area')?.addEventListener('click', () => {
+    scanCurrentMapViewAndPlan();
+  });
 
   // Bod 27: Uspořádat zastávky podle skutečné pěší vzdálenosti (zachová již navštívené zastávky a počítá od současné polohy při chůzi)
   $('btn-optimize-route')?.addEventListener('click', () => {
@@ -4569,7 +4846,9 @@ export function mountWalk(root, routes, config, actions = {}) {
     wizardDistanceMode = String(phase1DurationKm);
 
     const originPt = getRouteOriginPoint();
-    const allPlaces = getAllAvailablePlaces();
+    const rawAllPlaces = getAllAvailablePlaces();
+    const localPlaces = rawAllPlaces.filter(p => (haversineMeters(originPt, p) ?? Infinity) <= 15000);
+    const allPlaces = localPlaces.length > 0 ? localPlaces : rawAllPlaces;
     let pool = allPlaces.filter(p => {
       if (phase1Theme === 'all') return true;
       if (phase1Theme === 'castles') return p.category === 'castles' || p.kind === 'culture' || p.kind === 'heritage' || p.kind === 'castle';
@@ -4608,6 +4887,23 @@ export function mountWalk(root, routes, config, actions = {}) {
         plannedRoute.routeType = 'loop';
         plannedRoute.selectedPlaceIds = trip.selectedPlaceIds;
       }
+
+      // Uložíme dynamicky načtené body (OSM / Wikipedia) do embeddedStops, aby trasa kdekoliv v ČR zůstala trvale uložená
+      const catalogueIds = new Set(catalogue.map(c => c.id));
+      const existingEmbedded = (plannedRoute.embeddedStops || []).filter(s => s && s.id === 'custom-end-stop');
+      const dynamicSelected = plannedRoute.selectedPlaceIds
+        .filter(id => !catalogueIds.has(id) && id !== 'custom-end-stop')
+        .map(id => allPlaces.find(p => p.id === id))
+        .filter(Boolean)
+        .map(p => ({
+          id: p.id,
+          title: p.title,
+          lat: p.lat,
+          lng: p.lng,
+          kind: p.kind || 'nature',
+          category: p.category || 'nature',
+        }));
+      plannedRoute.embeddedStops = [...existingEmbedded, ...dynamicSelected];
     }
 
     lastRoutedGeometry = null;
@@ -4673,7 +4969,8 @@ export function mountWalk(root, routes, config, actions = {}) {
         plannedRoute.origin = { ...START_PRESETS[0] };
         if (map) map.setView([START_PRESETS[0].lat, START_PRESETS[0].lng], 13);
       }
-      applyPhase1QuickSelection();
+      applyPhase1QuickSelection(true);
+      refreshAutoPlaces(plannedRoute.origin, { autoPlan: true });
       playTick(stateObj.soundEnabled);
       return;
     }
@@ -4691,12 +4988,23 @@ export function mountWalk(root, routes, config, actions = {}) {
           updateFollowUi();
           map.setView([preset.lat, preset.lng], 13);
         }
-        refreshAutoPlaces();
         refreshWeatherStrip(preset);
-        applyPhase1QuickSelection();
+        applyPhase1QuickSelection(true);
+        refreshAutoPlaces(preset, { autoPlan: true, forceRefresh: true });
         status(`📍 Start výpravy nastaven na: ${preset.label}.`);
         playTick(stateObj.soundEnabled);
       }
+      return;
+    }
+
+    if (ev.target.closest('#btn-p1-scan-map')) {
+      scanCurrentMapViewAndPlan();
+      return;
+    }
+
+    if (ev.target.closest('#btn-p1-search-place')) {
+      const inp = $('p1-place-search-input');
+      searchCzechPlaceAndPlan(inp?.value || '');
       return;
     }
 
@@ -4706,6 +5014,13 @@ export function mountWalk(root, routes, config, actions = {}) {
       renderPhase1AndPhase4Ui(lastFix || telemetry.lastKnownPosition);
       status('🗺️ Klikni kamkoliv do mapy pro nastavení nového startu výpravy…');
       playTick(stateObj.soundEnabled);
+    }
+  });
+
+  $('p1-place-search-input')?.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') {
+      ev.preventDefault();
+      searchCzechPlaceAndPlan(ev.currentTarget.value);
     }
   });
 

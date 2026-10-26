@@ -59,6 +59,12 @@ import {
   GpsSimulator,
 } from './gps-simulator.js';
 import { routes as PILOT_ROUTES } from './data.js';
+import { classifyCzechPlaceTitle, loadAutoPlacesForArea } from './auto-places.js';
+import {
+  isCommerciallyUsableLicense,
+  getFallbackBitmapUrl,
+  resolveVerifiedPlacePhoto,
+} from './poi-photos.js';
 import {
   parseOsmcSymbol,
   renderOsmcBadgeSvg,
@@ -685,6 +691,150 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
     assert.equal(updatedStops.length, 4);
     assert.ok(updatedStops.some((s: any) => s.id === 'mid-south'));
   });
+
+  it('v1.2: Dynamické načítání zajímavých míst kdekoliv v ČR (Příbram, Brdy, Wikipedia GeoSearch + OSM)', async () => {
+    // 1. Klasifikace českých názvů míst z Wikipedie
+    assert.equal(classifyCzechPlaceTitle('Zámek Dobříš').category, 'castles');
+    assert.equal(classifyCzechPlaceTitle('Rozhledna Třemšná (Orlov)').category, 'views');
+    assert.equal(classifyCzechPlaceTitle('Pilská nádrž').category, 'water');
+    assert.equal(classifyCzechPlaceTitle('Přírodní rezervace Kuchyňka').category, 'nature');
+
+    // 2. Načtení míst a návrh trasy v Příbrami (bez síťového požadavku + s mockovanou Wikipedií)
+    const pribramOrigin = { id: 'pribram', label: 'Příbram', title: 'Příbram', lat: 49.6889, lng: 14.0092 };
+    const mockFetch = async (url: string) => {
+      if (String(url).includes('wikipedia.org')) {
+        return {
+          ok: true,
+          json: async () => ({
+            query: {
+              geosearch: [
+                { pageid: 101, title: 'Svatá Hora', lat: 49.6848, lon: 14.0176 },
+                { pageid: 102, title: 'Rozhledna Orlov', lat: 49.6968, lon: 13.9632 },
+              ],
+            },
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({ elements: [] }) };
+    };
+
+    const places = await loadAutoPlacesForArea(
+      pribramOrigin,
+      PILOT_ROUTES as any,
+      {},
+      null,
+      mockFetch as any,
+      null,
+      { radiusM: 7500, forceRefresh: true }
+    );
+    assert.ok(places.length >= 6, `V okolí Příbrami musí být nalezeno alespoň 6 míst, nalezeno: ${places.length}`);
+    assert.ok(places.some((p: any) => /Svatá Hora/i.test(p.title)));
+
+    // 3. Automatické sestavení okruhu v Příbrami
+    const trip = autoSuggestTrip({
+      origin: pribramOrigin,
+      targetKm: 6,
+      companionMode: 'solo',
+      terrainDifficulty: 'medium',
+      availablePlaces: places as any,
+      discoveries: [],
+    });
+    assert.equal(trip.found, true, 'Plánovač musí v Příbrami úspěšně sestavit okružní trasu');
+    assert.ok(trip.selectedPlaceIds.length >= 2);
+  });
+
+  it('v1.3: Ověřené komerčně použitelné fotky z Wikimedia Commons (CC0 / PD / CC BY / CC BY-SA) s fallbackem na bitmap ilustraci', async () => {
+    // 1. Ověření licencí pro komerční použití
+    assert.equal(isCommerciallyUsableLicense('CC0', 'Creative Commons Zero'), true);
+    assert.equal(isCommerciallyUsableLicense('Public domain', 'Public domain'), true);
+    assert.equal(isCommerciallyUsableLicense('CC BY 4.0', 'Creative Commons Attribution 4.0'), true);
+    assert.equal(isCommerciallyUsableLicense('CC BY-SA 3.0', 'Creative Commons Attribution-Share Alike 3.0'), true);
+
+    // 2. Zamítnutí nekomerčních (NC), NoDerivs (ND) a neověřených licencí
+    assert.equal(isCommerciallyUsableLicense('CC BY-NC 4.0', 'Non-Commercial'), false);
+    assert.equal(isCommerciallyUsableLicense('CC BY-NC-SA 3.0', ''), false);
+    assert.equal(isCommerciallyUsableLicense('CC BY-ND 4.0', ''), false);
+    assert.equal(isCommerciallyUsableLicense('Fair use', ''), false);
+    assert.equal(isCommerciallyUsableLicense('', ''), false);
+
+    // 3. Fallback bitmap ilustrace podle druhu místa
+    assert.equal(getFallbackBitmapUrl({ kind: 'culture' }), './assets/castle.svg');
+    assert.equal(getFallbackBitmapUrl({ kind: 'water' }), './assets/lake.svg');
+    assert.equal(getFallbackBitmapUrl({ kind: 'view' }), './assets/forest.svg');
+
+    // 4. Rozpoznání ověřené fotky vs. zamítnutí nekomerční fotky s návratem k bitmapě
+    const mockFetchCommercial = async () => ({
+      ok: true,
+      json: async () => ({
+        query: {
+          pages: {
+            '1': {
+              imageinfo: [
+                {
+                  thumburl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/a/a1/Svata_Hora.jpg/560px-Svata_Hora.jpg',
+                  url: 'https://upload.wikimedia.org/wikipedia/commons/a/a1/Svata_Hora.jpg',
+                  extmetadata: {
+                    LicenseShortName: { value: 'CC BY-SA 4.0' },
+                    UsageTerms: { value: 'Creative Commons Attribution-Share Alike 4.0' },
+                    Artist: { value: 'Jan Novák' },
+                  },
+                },
+              ],
+            },
+          },
+        },
+      }),
+    });
+
+    const verifiedRes = await resolveVerifiedPlacePhoto(
+      {
+        id: 'test-verified-svata-hora',
+        title: 'Svatá Hora',
+        kind: 'culture',
+        wikiPageImage: 'Svata_Hora.jpg',
+      },
+      { fetchImpl: mockFetchCommercial as any, storage: null }
+    );
+    assert.equal(verifiedRes.hasVerifiedPhoto, true);
+    assert.match(String(verifiedRes.photoUrl), /Svata_Hora\.jpg/);
+    assert.equal(verifiedRes.license, 'CC BY-SA 4.0');
+
+    const mockFetchNonCommercial = async () => ({
+      ok: true,
+      json: async () => ({
+        query: {
+          pages: {
+            '2': {
+              imageinfo: [
+                {
+                  thumburl: 'https://upload.wikimedia.org/restricted.jpg',
+                  extmetadata: {
+                    LicenseShortName: { value: 'CC BY-NC 4.0' },
+                    UsageTerms: { value: 'Non-Commercial' },
+                  },
+                },
+              ],
+            },
+          },
+        },
+      }),
+    });
+
+    const fallbackRes = await resolveVerifiedPlacePhoto(
+      {
+        id: 'test-nc-castle',
+        title: 'Hrad s NC fotkou',
+        kind: 'culture',
+        wikiPageImage: 'Restricted.jpg',
+      },
+      { fetchImpl: mockFetchNonCommercial as any, storage: null }
+    );
+    assert.equal(fallbackRes.hasVerifiedPhoto, false, 'Nekomerční fotka musí být zamítnuta');
+    assert.equal(fallbackRes.photoUrl, null);
+    assert.equal(fallbackRes.fallbackUrl, './assets/castle.svg');
+  });
 });
+
+
 
 

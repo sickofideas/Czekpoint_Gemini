@@ -99,11 +99,12 @@ export const TERRAIN_DIFFICULTIES = Object.freeze([
 
 export const CZECH_PLACE_PRESETS = Object.freeze([
   { id: 'namesti', label: 'Rožmitál pod Třemšínem (Náměstí)', lat: 49.6033, lng: 13.8633 },
-  { id: 'stary-rozmital', label: 'Starý Rožmitál (Alej Johanky)', lat: 49.6082, lng: 13.8507 },
-  { id: 'nadrazi', label: 'Nádraží Rožmitál pod Třemšínem', lat: 49.5968, lng: 13.8682 },
-  { id: 'tremsin-hut', label: 'Hutě pod Třemšínem (Brdy)', lat: 49.5698, lng: 13.8022 },
-  { id: 'pribram', label: 'Příbram (Svatá Hora / náměstí)', lat: 49.6889, lng: 14.0092 },
+  { id: 'pribram', label: 'Příbram (Svatá Hora / město)', lat: 49.6889, lng: 14.0092 },
+  { id: 'padrt', label: 'Brdy – Padrťské rybníky', lat: 49.6512, lng: 13.7605 },
   { id: 'breznice', label: 'Březnice (zámek a park)', lat: 49.5576, lng: 13.9516 },
+  { id: 'stary-rozmital', label: 'Starý Rožmitál (Alej Johanky)', lat: 49.6082, lng: 13.8507 },
+  { id: 'tremsin-hut', label: 'Hutě pod Třemšínem (Brdy)', lat: 49.5698, lng: 13.8022 },
+  { id: 'nadrazi', label: 'Nádraží Rožmitál pod Třemšínem', lat: 49.5968, lng: 13.8682 },
   { id: 'pisek', label: 'Písek (Kamenný most)', lat: 49.3088, lng: 14.1475 },
   { id: 'beroun', label: 'Beroun (Husovo náměstí)', lat: 49.9638, lng: 14.0720 },
   { id: 'kasperske-hory', label: 'Kašperské Hory (Šumava)', lat: 49.1440, lng: 13.5565 },
