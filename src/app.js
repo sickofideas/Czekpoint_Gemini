@@ -697,6 +697,19 @@ function renderSettingsPage() {
         </div>
       </section>
 
+      <!-- Testovací GPS simulátor chůze (mimo mapu) -->
+      <section class="settings-card">
+        <div class="settings-card-head">
+          <span class="settings-card-badge">Vývoj a testování</span>
+          <h2>🧪 Testovací simulátor GPS chůze</h2>
+          <p class="small-note">Simulátor je vyhrazen pro testování, funguje zcela odděleně od mapy a nezkresluje tvůj skutečný profil ani postup v terénu.</p>
+        </div>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;padding:12px 0">
+          <a href="#/?sim=1" class="button lime">🧪 Otevřít testovací simulátor na mapě</a>
+          <span class="small-note">Zobrazí testovací panel pod mapou bez překrývání herní plochy.</span>
+        </div>
+      </section>
+
       <div class="about-foot" style="margin-top:20px">
         <div class="data-actions">
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">

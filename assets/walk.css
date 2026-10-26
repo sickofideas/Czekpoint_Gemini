@@ -1006,6 +1006,35 @@
   align-items: center;
   gap: 8px;
 }
+.zen-follow-fab {
+  position: absolute;
+  bottom: 24px;
+  right: 18px;
+  z-index: 1005;
+  min-height: 44px;
+  background: #ffffff;
+  color: #142f26;
+  border: 2px solid #3c6e47;
+  border-radius: 28px;
+  padding: 8px 16px;
+  font-weight: 700;
+  font-size: 13.5px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.2s ease;
+}
+.zen-follow-fab.is-following {
+  background: #255c3a;
+  color: #ffffff;
+  border-color: #79a868;
+}
+.zen-follow-fab:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+}
 
 /* Můj pas — Turistická hůl, avataři, pohlednice a trofeje */
 .trophy-grid {

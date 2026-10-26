@@ -604,6 +604,40 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
     assert.equal(liveTrip.origin?.lat, liveGps.lat);
     assert.equal(liveTrip.origin?.lng, liveGps.lng);
   });
+
+  it('v1.0 (Seběhnutí z trasy a prioritní pěší routing): Při seběhnutí z trasy (>45 m) navigace NIKDY nevrací hráče na náměstí, ale vede přímo k dalšímu cíli', () => {
+    const origin = { id: 'namesti', title: 'Náměstí', lat: 49.6014, lng: 13.8644 };
+    const stop1 = { id: 'stop-1', title: 'Podbrdské muzeum', lat: 49.5993, lng: 13.8626 };
+    const stop2 = { id: 'stop-2', title: 'Alej Johanky', lat: 49.5991, lng: 13.8518 };
+
+    const sharedRoute = buildLocalRoutedGeometry([origin, stop1, stop2]);
+
+    // Hráč seběhl 80 m bokem do parku (mimo lomenou čáru trasy) na cestě k stop-1
+    const offRoutePos = { lat: 49.6005, lng: 13.8610 };
+    const instrOffRoute = computeActiveTurnInstruction(
+      sharedRoute as any,
+      offRoutePos as any,
+      [stop1, stop2] as any,
+      new Set() as any
+    );
+
+    assert.equal(instrOffRoute.isOffRoute, true);
+    assert.match(instrOffRoute.text, /K dalšímu cíli: Podbrdské muzeum/);
+    assert.ok(instrOffRoute.distanceToTurnM! > 0);
+    // Ujistíme se, že instrukce neobsahuje náměstí
+    assert.equal(/náměstí/i.test(instrOffRoute.text), false, 'Při seběhnutí z trasy se nesmí vracet na náměstí');
+
+    // Když je stop-1 potvrzený (navštívený) a hráč běží dál k stop-2
+    const confirmedStops = new Set(['stop-1']);
+    const instrNext = computeActiveTurnInstruction(
+      sharedRoute as any,
+      offRoutePos as any,
+      [stop1, stop2] as any,
+      confirmedStops as any
+    );
+    assert.match(instrNext.text, /Alej Johanky/);
+    assert.equal(/Podbrdské muzeum/i.test(instrNext.text), false, 'Už navštívený cíl se nesmí opakovat');
+  });
 });
 
 

@@ -7,6 +7,7 @@ import {
   nearestPointOnPolygonBoundary,
   normalizeVertex,
 } from './natural-features.js';
+import { PILOT_HIKING_TRAILS } from './hiking-trails.js';
 
 export const START_PRESETS = Object.freeze([
   { id: 'namesti', label: 'Náměstí Rožmitál', lat: 49.6033, lng: 13.8633 },
@@ -337,6 +338,54 @@ export function computeLocalWalkingLeg(fromPoint, toPoint, options = {}) {
     }
     nextWaypoints.push(waypoints[waypoints.length - 1]);
     waypoints = nextWaypoints;
+  }
+
+  // 2.5. Priorita turistických stezek a pěšin (KČT / naučné stezky) před silnicemi
+  const trails = options.trails || PILOT_HIKING_TRAILS;
+  if (Array.isArray(trails) && trails.length > 0) {
+    const trailAligned = [];
+    for (let i = 0; i < waypoints.length - 1; i++) {
+      const a = waypoints[i];
+      const b = waypoints[i + 1];
+      trailAligned.push(a);
+      const directDist = haversineMeters(a, b) ?? 0;
+      if (directDist >= 120) {
+        for (const trail of trails) {
+          if (!Array.isArray(trail.coordinates) || trail.coordinates.length < 3) continue;
+          let idxA = -1, minDA = Infinity;
+          let idxB = -1, minDB = Infinity;
+          for (let t = 0; t < trail.coordinates.length; t++) {
+            const pt = { lat: trail.coordinates[t][0], lng: trail.coordinates[t][1] };
+            const dA = haversineMeters(a, pt) ?? Infinity;
+            const dB = haversineMeters(b, pt) ?? Infinity;
+            if (dA < minDA) { minDA = dA; idxA = t; }
+            if (dB < minDB) { minDB = dB; idxB = t; }
+          }
+          if (minDA <= 280 && minDB <= 280 && idxA !== -1 && idxB !== -1 && Math.abs(idxA - idxB) >= 1) {
+            const step = idxA < idxB ? 1 : -1;
+            const intermediate = [];
+            for (let k = idxA; k !== idxB + step; k += step) {
+              const tc = trail.coordinates[k];
+              if (tc) intermediate.push({ lat: tc[0], lng: tc[1], isTrail: true });
+            }
+            let trailDist = (haversineMeters(a, intermediate[0]) ?? 0) + (haversineMeters(intermediate[intermediate.length - 1], b) ?? 0);
+            for (let m = 0; m < intermediate.length - 1; m++) {
+              trailDist += haversineMeters(intermediate[m], intermediate[m + 1]) ?? 0;
+            }
+            if (trailDist <= directDist * 1.55) {
+              for (const ip of intermediate) {
+                if ((haversineMeters(a, ip) ?? 0) > 18 && (haversineMeters(b, ip) ?? 0) > 18) {
+                  trailAligned.push(ip);
+                }
+              }
+              break;
+            }
+          }
+        }
+      }
+    }
+    trailAligned.push(waypoints[waypoints.length - 1]);
+    waypoints = trailAligned;
   }
 
   // 3. Spočítáme celkovou pěší vzdálenost a souřadnice
@@ -1059,15 +1108,34 @@ export function computeActiveTurnInstruction(arg1, arg2, arg3 = null, arg4 = nul
     : buildTurnStepsFromCoordinates(coords, sharedRoute.stopTargets || []);
 
   let playerCoordIdx = 0;
+  let minDistanceToRouteM = Infinity;
   if (currentPos && Number.isFinite(currentPos.lat) && Number.isFinite(currentPos.lng)) {
-    let minD = Infinity;
     for (let i = 0; i < coords.length; i++) {
       const d = haversineMeters(currentPos, { lat: coords[i][0], lng: coords[i][1] }) ?? Infinity;
-      if (d < minD) {
-        minD = d;
+      if (d < minDistanceToRouteM) {
+        minDistanceToRouteM = d;
         playerCoordIdx = i;
       }
     }
+  }
+
+  // Pokud hráč seběhl z naplánované trasy (> 45 m), NIKDY ho nevracíme na start (náměstí),
+  // ale nasměrujeme ho přímo k dalšímu nadcházejícímu cíli v pořadí!
+  if (minDistanceToRouteM > 45 && nextStop && currentPos && Number.isFinite(currentPos.lat)) {
+    const distDirectM = Math.max(5, Math.round(haversineMeters(currentPos, nextStop) ?? 0));
+    const speech = distDirectM <= 30
+      ? `Jste u cíle ${nextStop.title}. Získáváte razítko.`
+      : `Pokračujte k dalšímu cíli ${nextStop.title}, ${distDirectM} metrů.`;
+    return {
+      icon: distDirectM <= 30 ? '🏁' : '↗',
+      text: distDirectM <= 30 ? `🏁 Jsi u cíle: ${nextStop.title}` : `↗ K dalšímu cíli: ${nextStop.title} (${distDirectM} m)`,
+      speechText: speech,
+      voiceText: speech,
+      distanceToTurnM: distDirectM,
+      isNearTurn: distDirectM <= 40,
+      isOffRoute: true,
+      stepKey: `off_route_${nextStop.id}_${distDirectM}`,
+    };
   }
 
   // Najdeme nejbližší nadcházející manévr (odbočku nebo cíl) po playerCoordIdx
@@ -1360,22 +1428,41 @@ export async function fetchWalkingGeometry(waypoints, fetchImpl = typeof fetch !
 
   try {
     const coordsStr = accessibleWaypoints.map(p => `${Number(p.lng).toFixed(5)},${Number(p.lat).toFixed(5)}`).join(';');
-    const url = `https://router.project-osrm.org/route/v1/foot/${coordsStr}?overview=full&geometries=geojson&steps=true`;
+    // Priorita 1: OpenStreetMap Germany Foot & Hiking routing engine (pěší stezky, KČT trasy, nulová tolerance k dálnicím a silnicím bez chodníků)
+    // Priorita 2: OSRM Project Foot router jako záložní server
+    const primaryUrl = `https://routing.openstreetmap.de/routed-foot/route/v1/foot/${coordsStr}?overview=full&geometries=geojson&steps=true`;
+    const secondaryUrl = `https://router.project-osrm.org/route/v1/foot/${coordsStr}?overview=full&geometries=geojson&steps=true`;
 
-    let timeoutId;
-    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    const signal = controller ? controller.signal : undefined;
-    if (controller) {
-      timeoutId = setTimeout(() => controller.abort(), 4000);
+    let data = null;
+    let route = null;
+
+    for (const url of [primaryUrl, secondaryUrl]) {
+      let timeoutId;
+      const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      const signal = controller ? controller.signal : undefined;
+      if (controller) {
+        timeoutId = setTimeout(() => controller.abort(), 3500);
+      }
+      try {
+        const res = await fetchImpl(url, { signal });
+        if (res && res.ok) {
+          const json = await res.json();
+          if (json?.routes?.[0]?.geometry?.coordinates?.length >= 2) {
+            data = json;
+            route = json.routes[0];
+            break;
+          }
+        }
+      } catch {
+        // Try next router
+      } finally {
+        if (timeoutId) clearTimeout(timeoutId);
+      }
     }
 
-    try {
-      const res = await fetchImpl(url, { signal });
-      if (!res || !res.ok) {
-        return fallback();
-      }
-      const data = await res.json();
-      const route = data?.routes?.[0];
+    if (!route) {
+      return fallback();
+    }
       if (route?.geometry?.coordinates && Array.isArray(route.geometry.coordinates) && route.geometry.coordinates.length >= 2) {
         const rawCoords = route.geometry.coordinates.map(([lng, lat]) => [lat, lng]);
         // Ověříme, že vrácená trasa nevede přímou čarou přes rybník nebo řeku bez mostu;
@@ -1445,9 +1532,6 @@ export async function fetchWalkingGeometry(waypoints, fetchImpl = typeof fetch !
         }
         return result;
       }
-    } finally {
-      if (timeoutId) clearTimeout(timeoutId);
-    }
   } catch {
     // Return fallback on network error or timeout
   }

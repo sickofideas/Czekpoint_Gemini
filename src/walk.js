@@ -268,6 +268,7 @@ export function mountWalk(root, routes, config, actions = {}) {
   // Hlasová navigace v češtině (Web Speech API, ZADÁNÍ #08 Bod 5)
   let voiceNavEnabled = appSettings.voiceNav !== false;
   let lastSpokenNavStepKey = '';
+  let lastOffRouteRecalcAt = 0;
 
   // Herní režim: 'explorer' (Objevitel) | 'gamified' (Výprava s gamifikací, výchozí) | 'casual' (Pohodová procházka)
   let fogMode = appSettings.gameMode === 'explorer' ? 'full' : appSettings.gameMode === 'casual' ? 'none' : 'explore';
@@ -686,6 +687,10 @@ export function mountWalk(root, routes, config, actions = {}) {
       </div>
 
       <button type="button" id="zen-close-btn" class="zen-close-btn" hidden>✕ Zmenšit mapu</button>
+      <button type="button" id="zen-follow-btn" class="zen-follow-fab is-following" title="Vycentrovat a sledovat moji polohu na mapě">
+        <span class="zen-fab-icon">◎</span>
+        <span class="zen-fab-label" id="zen-follow-label">Sleduji polohu</span>
+      </button>
       <div class="walk-map-toolbar">
         <button type="button" class="button small map-tool-btn" id="walk-center" title="Vycentrovat na moji polohu (zachová zvolené přiblížení)">◎ Moje poloha</button>
         <button type="button" class="button small map-tool-btn" id="walk-fog-toggle" title="Přepnout zobrazení (Tajemný pergamen → Otevřená mapa → Plná mlha)">📜 Mapa objevování</button>
@@ -979,26 +984,95 @@ export function mountWalk(root, routes, config, actions = {}) {
     return overlap > 0 ? Math.min(mapRect.height * 0.5, overlap + 32) : Math.round(mapRect.height * 0.16);
   }
 
+  let userZoomLocked = false;
+  let lastUserZoomAt = 0;
+  let lastAutoZoomAt = 0;
+  let currentAdaptiveZoom = 16;
+
+  /**
+   * Zjistí, zda je v okolí hráče nějaký bod zájmu, trofej nebo cíl trasy.
+   * Pokud v okolí nic moc není (> 420 m prázdno), lehce mapu oddálí (~14,5–15),
+   * aby hráč viděl dál dopředu, že už tam někde něco je.
+   */
+  function getAdaptiveSurroundingsZoom(pos, currentZoom) {
+    const now = Date.now();
+    if (now - lastUserZoomAt < 15000) {
+      return currentZoom;
+    }
+    if (now - lastAutoZoomAt < 7000) {
+      return currentAdaptiveZoom;
+    }
+
+    const allPlaces = getAllAvailablePlaces();
+    const planned = getPlannedPlaces();
+    const nextUnvisited = planned.find(p => !confirmedStopIds.has(p.id));
+
+    let minDistM = Infinity;
+    if (nextUnvisited && Number.isFinite(nextUnvisited.lat) && Number.isFinite(nextUnvisited.lng)) {
+      minDistM = haversineMeters(pos, nextUnvisited) ?? Infinity;
+    }
+    for (const p of allPlaces) {
+      if (p && Number.isFinite(p.lat) && Number.isFinite(p.lng)) {
+        const d = haversineMeters(pos, p) ?? Infinity;
+        if (d < minDistM) minDistM = d;
+      }
+    }
+
+    let targetZoom = 16.5;
+    if (minDistM > 420) {
+      targetZoom = 14.5; // v okolí nic není -> lehce oddálit
+    } else if (minDistM > 220) {
+      targetZoom = 15.5; // střední vzdálenost
+    } else {
+      targetZoom = 16.5; // blízko u cíle / razítka
+    }
+
+    lastAutoZoomAt = now;
+    currentAdaptiveZoom = targetZoom;
+    return targetZoom;
+  }
+
   function centerMapOnPlayer(pos = lastFix || telemetry.lastKnownPosition, animate = false) {
     if (!map || !pos || !Number.isFinite(pos.lat) || !Number.isFinite(pos.lng)) return;
-    const size = map.getSize();
+    const mapEl = $('walk-map');
+    const width = zenMode ? window.innerWidth : (mapEl?.clientWidth || map.getSize().x || 390);
+    const height = zenMode ? window.innerHeight : (mapEl?.clientHeight || map.getSize().y || 600);
+    const bottomObsPx = zenMode ? 0 : getBottomSheetOverlapPx();
     const currentZoom = map.getZoom();
-    const bottomObsPx = getBottomSheetOverlapPx();
+
+    let targetZoom = currentZoom;
+    if (appSettings.autoZoomOutEmpty !== false && !userZoomLocked) {
+      targetZoom = getAdaptiveSurroundingsZoom(pos, currentZoom);
+    }
+
     const targetCenter = computeVisibleMapCenterForPlayer(
       pos,
-      { width: size.x || 390, height: size.y || 520 },
+      { width, height },
       bottomObsPx,
       0,
-      currentZoom
+      targetZoom
     );
-    map.setView([targetCenter.lat, targetCenter.lng], currentZoom, { animate });
+
+    if (Math.abs(targetZoom - currentZoom) >= 0.75) {
+      map.setView([targetCenter.lat, targetCenter.lng], targetZoom, { animate: true });
+    } else {
+      map.setView([targetCenter.lat, targetCenter.lng], currentZoom, { animate });
+    }
   }
 
   function updateFollowUi() {
     const returnBtn = $('btn-return-to-gps');
-    if (!returnBtn) return;
-    // Tlačítko „Zpět na mou polohu“ zobrazíme vždy, když uživatel ručně posunul mapu do režimu prohlížení
-    returnBtn.hidden = Boolean(follow);
+    if (returnBtn) {
+      returnBtn.hidden = Boolean(follow);
+    }
+    const zenBtn = $('zen-follow-btn');
+    const zenLabel = $('zen-follow-label');
+    if (zenBtn) {
+      zenBtn.classList.toggle('is-following', Boolean(follow));
+      if (zenLabel) {
+        zenLabel.textContent = follow ? 'Sleduji polohu' : '◎ Vycentrovat';
+      }
+    }
   }
 
   function enterSimulatorSandbox() {
@@ -1774,6 +1848,14 @@ export function mountWalk(root, routes, config, actions = {}) {
     iconEl.textContent = instr.icon || '↑';
     textEl.textContent = instr.text || 'Pokračuj po trase';
 
+    // Pokud hráč seběhl z trasy (např. běží jinudy do lesa), automaticky přepočítáme pěší trasu
+    // z jeho nového místa přímo k dalšímu nadcházejícímu cíli v pořadí (nikdy zpět na náměstí!)
+    if (instr.isOffRoute && (active || demo) && (Date.now() - lastOffRouteRecalcAt > 7000)) {
+      lastOffRouteRecalcAt = Date.now();
+      plannedRouteRenderKey = null;
+      renderPlannedRouteOnMap(true);
+    }
+
     if (voiceNavEnabled && (active || demo) && instr.voiceText && instr.distanceToTurnM != null && instr.distanceToTurnM <= 85) {
       speakCzechNav(instr.voiceText, instr.stepKey);
     }
@@ -2047,17 +2129,23 @@ export function mountWalk(root, routes, config, actions = {}) {
     const plannedPlaces = getPlannedPlaces();
     const currentOrigin = getRouteOriginPoint();
     const unvisitedPlaces = plannedPlaces.filter(p => !isStopVisited(p));
-    const routeStartPoint = lastFix && unvisitedPlaces.length < plannedPlaces.length
-      ? lastFix
-      : currentOrigin;
-
+    const isActivelyNavigating = Boolean((active || demo) && lastFix && Number.isFinite(lastFix.lat));
+    const forwardStartPoint = isActivelyNavigating ? lastFix : currentOrigin;
     const isLoop = plannedRoute.routeType === 'loop' && plannedPlaces.length >= 2;
-    const allWaypoints = isLoop
-      ? [currentOrigin, ...plannedPlaces, currentOrigin]
-      : [currentOrigin, ...plannedPlaces];
+
+    // Zásadní oprava: Pokud už hráč vyrazil do terénu, trasa vpřed vede z jeho aktuální polohy
+    // k dalším nenavštíveným zastávkám v pořadí. Aplikace se NIKDY nevrací na náměstí / start,
+    // pokud zbývají další cíle na trase.
+    const allWaypoints = isActivelyNavigating
+      ? (unvisitedPlaces.length > 0
+          ? [forwardStartPoint, ...unvisitedPlaces, ...(isLoop ? [currentOrigin] : [])]
+          : (isLoop ? [forwardStartPoint, currentOrigin] : [forwardStartPoint]))
+      : (isLoop ? [currentOrigin, ...plannedPlaces, currentOrigin] : [currentOrigin, ...plannedPlaces]);
+
     const geomKey = getRouteGeometryKey(allWaypoints);
     const visitedKey = plannedPlaces.map(p => (isStopVisited(p) ? '1' : '0')).join('');
-    const renderKey = `${geomKey}|r${plannedRoute.radiusKm || 10}|v${visitedKey}|n${plannedPlaces.length}|l${isLoop ? 1 : 0}`;
+    const navPosKey = isActivelyNavigating ? `${Number(forwardStartPoint.lat).toFixed(3)},${Number(forwardStartPoint.lng).toFixed(3)}` : 'init';
+    const renderKey = `${geomKey}|r${plannedRoute.radiusKm || 10}|v${visitedKey}|u${unvisitedPlaces.length}|p${navPosKey}|l${isLoop ? 1 : 0}`;
     if (!force && renderKey === plannedRouteRenderKey) return;
     plannedRouteRenderKey = renderKey;
     const token = ++plannedRouteRenderToken;
@@ -3984,6 +4072,19 @@ export function mountWalk(root, routes, config, actions = {}) {
     playTick(stateObj.soundEnabled);
   });
 
+  if (location.hash.includes('sim=1') || location.search.includes('sim=1')) {
+    setTimeout(() => {
+      if (!disposed && fakeGpsSim && !fakeGpsSim.isOpen) {
+        fakeGpsSim.open();
+        const zone = $('simulator-test-zone');
+        if (zone) {
+          zone.hidden = false;
+          zone.scrollIntoView({ behavior: 'smooth' });
+        }
+      }
+    }, 400);
+  }
+
   $('walk-start').addEventListener('click', start);
   $('walk-stop').addEventListener('click', () => pauseSession('Pozastaveno. Průzkum je uložený.'));
   $('walk-end').addEventListener('click', finishExpedition);
@@ -4022,15 +4123,44 @@ export function mountWalk(root, routes, config, actions = {}) {
     $('walk-zen-toggle').textContent = zenMode ? '⛶ Zmenšit mapu' : '⛶ Zvětšit mapu';
     $('map-command-bar').hidden = zenMode;
     $('walk-bottom-sheet').hidden = zenMode;
+    if (zenMode) {
+      follow = true;
+      userZoomLocked = false;
+    }
+    updateFollowUi();
     if (map) {
+      map.invalidateSize();
+      const pos = lastFix || telemetry.lastKnownPosition || getRouteOriginPoint();
+      if (pos) centerMapOnPlayer(pos, false);
       setTimeout(() => {
-        map.invalidateSize();
-        if (follow && (lastFix || telemetry.lastKnownPosition)) {
-          centerMapOnPlayer(lastFix || telemetry.lastKnownPosition, false);
+        if (!disposed && map) {
+          map.invalidateSize();
+          if (follow && (lastFix || telemetry.lastKnownPosition)) {
+            centerMapOnPlayer(lastFix || telemetry.lastKnownPosition, false);
+          }
         }
-      }, 200);
+      }, 60);
+      setTimeout(() => {
+        if (!disposed && map) {
+          map.invalidateSize();
+          if (follow && (lastFix || telemetry.lastKnownPosition)) {
+            centerMapOnPlayer(lastFix || telemetry.lastKnownPosition, false);
+          }
+        }
+      }, 240);
     }
   }
+
+  $('zen-follow-btn')?.addEventListener('click', () => {
+    follow = true;
+    userZoomLocked = false;
+    updateFollowUi();
+    const pos = lastFix || telemetry.lastKnownPosition || getRouteOriginPoint();
+    if (pos && map) {
+      centerMapOnPlayer(pos, true);
+    }
+    playTick(stateObj.soundEnabled);
+  });
 
   $('walk-zen-toggle').addEventListener('click', () => {
     zenMode = !zenMode;
