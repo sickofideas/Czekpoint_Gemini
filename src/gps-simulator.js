@@ -330,7 +330,7 @@ export function simulateWalkPlayback(waypointsOrRoute, speedKmH = 5, places = []
 export class GpsSimulator {
   constructor(options = {}) {
     this.map = options.map || null;
-    this.container = options.container || document.body;
+    this.container = options.container || (typeof document !== 'undefined' ? document.body : null);
     this.onFix = options.onFix || (() => {});
     this.onResetAnchor = options.onResetAnchor || (() => {});
     this.onStopRealGps = options.onStopRealGps || (() => {});
@@ -413,18 +413,63 @@ export class GpsSimulator {
     else this.open();
   }
 
+  triggerLoopTick(now = Date.now()) {
+    if (!this.isOpen) return;
+    if (this.lastWallTickMs && now - this.lastWallTickMs < 480) {
+      return;
+    }
+    const elapsedSec = this.lastWallTickMs
+      ? Math.min(20, Math.max(0.5, (now - this.lastWallTickMs) / 1000))
+      : 1;
+    this.lastWallTickMs = now;
+    this.tick(now, elapsedSec * 2);
+  }
+
   startLoop() {
     this.stopLoop();
+    this.lastWallTickMs = Date.now();
+    if (typeof Worker !== 'undefined' && typeof Blob !== 'undefined' && typeof URL !== 'undefined') {
+      try {
+        const workerCode = `
+          let t = null;
+          self.onmessage = function(e) {
+            if (e.data === 'start') {
+              if (t) clearInterval(t);
+              t = setInterval(function() { self.postMessage('tick'); }, 1000);
+            } else if (e.data === 'stop') {
+              if (t) clearInterval(t);
+              t = null;
+            }
+          };
+        `;
+        const blob = new Blob([workerCode], { type: 'application/javascript' });
+        this.bgWorker = new Worker(URL.createObjectURL(blob));
+        this.bgWorker.onmessage = () => {
+          this.triggerLoopTick(Date.now());
+        };
+        this.bgWorker.postMessage('start');
+      } catch {
+        this.bgWorker = null;
+      }
+    }
     this.timer = setInterval(() => {
-      this.tick(Date.now(), 2);
+      this.triggerLoopTick(Date.now());
     }, 1000);
   }
 
   stopLoop() {
+    if (this.bgWorker) {
+      try {
+        this.bgWorker.postMessage('stop');
+        this.bgWorker.terminate();
+      } catch {}
+      this.bgWorker = null;
+    }
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = null;
     }
+    this.lastWallTickMs = 0;
   }
 
   bindEvents() {

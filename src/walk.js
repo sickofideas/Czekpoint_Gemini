@@ -48,7 +48,7 @@ import {
 import { renderPostcard, generatePostcardBlob, generatePostcardDataUrl } from './postcard.js';
 import { renderPostcardSvgDataUrl } from './postcards.js';
 import { fetchNearby } from './nearby.js';
-import { loadAutoPlacesForArea } from './auto-places.js';
+import { loadAutoPlacesForArea, buildLocalFallbackPlaces } from './auto-places.js';
 import {
   getFallbackBitmapUrl,
   getCachedPlacePhoto,
@@ -72,6 +72,7 @@ import {
   createCompassStabilizer,
   interpolateBackgroundGap,
   triggerPocketProximityAlert,
+  playTurnAudioCue,
   createKeepAliveController,
 } from './keep-alive.js';
 import { haversineMeters } from './domain.js';
@@ -711,6 +712,8 @@ export function mountWalk(root, routes, config, actions = {}) {
 
       <!-- 2.2 Jediný nekolizní svislý sloupec ovládacích tlačítek u pravého okraje mapy (right: 12px; top: 74px) -->
       <div class="walk-map-toolbar map-right-toolbar" role="toolbar" aria-label="Ovládání mapy">
+        <button type="button" class="map-right-btn" id="walk-zoom-in" title="Přiblížit mapu (+)" aria-label="Přiblížit mapu">➕</button>
+        <button type="button" class="map-right-btn" id="walk-zoom-out" title="Oddálit mapu (−)" aria-label="Oddálit mapu">➖</button>
         <button type="button" class="map-right-btn" id="walk-center" title="Vycentrovat na mě">🎯</button>
         <button type="button" class="map-right-btn active" id="walk-fog-toggle" title="Přepnout pergamen / běžnou mapu">📜</button>
         <button type="button" class="map-right-btn" id="btn-download-offline-map" title="Stáhnout tuto oblast offline">📥</button>
@@ -997,6 +1000,10 @@ export function mountWalk(root, routes, config, actions = {}) {
     }
   };
   const placesLayer = L?.layerGroup();
+  const placeMarkersById = new Map();
+  const prefetchedPhotoPlaceIds = new Set();
+  const prefetchedVerifiedPlaceIds = new Set();
+  let lastTrailRenderKey = '';
   trailLayer = L?.layerGroup();
 
   function canPersistRealState(fix = null) {
@@ -1038,51 +1045,6 @@ export function mountWalk(root, routes, config, actions = {}) {
 
   let userZoomLocked = false;
   let lastUserZoomAt = 0;
-  let lastAutoZoomAt = 0;
-  let currentAdaptiveZoom = 16;
-
-  /**
-   * Zjistí, zda je v okolí hráče nějaký bod zájmu, trofej nebo cíl trasy.
-   * Pokud v okolí nic moc není (> 420 m prázdno), lehce mapu oddálí (~14,5–15),
-   * aby hráč viděl dál dopředu, že už tam někde něco je.
-   */
-  function getAdaptiveSurroundingsZoom(pos, currentZoom) {
-    const now = Date.now();
-    if (now - lastUserZoomAt < 15000) {
-      return currentZoom;
-    }
-    if (now - lastAutoZoomAt < 7000) {
-      return currentAdaptiveZoom;
-    }
-
-    const allPlaces = getAllAvailablePlaces();
-    const planned = getPlannedPlaces();
-    const nextUnvisited = planned.find(p => !confirmedStopIds.has(p.id));
-
-    let minDistM = Infinity;
-    if (nextUnvisited && Number.isFinite(nextUnvisited.lat) && Number.isFinite(nextUnvisited.lng)) {
-      minDistM = haversineMeters(pos, nextUnvisited) ?? Infinity;
-    }
-    for (const p of allPlaces) {
-      if (p && Number.isFinite(p.lat) && Number.isFinite(p.lng)) {
-        const d = haversineMeters(pos, p) ?? Infinity;
-        if (d < minDistM) minDistM = d;
-      }
-    }
-
-    let targetZoom = 16.5;
-    if (minDistM > 420) {
-      targetZoom = 14.5; // v okolí nic není -> lehce oddálit
-    } else if (minDistM > 220) {
-      targetZoom = 15.5; // střední vzdálenost
-    } else {
-      targetZoom = 16.5; // blízko u cíle / razítka
-    }
-
-    lastAutoZoomAt = now;
-    currentAdaptiveZoom = targetZoom;
-    return targetZoom;
-  }
 
   function centerMapOnPlayer(pos = lastFix || telemetry.lastKnownPosition, animate = false) {
     if (!map || !pos || !Number.isFinite(pos.lat) || !Number.isFinite(pos.lng)) return;
@@ -1090,26 +1052,17 @@ export function mountWalk(root, routes, config, actions = {}) {
     const width = zenMode ? window.innerWidth : (mapEl?.clientWidth || map.getSize().x || 390);
     const height = zenMode ? window.innerHeight : (mapEl?.clientHeight || map.getSize().y || 600);
     const bottomObsPx = zenMode ? 0 : getBottomSheetOverlapPx();
-    const currentZoom = map.getZoom();
-
-    let targetZoom = currentZoom;
-    if (appSettings.autoZoomOutEmpty !== false && !userZoomLocked) {
-      targetZoom = getAdaptiveSurroundingsZoom(pos, currentZoom);
-    }
+    const currentZoom = map.getZoom() || 16.5;
 
     const targetCenter = computeVisibleMapCenterForPlayer(
       pos,
       { width, height },
       bottomObsPx,
       0,
-      targetZoom
+      currentZoom
     );
 
-    if (Math.abs(targetZoom - currentZoom) >= 0.75) {
-      map.setView([targetCenter.lat, targetCenter.lng], targetZoom, { animate: true });
-    } else {
-      map.setView([targetCenter.lat, targetCenter.lng], currentZoom, { animate });
-    }
+    map.setView([targetCenter.lat, targetCenter.lng], currentZoom, { animate });
   }
 
   function updateFollowUi() {
@@ -1130,6 +1083,7 @@ export function mountWalk(root, routes, config, actions = {}) {
   function enterSimulatorSandbox() {
     if (simSandboxActive) return;
     simSandboxActive = true;
+    keepAliveCtrl.start('Czekpoint Simulátor aktivní');
     const banner = $('walk-sandbox-banner');
     if (banner) banner.hidden = false;
     status('🧪 Simulátor zapnut v izolovaném režimu — tvůj skutečný profil ani uložená území se nemění.');
@@ -1564,9 +1518,8 @@ export function mountWalk(root, routes, config, actions = {}) {
    * natočené ve směru chůze a postupně blednoucí podle stáří (opacity 0.85 -> 0.15).
    */
   function renderTrail() {
-    trailLayer?.clearLayers();
-    if (!map) return;
-    const zoom = map.getZoom() || 16;
+    if (!map || !trailLayer) return;
+    const zoom = Math.round((map.getZoom() || 16.5) * 2) / 2;
     const footprints = computeFootprintPlacements(progress.walkSegments, zoom);
     const totalCount = footprints.length;
 
@@ -1574,6 +1527,12 @@ export function mountWalk(root, routes, config, actions = {}) {
       $('trail-info').textContent = `Stopy pohorek na prošlé cestě: ${totalCount} kroků · Potvrzení zastávky: pod ${STOP_CONFIRM_RADIUS_M} m (opakované měření)`;
     }
 
+    const lastFp = totalCount > 0 ? footprints[totalCount - 1] : null;
+    const trailKey = `${zoom}|${totalCount}|${lastFp ? `${lastFp.lat.toFixed(5)},${lastFp.lng.toFixed(5)}` : '0'}`;
+    if (trailKey === lastTrailRenderKey) return;
+    lastTrailRenderKey = trailKey;
+
+    trailLayer.clearLayers();
     for (let i = 0; i < totalCount; i++) {
       const fp = footprints[i];
       const ageRatio = totalCount <= 1 ? 1 : i / (totalCount - 1);
@@ -1835,7 +1794,7 @@ export function mountWalk(root, routes, config, actions = {}) {
     const phase4Bar = $('phase4-finish-bar');
     if (!topBar || !topText) return;
 
-    const isWalking = Boolean(active || demo);
+    const isWalking = Boolean(active || demo || simSandboxActive);
     const plannedPlaces = getPlannedPlaces();
     const isPaused = Boolean(!isWalking && currentExpedition && currentExpedition.state === 'paused');
 
@@ -1846,7 +1805,7 @@ export function mountWalk(root, routes, config, actions = {}) {
     topBar.classList.toggle('is-walking', isWalking);
 
     if ($('turn-nav-pill')) {
-      $('turn-nav-pill').hidden = !shouldShowTopBar;
+      $('turn-nav-pill').hidden = !(shouldShowTopBar || Boolean(lastRoutedGeometry));
     }
 
     if (bottomBar) {
@@ -2077,25 +2036,38 @@ export function mountWalk(root, routes, config, actions = {}) {
   }
 
   /**
-   * ZADÁNÍ #08 (Bod 5): Volitelná hlasová navigace v češtině (Web Speech API, cs-CZ).
+   * ZADÁNÍ #08 (Bod 5) & ZADÁNÍ #10: Hlasová navigace v češtině (Web Speech API, cs-CZ) + zvukový signál rohu
+   * fungující i při zhasnutém displeji / v kapesním režimu.
    */
-  function speakCzechNav(text, stepKey = '') {
+  function speakCzechNav(text, stepKey = '', direction = 'straight') {
     if (!voiceNavEnabled || !text) return;
     if (stepKey && stepKey === lastSpokenNavStepKey) return;
     if (stepKey) lastSpokenNavStepKey = stepKey;
+
+    if (stateObj.soundEnabled !== false) {
+      playTurnAudioCue(direction);
+    }
+
     try {
       if (typeof window !== 'undefined' && 'speechSynthesis' in window && typeof SpeechSynthesisUtterance !== 'undefined') {
-        window.speechSynthesis.cancel();
+        try {
+          window.speechSynthesis.resume?.();
+        } catch {}
+        if (window.speechSynthesis.speaking) {
+          window.speechSynthesis.cancel();
+        }
         const utter = new SpeechSynthesisUtterance(text);
         utter.lang = 'cs-CZ';
-        utter.rate = 1.0;
+        utter.rate = 1.02;
+        utter.volume = 1.0;
         window.speechSynthesis.speak(utter);
       }
     } catch {}
   }
 
   /**
-   * ZADÁNÍ #08 (Bod 5): Aktualizuje kompaktní pilulku odbočovací navigace (.turn-nav-pill) vedle kompasu.
+   * ZADÁNÍ #08 (Bod 5): Aktualizuje kompaktní pilulku odbočovací navigace (.turn-nav-pill) vedle kompasu
+   * a hlásí každý roh domu v předstihu i přímo u rohu.
    */
   function updateTurnNavPill(origin = lastFix) {
     const iconEl = $('turn-nav-icon');
@@ -2106,7 +2078,7 @@ export function mountWalk(root, routes, config, actions = {}) {
     const currentPos = origin || lastFix || telemetry.lastKnownPosition || plannedRoute.origin;
     if (!currentPos || (plannedPlaces.length === 0 && !lastRoutedGeometry)) {
       iconEl.textContent = '↑';
-      textEl.textContent = 'Volná chůze · Vyber trasu v Průvodci výpravou';
+      textEl.textContent = 'Volná chůze · Vyber body v mapě nebo v seznamu';
       return;
     }
 
@@ -2119,16 +2091,20 @@ export function mountWalk(root, routes, config, actions = {}) {
     iconEl.textContent = instr.icon || '↑';
     textEl.textContent = instr.text || 'Pokračuj po trase';
 
+    if ($('pocket-mode-overlay') && !$('pocket-mode-overlay').hidden && $('pocket-mode-stats')) {
+      $('pocket-mode-stats').textContent = instr.text || 'GPS zaznamenává trasu na pozadí';
+    }
+
     // Pokud hráč seběhl z trasy (např. běží jinudy do lesa), automaticky přepočítáme pěší trasu
     // z jeho nového místa přímo k dalšímu nadcházejícímu cíli v pořadí (nikdy zpět na náměstí!)
-    if (instr.isOffRoute && (active || demo) && (Date.now() - lastOffRouteRecalcAt > 7000)) {
+    if (instr.isOffRoute && (active || demo || simSandboxActive) && (Date.now() - lastOffRouteRecalcAt > 7000)) {
       lastOffRouteRecalcAt = Date.now();
       plannedRouteRenderKey = null;
       renderPlannedRouteOnMap(true);
     }
 
-    if (voiceNavEnabled && (active || demo) && instr.voiceText && instr.distanceToTurnM != null && instr.distanceToTurnM <= 85) {
-      speakCzechNav(instr.voiceText, instr.stepKey);
+    if (voiceNavEnabled && (active || demo || simSandboxActive) && instr.voiceText && instr.distanceToTurnM != null && instr.distanceToTurnM <= 85) {
+      speakCzechNav(instr.voiceText, instr.stepKey, instr.turnDirection || 'straight');
     }
   }
 
@@ -2650,7 +2626,6 @@ export function mountWalk(root, routes, config, actions = {}) {
         ? 'Vzdálenosti od středu mapy.'
         : 'Poloha není určena.';
     }
-    placesLayer?.clearLayers();
     const all = getAllAvailablePlaces();
     const origin = lastFix || telemetry.lastKnownPosition || map?.getCenter();
     const normalized = origin && Number.isFinite(origin.lat) && Number.isFinite(origin.lng)
@@ -2769,10 +2744,23 @@ export function mountWalk(root, routes, config, actions = {}) {
       }).join('') || '<p class="small-note">V této části mapy zatím nejsou žádná místa. Posuň mapu nebo chvíli počkej na automatické načtení.</p>';
     }
 
-    if (!map) return;
+    if (!map || !placesLayer) return;
 
     const nextUnvisitedStop = plannedPlaces.find(p => !isStopVisited(p));
+    const activeMapPlaceIds = new Set();
 
+    // Odstraníme markery, které už nejsou v mapPlaces
+    for (const p of mapPlaces) {
+      activeMapPlaceIds.add(p.id);
+    }
+    for (const [existingId, entry] of placeMarkersById.entries()) {
+      if (!activeMapPlaceIds.has(existingId)) {
+        placesLayer.removeLayer(entry.marker);
+        placeMarkersById.delete(existingId);
+      }
+    }
+
+    // Aktualizujeme nebo vytvoříme markery bez blikání (in-place diffing)
     for (const p of mapPlaces) {
       const visited = isStopVisitedInSession(p);
       const isRouteStart = p.pointKind === 'route-start';
@@ -2795,8 +2783,6 @@ export function mountWalk(root, routes, config, actions = {}) {
         ? 'is-just-confirmed'
         : isNextTarget
         ? 'is-next-target'
-        : isFirstAppear
-        ? 'is-appearing'
         : '';
 
       const stopOrderIdx = plannedPlaces.findIndex(item => item.id === p.id);
@@ -2810,73 +2796,117 @@ export function mountWalk(root, routes, config, actions = {}) {
       const photoInnerHtml = hasRealPhoto
         ? `
             <span class="czekpoint-marker-photo-wrap">
-              <img class="czekpoint-marker-photo-img" src="${e(cachedPhoto.photoUrl)}" alt="" loading="lazy" onerror="this.parentElement.hidden=true;if(this.parentElement.nextElementSibling)this.parentElement.nextElementSibling.hidden=false;" />
+              <img class="czekpoint-marker-photo-img" src="${e(cachedPhoto.photoUrl)}" alt="" onerror="this.parentElement.hidden=true;if(this.parentElement.nextElementSibling)this.parentElement.nextElementSibling.hidden=false;" />
             </span>
             <span class="czekpoint-marker-glyph kind-${e(categoryKey)}" hidden>${glyphHtml}</span>
           `
         : `<span class="czekpoint-marker-glyph kind-${e(categoryKey)}">${glyphHtml}</span>`;
 
-      const marker = L.marker([p.lat, p.lng], {
-        icon: L.divIcon({
-          className: 'czekpoint-marker-anchor',
-          html: `
-            <span class="czekpoint-marker-badge ${tierClass} ${animClass} ${hasRealPhoto ? 'has-real-photo' : 'has-bitmap-glyph'}" data-kind="${e(categoryKey)}">
-              ${photoInnerHtml}
-              ${orderBadgeHtml}
-            </span>
-          `,
-          iconSize: [42, 42],
-          iconAnchor: [21, 21],
-          popupAnchor: [0, -14],
-        }),
-        title: p.title,
-      }).addTo(placesLayer);
+      const iconStateKey = `${tierClass}|${animClass}|${stopOrderIdx}|${hasRealPhoto ? cachedPhoto.photoUrl : categoryKey}`;
+      const iconHtml = `
+        <span class="czekpoint-marker-badge ${tierClass} ${animClass} ${hasRealPhoto ? 'has-real-photo' : 'has-bitmap-glyph'}" data-kind="${e(categoryKey)}">
+          ${photoInnerHtml}
+          ${orderBadgeHtml}
+        </span>
+      `;
 
-      marker.on('click', () => {
-        if (pickingCustomEndOnMap) {
-          pickingCustomEndOnMap = false;
-          phase1EndMode = 'custom';
-          plannedRoute.routeType = 'oneway';
-          const others = getPlannedPlaces().filter(item => item.id !== p.id);
-          const orderedOthers = others.length >= 2
-            ? optimizeRouteOrder(getRouteOriginPoint(), others, {
-                returnToOrigin: false,
-                visitedStopIds: confirmedStopIds,
-                currentPosition: (active || demo) && lastFix ? lastFix : null,
-              })
-            : others;
-          plannedRoute.selectedPlaceIds = [...orderedOthers.map(item => item.id), p.id];
-          recalculateRemainingRoute(`🏁 Nový konec trasy nastaven na: ${p.title}.`);
-          playStampChord(stateObj.soundEnabled);
-          return;
+      const existing = placeMarkersById.get(p.id);
+      if (existing) {
+        existing.place = p;
+        if (existing.lat !== p.lat || existing.lng !== p.lng) {
+          existing.marker.setLatLng([p.lat, p.lng]);
+          existing.lat = p.lat;
+          existing.lng = p.lng;
         }
-        openPlaceDetail(p);
-      });
+        if (existing.iconStateKey !== iconStateKey) {
+          existing.marker.setIcon(
+            L.divIcon({
+              className: 'czekpoint-marker-anchor',
+              html: iconHtml,
+              iconSize: [42, 42],
+              iconAnchor: [21, 21],
+              popupAnchor: [0, -14],
+            })
+          );
+          existing.iconStateKey = iconStateKey;
+        }
+      } else {
+        const marker = L.marker([p.lat, p.lng], {
+          icon: L.divIcon({
+            className: 'czekpoint-marker-anchor',
+            html: iconHtml,
+            iconSize: [42, 42],
+            iconAnchor: [21, 21],
+            popupAnchor: [0, -14],
+          }),
+          title: p.title,
+        }).addTo(placesLayer);
+
+        const entry = {
+          marker,
+          place: p,
+          lat: p.lat,
+          lng: p.lng,
+          iconStateKey,
+        };
+        placeMarkersById.set(p.id, entry);
+
+        marker.on('click', () => {
+          const currentPlace = entry.place || p;
+          if (pickingCustomEndOnMap) {
+            pickingCustomEndOnMap = false;
+            phase1EndMode = 'custom';
+            plannedRoute.routeType = 'oneway';
+            const others = getPlannedPlaces().filter(item => item.id !== currentPlace.id);
+            const orderedOthers = others.length >= 2
+              ? optimizeRouteOrder(getRouteOriginPoint(), others, {
+                  returnToOrigin: false,
+                  visitedStopIds: confirmedStopIds,
+                  currentPosition: (active || demo) && lastFix ? lastFix : null,
+                })
+              : others;
+            plannedRoute.selectedPlaceIds = [...orderedOthers.map(item => item.id), currentPlace.id];
+            recalculateRemainingRoute(`🏁 Nový konec trasy nastaven na: ${currentPlace.title}.`);
+            playStampChord(stateObj.soundEnabled);
+            return;
+          }
+          openPlaceDetail(currentPlace);
+        });
+      }
     }
 
     renderPlannedRouteOnMap();
 
-    // Asynchronně načteme fotky míst z Wikipedie / OSM (ZADÁNÍ #10 Bod 4.2)
-    prefetchPlacePhotos([...plannedPlaces, ...sidebarList.slice(0, 12)], {
-      signal: aborter.signal,
-      maxCount: 12,
-      onUpdated: () => {
-        if (disposed) return;
-        renderPlaces();
-      },
-    });
-    prefetchVerifiedPhotosForPlaces([...plannedPlaces, ...mapPlaces.slice(0, 14)], {
-      signal: aborter.signal,
-      maxCount: 14,
-      onBatchUpdated: () => {
-        if (disposed) return;
-        renderPlaces();
-        renderNextCheckpointHero(lastFix || telemetry.lastKnownPosition);
-        if (selectedDetailPlace && !$('place-detail-sheet')?.hidden) {
-          openPlaceDetail(selectedDetailPlace);
-        }
-      },
-    });
+    // Asynchronně načteme fotky pouze pro místa, která jsme ještě nedotazovali (zabraňuje smyčce a blikání!)
+    const unprefetchedSidebar = [...plannedPlaces, ...sidebarList.slice(0, 14)].filter(p => p && p.id && !prefetchedPhotoPlaceIds.has(p.id));
+    if (unprefetchedSidebar.length > 0) {
+      for (const p of unprefetchedSidebar) prefetchedPhotoPlaceIds.add(p.id);
+      prefetchPlacePhotos(unprefetchedSidebar, {
+        signal: aborter.signal,
+        maxCount: 14,
+        onUpdated: () => {
+          if (disposed) return;
+          renderPlaces();
+        },
+      });
+    }
+
+    const unprefetchedMap = [...plannedPlaces, ...mapPlaces.slice(0, 16)].filter(p => p && p.id && !prefetchedVerifiedPlaceIds.has(p.id));
+    if (unprefetchedMap.length > 0) {
+      for (const p of unprefetchedMap) prefetchedVerifiedPlaceIds.add(p.id);
+      prefetchVerifiedPhotosForPlaces(unprefetchedMap, {
+        signal: aborter.signal,
+        maxCount: 16,
+        onBatchUpdated: () => {
+          if (disposed) return;
+          renderPlaces();
+          renderNextCheckpointHero(lastFix || telemetry.lastKnownPosition);
+          if (selectedDetailPlace && !$('place-detail-sheet')?.hidden) {
+            openPlaceDetail(selectedDetailPlace);
+          }
+        },
+      });
+    }
   }
 
   function openPlaceDetail(p) {
@@ -3390,6 +3420,7 @@ export function mountWalk(root, routes, config, actions = {}) {
     if ($('walk-demo')) $('walk-demo').textContent = demo ? 'Ukončit ukázku' : 'Ukázka pohybu';
 
     renderPlannerBasketAndXray();
+    renderPlaces();
     scheduleFog();
     renderTrail();
     renderNextCheckpointHero(lastFix || telemetry.lastKnownPosition);
@@ -3788,8 +3819,15 @@ export function mountWalk(root, routes, config, actions = {}) {
       }
     }
     if (map && player && accuracyRing) {
-      if (typeof document !== 'undefined' && document.hidden) {
+      const isHiddenOrPocket = (typeof document !== 'undefined' && document.hidden) || ($('pocket-mode-overlay') && !$('pocket-mode-overlay').hidden);
+      if (isHiddenOrPocket) {
+        setPlayerMarkerVisible(true);
+        updatePlayerAvatarIcon(true);
         player.setLatLng([cleanFix.lat, cleanFix.lng]);
+        accuracyRing.setLatLng([cleanFix.lat, cleanFix.lng]);
+        if (follow) {
+          centerMapOnPlayer(cleanFix, false);
+        }
       } else {
         smoothMovePlayerTo(cleanFix.lat, cleanFix.lng, coords.simulated ? 420 : 1100);
       }
@@ -4216,6 +4254,7 @@ export function mountWalk(root, routes, config, actions = {}) {
         onPause: () => { togglePauseUnified(); },
         onResume: () => { togglePauseUnified(); },
         onStop: () => { finishUnifiedExpedition(); },
+        onTick: () => { keepAliveCtrl.triggerManualTick?.(); },
       });
       if (isSecureContext && navigator.geolocation) {
         status(`Výprava odstartována! Běží i při zhasnutém displeji (GPS ≤ ${MAX_GPS_ACCURACY_M} m, dosah ${FOG_REVEAL_RADIUS_M} m)…`);
@@ -4230,12 +4269,25 @@ export function mountWalk(root, routes, config, actions = {}) {
   }
   const start = startUnifiedExpedition;
 
-  // Inicializace mapy Leaflet (ZADÁNÍ #09 Fáze 1: Automatické oddálení na okruh cca 3 km kolem uživatele)
+  // Tik na pozadí (z Web Workeru / Audio smyčky) udržuje pohyb postavičky i hlasovou navigaci při zhasnutém displeji
+  keepAliveCtrl.onTick((now) => {
+    if (disposed) return;
+    if (simSandboxActive && fakeGpsSim && fakeGpsSim.isOpen) {
+      fakeGpsSim.triggerLoopTick?.(now);
+    }
+    if (active || demo || simSandboxActive) {
+      renderTouristStatsHud(lastFix);
+      updateTurnNavPill(lastFix);
+    }
+  });
+
+  // Inicializace mapy Leaflet s bližším výchozím přiblížením (16.5) a volným přibližováním/oddalováním až do detailu ulic (maxZoom: 19)
   if (L) {
     const center = progress.cells.length ? cellCenter(progress.cells.at(-1)) : { lat: 49.6014, lng: 13.8644 };
-    map = L.map($('walk-map'), { zoomControl: true, minZoom: 3, maxZoom: 18, maxBounds: [[-85, -180], [85, 180]], maxBoundsViscosity: 1 }).setView([center.lat, center.lng], 13.5);
+    map = L.map($('walk-map'), { zoomControl: true, minZoom: 3, maxZoom: 19, maxBounds: [[-85, -180], [85, 180]], maxBoundsViscosity: 1 }).setView([center.lat, center.lng], 16.5);
     tileLayer = L.tileLayer(config.mapTileUrl, {
       maxZoom: 19,
+      maxNativeZoom: 19,
       noWrap: true,
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> (ODbL)',
     }).addTo(map);
@@ -4331,7 +4383,12 @@ export function mountWalk(root, routes, config, actions = {}) {
     }
 
     map.on('move zoom viewreset resize', scheduleFog);
+    map.on('zoomstart', () => {
+      userZoomLocked = true;
+      lastUserZoomAt = Date.now();
+    });
     map.on('zoomend', () => {
+      lastUserZoomAt = Date.now();
       renderTrail();
       renderPlaces();
     });
@@ -5052,6 +5109,22 @@ export function mountWalk(root, routes, config, actions = {}) {
     const p1ScanBtn = $('btn-p1-scan-map');
     if (scanBtn) scanBtn.classList.add('is-loading');
     if (p1ScanBtn) p1ScanBtn.classList.add('is-loading');
+
+    // Okamžitě (0 ms) doplníme blízké body v okolí, aby mapa nebyla prázdná během čekání na Overpass / Wikipedii
+    const existingCloseCount = getAllAvailablePlaces().filter(p => (haversineMeters(originPos, p) ?? Infinity) <= 1800).length;
+    if (existingCloseCount < 12) {
+      const gridSeedKey = `${originPos.lat.toFixed(2)}:${originPos.lng.toFixed(2)}`;
+      const localSeed = buildLocalFallbackPlaces(originPos, gridSeedKey);
+      const seedMap = new Map();
+      for (const p of nearby) {
+        if (p && p.id) seedMap.set(p.id, p);
+      }
+      for (const p of localSeed) {
+        if (p && p.id && !seedMap.has(p.id)) seedMap.set(p.id, p);
+      }
+      nearby = [...seedMap.values()];
+      renderPlaces();
+    }
 
     try {
       const autoPlaces = await loadAutoPlacesForArea(
@@ -6422,6 +6495,22 @@ export function mountWalk(root, routes, config, actions = {}) {
     }
     playTick(stateObj.soundEnabled);
   };
+
+  $('walk-zoom-in')?.addEventListener('click', () => {
+    if (!map) return;
+    userZoomLocked = true;
+    lastUserZoomAt = Date.now();
+    map.zoomIn(1);
+    playTick(stateObj.soundEnabled);
+  });
+
+  $('walk-zoom-out')?.addEventListener('click', () => {
+    if (!map) return;
+    userZoomLocked = true;
+    lastUserZoomAt = Date.now();
+    map.zoomOut(1);
+    playTick(stateObj.soundEnabled);
+  });
 
   $('walk-center')?.addEventListener('click', restoreFollowOnPlayer);
   $('btn-return-to-gps')?.addEventListener('click', restoreFollowOnPlayer);

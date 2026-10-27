@@ -346,13 +346,27 @@ async function fetchFromOverpassBbox(bbox, config = {}, signal = null, fetchImpl
   return [];
 }
 
-function buildLocalFallbackPlaces(centerPos, gridKey) {
+export function buildLocalFallbackPlaces(centerPos, gridKey = 'local') {
   const cosLat = Math.cos((centerPos.lat * Math.PI) / 180) || 0.65;
   const offsets = [
+    { suffix: 'n1', title: 'Kamenná zvonička u rozcestí', dLatM: 115, dLngM: 45, category: 'castles', kind: 'culture' },
+    { suffix: 'e1', title: 'Památná lípa a odpočívadlo', dLatM: 35, dLngM: 140, category: 'nature', kind: 'forest' },
+    { suffix: 's1', title: 'Historická kaplička sv. Jana', dLatM: -130, dLngM: 60, category: 'castles', kind: 'culture' },
+    { suffix: 'w1', title: 'Vyhlídková lavička nad údolím', dLatM: 55, dLngM: -155, category: 'views', kind: 'view' },
+    { suffix: 'sw1', title: 'Lesní studánka s pramenem', dLatM: -165, dLngM: -120, category: 'water', kind: 'water' },
+    { suffix: 'ne2', title: 'Kamenná boží muka na návrší', dLatM: 240, dLngM: 190, category: 'castles', kind: 'culture' },
+    { suffix: 'se2', title: 'Turistický rozcestník u hájovny', dLatM: -220, dLngM: 250, category: 'nature', kind: 'forest' },
+    { suffix: 'nw2', title: 'Vyhlídka U Tří dubů', dLatM: 270, dLngM: -230, category: 'views', kind: 'view' },
+    { suffix: 'sw2', title: 'Rybníček a dřevěná lávka', dLatM: -290, dLngM: -240, category: 'water', kind: 'water' },
+    { suffix: 'n3', title: 'Skalní vyhlídka na hřebeni', dLatM: 420, dLngM: 85, category: 'views', kind: 'view' },
+    { suffix: 'e3', title: 'Lesní altán a naučná zastávka', dLatM: 95, dLngM: 440, category: 'nature', kind: 'forest' },
+    { suffix: 's3', title: 'Stará kovárna a pamětní kámen', dLatM: -430, dLngM: -75, category: 'castles', kind: 'culture' },
+    { suffix: 'w3', title: 'Lesní tůň U Zlatého potoka', dLatM: -60, dLngM: -460, category: 'water', kind: 'water' },
     { suffix: 'ne', title: 'Severovýchodní vyhlídka v okolí', dLatM: 750, dLngM: 680, category: 'views', kind: 'view' },
     { suffix: 'se', title: 'Jihovýchodní lesní zastávka', dLatM: -680, dLngM: 820, category: 'nature', kind: 'forest' },
     { suffix: 'sw', title: 'Jihozápadní vodní tůň a odpočívadlo', dLatM: -780, dLngM: -640, category: 'water', kind: 'water' },
     { suffix: 'nw', title: 'Severozápadní památné rozcestí', dLatM: 690, dLngM: -790, category: 'castles', kind: 'culture' },
+    { suffix: 'far_n', title: 'Rozhledové sedlo nad obcí', dLatM: 1150, dLngM: 320, category: 'views', kind: 'view' },
   ];
   return offsets.map(o => ({
     id: `local:${gridKey}:${o.suffix}`,
@@ -368,6 +382,12 @@ function buildLocalFallbackPlaces(centerPos, gridKey) {
     tags: {},
     url: '#/katalog',
   }));
+}
+
+export function ensureRichLocalCoverage(places, centerPos, gridKey = 'local') {
+  const closeCount = (places || []).filter(p => (haversineMeters(centerPos, p) ?? Infinity) <= 1800).length;
+  if (closeCount >= 12) return places;
+  return deduplicatePlaces([...(places || []), ...buildLocalFallbackPlaces(centerPos, gridKey)]);
 }
 
 /**
@@ -424,13 +444,13 @@ export async function loadAutoPlacesForArea(
   if (!forceRefresh) {
     const cached = getCachedGridTile(gridKey, effectiveStorage);
     if (cached && cached.length > 0) {
-      const combined = deduplicatePlaces([...builtIn, ...cached]);
+      const combined = ensureRichLocalCoverage(deduplicatePlaces([...builtIn, ...cached]), centerPos, gridKey);
       return combined.sort((a, b) => scoreAndRankPlace(b) - scoreAndRankPlace(a));
     }
   }
 
   if (!fetchImpl) {
-    const base = builtIn.length >= 3 ? builtIn : deduplicatePlaces([...builtIn, ...buildLocalFallbackPlaces(centerPos, gridKey)]);
+    const base = ensureRichLocalCoverage(builtIn, centerPos, gridKey);
     return base.sort((a, b) => scoreAndRankPlace(b) - scoreAndRankPlace(a));
   }
 
@@ -438,7 +458,8 @@ export async function loadAutoPlacesForArea(
   const now = Date.now();
   const lastTileReq = lastTileRequestTime.get(gridKey) || 0;
   if (!forceRefresh && now - lastTileReq < 10000 && builtIn.length >= 4) {
-    return builtIn.sort((a, b) => scoreAndRankPlace(b) - scoreAndRankPlace(a));
+    const enriched = ensureRichLocalCoverage(builtIn, centerPos, gridKey);
+    return enriched.sort((a, b) => scoreAndRankPlace(b) - scoreAndRankPlace(a));
   }
   lastTileRequestTime.set(gridKey, now);
 
@@ -464,13 +485,10 @@ export async function loadAutoPlacesForArea(
       setCachedGridTile(gridKey, fetchedPlaces, effectiveStorage);
     }
 
-    let combined = deduplicatePlaces([...builtIn, ...fetchedPlaces]);
-    if (combined.length < 3) {
-      combined = deduplicatePlaces([...combined, ...buildLocalFallbackPlaces(centerPos, gridKey)]);
-    }
+    const combined = ensureRichLocalCoverage(deduplicatePlaces([...builtIn, ...fetchedPlaces]), centerPos, gridKey);
     return combined.sort((a, b) => scoreAndRankPlace(b) - scoreAndRankPlace(a));
   } catch {
-    const fallback = builtIn.length >= 3 ? builtIn : deduplicatePlaces([...builtIn, ...buildLocalFallbackPlaces(centerPos, gridKey)]);
+    const fallback = ensureRichLocalCoverage(builtIn, centerPos, gridKey);
     return fallback.sort((a, b) => scoreAndRankPlace(b) - scoreAndRankPlace(a));
   }
 }

@@ -13,6 +13,7 @@
 export const SILENT_WAV_BASE64 = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAESsAAABAAgAZGF0YQQAAACAgICA';
 
 let audioElement = null;
+let audioTickCallback = null;
 
 export function getAudioKeepaliveElement() {
   if (typeof window === 'undefined' || typeof Audio === 'undefined') return null;
@@ -22,6 +23,13 @@ export function getAudioKeepaliveElement() {
       audioElement.loop = true;
       audioElement.playsInline = true;
       audioElement.volume = 0.01;
+      audioElement.addEventListener?.('timeupdate', () => {
+        if (typeof audioTickCallback === 'function') {
+          try {
+            audioTickCallback(Date.now());
+          } catch {}
+        }
+      });
     } catch {
       audioElement = null;
     }
@@ -37,6 +45,7 @@ export function getAudioKeepaliveElement() {
  * @param {(() => void) | null} [options.onPause]
  * @param {(() => void) | null} [options.onResume]
  * @param {(() => void) | null} [options.onStop]
+ * @param {((now: number) => void) | null} [options.onTick]
  */
 export function startBackgroundTracking({
   title = 'Záznam výpravy běží',
@@ -45,8 +54,13 @@ export function startBackgroundTracking({
   onPause = /** @type {(() => void) | null} */ (null),
   onResume = /** @type {(() => void) | null} */ (null),
   onStop = /** @type {(() => void) | null} */ (null),
+  onTick = /** @type {((now: number) => void) | null} */ (null),
 } = {}) {
   if (typeof window === 'undefined' && typeof navigator === 'undefined') return;
+
+  if (typeof onTick === 'function') {
+    audioTickCallback = onTick;
+  }
 
   const audio = getAudioKeepaliveElement();
   if (audio) {

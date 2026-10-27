@@ -41,6 +41,8 @@ import {
   buildLocalRoutedGeometry,
   computeRemainingFromSharedRoute,
   computeActiveTurnInstruction,
+  buildTurnStepsFromCoordinates,
+  locatePlayerOnPolyline,
   searchPlaceNominatim,
   buildReturnToOriginRoute,
   computeQuadrantSector,
@@ -81,6 +83,8 @@ import {
   createCompassStabilizer,
   interpolateBackgroundGap,
   triggerPocketProximityAlert,
+  createKeepAliveController,
+  playTurnAudioCue,
 } from './keep-alive.js';
 import {
   renderBootFootprintSvg,
@@ -1156,7 +1160,96 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
     assert.ok(walkJs.includes('btn-pocket-mode'), 'Tlačítko Kapesního režimu musí existovat');
     assert.ok(walkJs.includes('arrival-goal-modal'), 'Dialog po příchodu do cíle musí existovat');
   });
+
+  it('Oprava blikání bodů, hustoty míst v okolí, přiblížení mapy (16.5 + tlačítka +/-), hlášení každého rohu domu a chůze postavičky při zhasnutém displeji', async () => {
+    // 1. Bohatá hustota míst v okolí (18+ bodů do 1,8 km i při výpadku Overpass API)
+    const testCenter = { lat: 49.7500, lng: 14.1500 };
+    const failingOverpassFetch = async () => ({ ok: false, status: 502, json: async () => ({}) });
+    const nearbyPlaces = await loadAutoPlacesForArea(
+      testCenter,
+      [],
+      {},
+      null,
+      failingOverpassFetch as any,
+      null,
+      { radiusM: 4000, forceRefresh: true }
+    );
+    assert.ok(nearbyPlaces.length >= 15, `V okolí musí být alespoň 15 bodů i při výpadku Overpass API, získáno: ${nearbyPlaces.length}`);
+
+    // 2. Detekce každého rohu domu / ulice (>= 15°) a 3-fázové hlasové hlášení (_adv, _app, _now)
+    // Vytvoříme trasu vedoucí 60 m na sever a pak zahýbající doprava (na východ) za roh domu
+    const cornerCoords: [number, number][] = [
+      [49.60100, 13.86400], // Start
+      [49.60127, 13.86400], // +30 m severně
+      [49.60154, 13.86400], // +60 m severně (ROH DOMU -> odbočka doprava na východ)
+      [49.60154, 13.86450], // +36 m východně
+      [49.60154, 13.86500], // Cíl (+72 m východně)
+    ];
+    const targetStop = { id: 'cil-za-rohem', title: 'Kaplička za rohem', lat: 49.60154, lng: 13.86500 };
+    const steps = buildTurnStepsFromCoordinates(cornerCoords, [targetStop]);
+    const rightCornerStep = steps.find((s: any) => s.coordIndex === 2);
+    assert.ok(rightCornerStep, 'Každý roh ulice/domu musí být detekován jako odbočovací krok');
+    assert.match(rightCornerStep.actionLabel, /doprava za roh/i);
+    assert.match(rightCornerStep.voiceAction, /zahněte doprava za roh/i);
+
+    const routeObj = {
+      coordinates: cornerCoords,
+      steps,
+      distanceM: 132,
+      isFallback: false,
+    };
+
+    // Hráč je 45 m před rohem (fáze 1: předstih _adv)
+    const pos45mBefore = { lat: 49.60114, lng: 13.86400 };
+    const navAdv = computeActiveTurnInstruction(routeObj as any, pos45mBefore as any, [targetStop] as any, new Set());
+    assert.ok(navAdv.stepKey.endsWith('_adv'), `Ve vzdálenosti ~45 m před rohem má být fáze _adv, získáno: ${navAdv.stepKey}`);
+    assert.equal(navAdv.turnDirection, 'right');
+    assert.match(navAdv.voiceText, /zahněte doprava za roh/i);
+
+    // Hráč je 22 m před rohem (fáze 2: přiblížení _app)
+    const pos22mBefore = { lat: 49.60134, lng: 13.86400 };
+    const navApp = computeActiveTurnInstruction(routeObj as any, pos22mBefore as any, [targetStop] as any, new Set());
+    assert.ok(navApp.stepKey.endsWith('_app'), `Ve vzdálenosti ~22 m před rohem má být fáze _app, získáno: ${navApp.stepKey}`);
+    assert.match(navApp.voiceText, /Připravte se.*zahněte doprava za roh/i);
+
+    // Hráč je 8 m před rohem (fáze 3: přímo u rohu _now — nesmí přeskočit roh předčasně!)
+    const pos8mBefore = { lat: 49.60147, lng: 13.86400 };
+    const navNow = computeActiveTurnInstruction(routeObj as any, pos8mBefore as any, [targetStop] as any, new Set());
+    assert.ok(navNow.stepKey.endsWith('_now'), `Ve vzdálenosti ~8 m před rohem musí hlásit samotný roh (_now), získáno: ${navNow.stepKey}`);
+    assert.match(navNow.voiceText, /Teď zahněte doprava za roh/i);
+
+    // 3. Chůze postavičky (GpsSimulator) pokračuje v reálném čase i při zhasnutém displeji (triggerLoopTick)
+    const fixesReceived: any[] = [];
+    const sim = new GpsSimulator({
+      initialPosition: { lat: 49.60100, lng: 13.86400 },
+      onFix: (fix: any) => fixesReceived.push(fix),
+    });
+    sim.isOpen = true;
+    sim.mode = 'direction';
+    sim.currentDirectionDeg = 0; // chůze na sever
+    sim.speed = 5; // 5 m/s
+    sim.lastWallTickMs = 1000;
+    sim.triggerLoopTick(3000); // 2 sekundy na pozadí při zhasnutém displeji
+    assert.ok(sim.position.lat > 49.60103, 'Postavička musí při zhasnutém displeji plynule pokračovat v chůzi');
+    assert.ok(fixesReceived.length >= 1, 'Během chůze na pozadí musí simulátor emitovat GPS souřadnice pro hlasovou navigaci');
+    sim.stopLoop();
+
+    // 4. KeepAlive onTick + ověření in-place aktualizace markerů a zoom tlačítek v src/walk.js
+    const ka = createKeepAliveController();
+    let tickCount = 0;
+    ka.onTick(() => { tickCount += 1; });
+    ka.triggerManualTick();
+    assert.equal(tickCount, 1, 'KeepAlive kontrolér musí spouštět registrované background tick callbacky');
+    assert.equal(playTurnAudioCue('right'), false); // V Node prostředí bez AudioContext bezpečně vrátí false
+
+    const walkJs = fs.readFileSync('src/walk.js', 'utf-8');
+    assert.ok(walkJs.includes('placeMarkersById'), 'Markery v mapě se musí aktualizovat in-place přes placeMarkersById bez blikání');
+    assert.ok(walkJs.includes('id="walk-zoom-in"'), 'Tlačítko přiblížení #walk-zoom-in musí existovat');
+    assert.ok(walkJs.includes('id="walk-zoom-out"'), 'Tlačítko oddálení #walk-zoom-out musí existovat');
+    assert.ok(walkJs.includes('16.5'), 'Výchozí přiblížení mapy musí být detailní (16.5)');
+  });
 });
+
 
 
 

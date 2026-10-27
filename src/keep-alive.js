@@ -286,9 +286,47 @@ export function triggerPocketProximityAlert(kind = 'proximity') {
   return true;
 }
 
+export function playTurnAudioCue(direction = 'straight') {
+  try {
+    const ctx = getSharedAudioContext();
+    if (!ctx) return false;
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'triangle';
+
+    if (direction === 'left') {
+      osc.frequency.setValueAtTime(440, now);
+      osc.frequency.setValueAtTime(554.37, now + 0.11);
+    } else if (direction === 'right') {
+      osc.frequency.setValueAtTime(523.25, now);
+      osc.frequency.setValueAtTime(659.25, now + 0.11);
+    } else if (direction === 'arrive') {
+      osc.frequency.setValueAtTime(523.25, now);
+      osc.frequency.setValueAtTime(659.25, now + 0.1);
+      osc.frequency.setValueAtTime(783.99, now + 0.2);
+    } else {
+      osc.frequency.setValueAtTime(493.88, now);
+    }
+
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.exponentialRampToValueAtTime(0.16, now + 0.025);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.32);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.34);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
 /**
  * 8.1 & 8.2 SPRÁVCE BĚHU NA POZADÍ A KAPESNÍHO REŽIMU
- * Udržuje GPS v chodu pomocí:
+ * Udržuje GPS, pohyb postavičky i hlasovou navigaci v chodu i při zhasnutém displeji pomocí:
+ * - Neškrceného Web Worker časovače (1000 ms tik na pozadí mimo hlavní vlákno)
  * - Screen Wake Lock API (pokud je displej zapnutý nebo v Kapesním režimu)
  * - Tiché neslyšné smyčky Web Audio API + MediaSession ('Výprava běží' / 'Czekpoint GPS aktivní')
  */
@@ -299,6 +337,75 @@ export function createKeepAliveController() {
   let keepAliveOsc = null;
   let keepAliveGain = null;
   let heartbeatTimer = null;
+  let bgWorker = null;
+  let bgFallbackTimer = null;
+  let lastTickFiredAt = 0;
+  const tickListeners = new Set();
+
+  function fireBackgroundTick(force = false) {
+    if (!active && !force) return;
+    const now = Date.now();
+    // Zabráníme duplicitnímu tiku pod 450 ms, pokud se sejdou Worker i Audio timeupdate
+    if (!force && now - lastTickFiredAt < 450) return;
+    lastTickFiredAt = now;
+
+    const ctx = getSharedAudioContext();
+    if (ctx && ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+    }
+
+    for (const fn of tickListeners) {
+      try {
+        fn(now);
+      } catch (_) {}
+    }
+  }
+
+  function startBackgroundWorker() {
+    stopBackgroundWorker();
+    if (typeof Worker !== 'undefined' && typeof Blob !== 'undefined' && typeof URL !== 'undefined') {
+      try {
+        const workerCode = `
+          let timer = null;
+          self.onmessage = function(e) {
+            if (e.data === 'start') {
+              if (timer) clearInterval(timer);
+              timer = setInterval(function() { self.postMessage('tick'); }, 1000);
+            } else if (e.data === 'stop') {
+              if (timer) clearInterval(timer);
+              timer = null;
+            }
+          };
+        `;
+        const blob = new Blob([workerCode], { type: 'application/javascript' });
+        const blobUrl = URL.createObjectURL(blob);
+        bgWorker = new Worker(blobUrl);
+        bgWorker.onmessage = () => {
+          fireBackgroundTick();
+        };
+        bgWorker.postMessage('start');
+      } catch (_) {
+        bgWorker = null;
+      }
+    }
+    bgFallbackTimer = setInterval(() => {
+      fireBackgroundTick();
+    }, 1000);
+  }
+
+  function stopBackgroundWorker() {
+    if (bgWorker) {
+      try {
+        bgWorker.postMessage('stop');
+        bgWorker.terminate();
+      } catch (_) {}
+      bgWorker = null;
+    }
+    if (bgFallbackTimer) {
+      clearInterval(bgFallbackTimer);
+      bgFallbackTimer = null;
+    }
+  }
 
   async function acquireWakeLock() {
     if (typeof navigator === 'undefined' || !('wakeLock' in navigator)) return false;
@@ -377,6 +484,7 @@ export function createKeepAliveController() {
       active = true;
       await acquireWakeLock();
       startAudioAndMediaSession(subtitle);
+      startBackgroundWorker();
       if (heartbeatTimer) clearInterval(heartbeatTimer);
       heartbeatTimer = setInterval(() => {
         if (!active) return;
@@ -387,12 +495,13 @@ export function createKeepAliveController() {
         if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
           acquireWakeLock();
         }
-      }, 8000);
+      }, 4000);
       return true;
     },
     async stop() {
       active = false;
       pocketMode = false;
+      stopBackgroundWorker();
       if (heartbeatTimer) {
         clearInterval(heartbeatTimer);
         heartbeatTimer = null;
@@ -400,6 +509,15 @@ export function createKeepAliveController() {
       stopAudioAndMediaSession();
       await releaseWakeLock();
       return true;
+    },
+    onTick(fn) {
+      if (typeof fn === 'function') {
+        tickListeners.add(fn);
+      }
+      return () => tickListeners.delete(fn);
+    },
+    triggerManualTick() {
+      fireBackgroundTick(true);
     },
     updateMediaSessionStatus(subtitle) {
       if (!active) return;
