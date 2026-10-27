@@ -122,6 +122,12 @@ import {
   evaluateNaturalFeatureReveals,
   resolveAccessibleStopLocation,
 } from './natural-features.js';
+import {
+  startBackgroundTracking,
+  updateBackgroundTracking,
+  pauseBackgroundTracking,
+  stopBackgroundTracking,
+} from './background-keepalive.js';
 
 export function formatDistanceLabel(meters, suffix = '') {
   if (meters == null || !Number.isFinite(meters) || meters < 0) {
@@ -573,6 +579,7 @@ export function mountWalk(root, routes, config, actions = {}) {
         <strong id="walk-status" role="status" aria-live="polite">${e(storageError || 'Mapa připravena.')}</strong>
         <div class="mcb-toggles">
           <label class="mcb-check"><input type="checkbox" id="walk-awake" checked> Držet displej</label>
+          <label class="mcb-check" title="Záznam pokračuje i se zhasnutou obrazovkou v kapse"><input type="checkbox" id="walk-bg-record" checked disabled> 🔋 Záznam při zhasnutém displeji: ZAP</label>
           <label class="mcb-check"><input type="checkbox" id="walk-sound" ${stateObj.soundEnabled !== false ? 'checked' : ''}> 🔊 Zvuk</label>
           <label class="mcb-check"><input type="checkbox" id="walk-voice-nav" ${voiceNavEnabled ? 'checked' : ''}> 🗣️ Hlasová navigace</label>
           <span id="wake-status" class="visually-hidden">Displej: zámek není aktivní.</span>
@@ -735,6 +742,7 @@ export function mountWalk(root, routes, config, actions = {}) {
 
     <div class="map-sub-bar">
       <span class="trail-note" id="trail-info">Stopy pohorek za poslední chůzi: 0 kroků · Potvrzení zastávky: pod ${STOP_CONFIRM_RADIUS_M} m</span>
+      <span class="trail-note bg-record-note" id="bg-record-status">🔋 Záznam na pozadí: Běží i při zhasnutém displeji v kapse</span>
       <span class="trail-note osm-trails-attribution" id="osm-trails-attribution">Mapový podklad a KČT trasy: © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> (ODbL)</span>
     </div>
     <div class="walk-test-strip" aria-label="Ukázka a testovací nástroje">
@@ -3447,6 +3455,7 @@ export function mountWalk(root, routes, config, actions = {}) {
       memoryTrail = appendTrail(memoryTrail, { lat: lastFix.lat, lng: lastFix.lng, segmentBreak: true }, Date.now());
     }
     releaseWake();
+    pauseBackgroundTracking();
     releaseLock?.(); releaseLock = null;
 
     let saveFailedMsg = '';
@@ -3480,6 +3489,7 @@ export function mountWalk(root, routes, config, actions = {}) {
     }
     stopWatchdog();
     releaseWake();
+    stopBackgroundTracking();
     active = false;
     starting = false;
 
@@ -3601,10 +3611,19 @@ export function mountWalk(root, routes, config, actions = {}) {
       currentExpedition = resumeExpedition(currentExpedition);
       stateObj.activeExpedition = currentExpedition;
       telemetry.lastTickMs = Date.now();
-      status('▶ Výprava pokračuje.');
+      startBackgroundTracking({
+        title: 'Výprava pokračuje · Czekpoint',
+        artist: 'Czekpoint · Objevování a mapa',
+        album: 'Záznam chůze i při zhasnutém displeji',
+        onPause: () => { togglePauseUnified(); },
+        onResume: () => { togglePauseUnified(); },
+        onStop: () => { finishUnifiedExpedition(); },
+      });
+      status('▶ Výprava pokračuje (záznam běží i při zhasnutém displeji).');
     } else {
       currentExpedition = pauseExpedition(currentExpedition);
       stateObj.activeExpedition = currentExpedition;
+      pauseBackgroundTracking();
       status('⏸ Výprava pozastavena. Průzkum je uložený.');
     }
     if (canPersistRealState()) {
@@ -3678,7 +3697,11 @@ export function mountWalk(root, routes, config, actions = {}) {
       }
     }
     if (map && player && accuracyRing) {
-      smoothMovePlayerTo(cleanFix.lat, cleanFix.lng, coords.simulated ? 420 : 1100);
+      if (typeof document !== 'undefined' && document.hidden) {
+        player.setLatLng([cleanFix.lat, cleanFix.lng]);
+      } else {
+        smoothMovePlayerTo(cleanFix.lat, cleanFix.lng, coords.simulated ? 420 : 1100);
+      }
       accuracyRing.setRadius(cleanFix.accuracy);
     }
 
@@ -3688,6 +3711,17 @@ export function mountWalk(root, routes, config, actions = {}) {
 
     if (active || demo) {
       sample(cleanFix, coords.simulated ? fixTime : now);
+      if (active && !coords.simulated) {
+        const gainedM = currentExpedition ? Math.max(0, progress.meters - (currentExpedition.startMeters || 0)) : progress.meters;
+        const durMin = Math.max(1, Math.round((Date.now() - (currentExpedition?.createdAt || Date.now())) / 60000));
+        const plannedPlaces = getPlannedPlaces();
+        const nextTarget = plannedPlaces.find(p => !isStopVisited(p));
+        const nextTitle = nextTarget ? ` · Cíl: ${nextTarget.title}` : '';
+        updateBackgroundTracking({
+          title: `👣 ${Math.round(gainedM)} m (${durMin} min)${nextTitle}`,
+          album: 'Czekpoint · Záznam běží i při zhasnutém displeji',
+        });
+      }
     } else {
       renderQuestHud(cleanFix);
     }
@@ -4017,8 +4051,16 @@ export function mountWalk(root, routes, config, actions = {}) {
     playStampChord(stateObj.soundEnabled);
 
     if (source !== 'sim') {
+      startBackgroundTracking({
+        title: 'Výprava odstartována · Czekpoint',
+        artist: 'Czekpoint · Objevování a mapa',
+        album: 'Záznam chůze i při zhasnutém displeji',
+        onPause: () => { togglePauseUnified(); },
+        onResume: () => { togglePauseUnified(); },
+        onStop: () => { finishUnifiedExpedition(); },
+      });
       if (isSecureContext && navigator.geolocation) {
-        status(`Výprava odstartována! Hledám polohu (přesnost GPS ≤ ${MAX_GPS_ACCURACY_M} m, dosah odkrývání ${FOG_REVEAL_RADIUS_M} m)…`);
+        status(`Výprava odstartována! Běží i při zhasnutém displeji (GPS ≤ ${MAX_GPS_ACCURACY_M} m, dosah ${FOG_REVEAL_RADIUS_M} m)…`);
         lastFixReceivedAt = Date.now();
         restartGpsWatch();
         startWatchdog();
@@ -6307,15 +6349,34 @@ export function mountWalk(root, routes, config, actions = {}) {
     if (!document.hidden && active && !disposed && !simSandboxActive) {
       restartGpsWatch();
       holdWake();
+      if (map) {
+        map.invalidateSize();
+        if (lastFix) {
+          smoothMovePlayerTo(lastFix.lat, lastFix.lng, 350);
+          if (follow) centerMapOnPlayer(lastFix, false);
+        }
+      }
+      stats();
+      scheduleFog();
+      renderTrail();
     }
   };
   document.addEventListener('visibilitychange', visibility, { signal: aborter.signal });
-  const pagehide = () => pauseSession();
+
+  const pagehide = () => {
+    // ZADÁNÍ: Při zhasnutí obrazovky nebo uspání telefonu v kapse NIKDY nepozastavovat výpravu!
+    // Pouze bezpečně zaznamenáme aktuální stav do úložiště.
+    if (canPersistRealState()) {
+      try { saveState(stateObj); } catch {}
+    }
+  };
   window.addEventListener('pagehide', pagehide, { signal: aborter.signal });
 
   const storageChanged = event => {
     if (event.key === STATE_KEY && !demo && !simSandboxActive) {
-      pauseSession();
+      if (!active) {
+        pauseSession();
+      }
       try {
         stateObj = loadState();
         progress = {
@@ -6347,6 +6408,7 @@ export function mountWalk(root, routes, config, actions = {}) {
 
   return () => {
     disposed = true;
+    stopBackgroundTracking();
     if (playerLerpRafId) {
       cancelAnimationFrame(playerLerpRafId);
       playerLerpRafId = null;

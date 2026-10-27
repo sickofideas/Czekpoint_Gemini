@@ -62,6 +62,13 @@ import {
   renderPlayerAvatarMarkerHtml,
 } from './walk.js';
 import {
+  SILENT_WAV_BASE64,
+  startBackgroundTracking,
+  updateBackgroundTracking,
+  pauseBackgroundTracking,
+  stopBackgroundTracking,
+} from './background-keepalive.js';
+import {
   SPEED_PRESETS,
   ACCURACY_PRESETS,
   simulateWalkPlayback,
@@ -924,6 +931,87 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
     assert.ok(walkJsCode.includes('btn-p3-skip-stop'), 'Tlačítko pro vynechání zastávky musí existovat');
     assert.ok(walkJsCode.includes('btn-p3-insert-stop'), 'Tlačítko pro vložení zastávky do trasy musí existovat');
     assert.ok(walkJsCode.includes('btn-p3-set-end'), 'Tlačítko pro nastavení konečného cíle musí existovat');
+  });
+
+  it('Záznam na pozadí při zhasnutém displeji: Neslyšný audio keepalive, MediaSession a nezastavování na pagehide', () => {
+    // 1. Ověření platnosti neslyšného audio streamu WAV
+    assert.ok(SILENT_WAV_BASE64.startsWith('data:audio/wav;base64,RIFF') || SILENT_WAV_BASE64.startsWith('data:audio/wav;base64,Uk'), 'Formát neslyšného audia musí být platný WAV');
+    const rawBase64 = SILENT_WAV_BASE64.split(',')[1];
+    const buf = Buffer.from(rawBase64, 'base64');
+    assert.equal(buf.subarray(0, 4).toString(), 'RIFF', 'Hlavička musí být RIFF');
+    assert.equal(buf.subarray(8, 12).toString(), 'WAVE', 'Formát musí být WAVE');
+
+    // 2. Ověření MediaSession a bezpečného běhu background keepalive funkcí
+    const actionHandlers: Record<string, Function> = {};
+    const mockMediaSession = {
+      metadata: null as any,
+      playbackState: 'none',
+      setActionHandler: (type: string, fn: Function) => {
+        actionHandlers[type] = fn;
+      },
+    };
+    try {
+      Object.defineProperty(globalThis.navigator, 'mediaSession', {
+        value: mockMediaSession,
+        configurable: true,
+        writable: true,
+      });
+    } catch {
+      (globalThis.navigator as any).mediaSession = mockMediaSession;
+    }
+    (globalThis as any).MediaMetadata = class MockMediaMetadata {
+      title: string;
+      artist: string;
+      album: string;
+      artwork: any[];
+      constructor(opts: any) {
+        this.title = opts.title;
+        this.artist = opts.artist;
+        this.album = opts.album;
+        this.artwork = opts.artwork || [];
+      }
+    };
+
+    (globalThis as any).window = globalThis;
+    let pauseCalled = false;
+    let resumeCalled = false;
+    let stopCalled = false;
+
+    startBackgroundTracking({
+      title: 'Výprava odstartována',
+      artist: 'Czekpoint',
+      album: 'Záznam chůze i při zhasnutém displeji',
+      onPause: () => { pauseCalled = true; },
+      onResume: () => { resumeCalled = true; },
+      onStop: () => { stopCalled = true; },
+    });
+
+    assert.equal(mockMediaSession.playbackState, 'playing');
+    assert.equal(mockMediaSession.metadata.title, 'Výprava odstartována');
+
+    // Test MediaSession akcí z lock screenu
+    actionHandlers['pause']?.();
+    assert.equal(pauseCalled, true, 'Kliknutí na pauzu na lock screenu musí vyvolat onPause');
+    actionHandlers['play']?.();
+    assert.equal(resumeCalled, true, 'Kliknutí na play na lock screenu musí vyvolat onResume');
+    actionHandlers['stop']?.();
+    assert.equal(stopCalled, true, 'Kliknutí na stop na lock screenu musí vyvolat onStop');
+
+    // Aktualizace stavu na lock screenu
+    updateBackgroundTracking({ title: '👣 1 500 m (22 min) · Cíl: Zámek' });
+    assert.equal(mockMediaSession.metadata.title, '👣 1 500 m (22 min) · Cíl: Zámek');
+
+    // Pozastavení a ukončení
+    pauseBackgroundTracking();
+    assert.equal(mockMediaSession.playbackState, 'paused');
+    stopBackgroundTracking();
+    assert.equal(mockMediaSession.playbackState, 'none');
+
+    // 3. Ověření v kódu walk.js: pagehide NIKDY nevolá pauseSession() a indikátor běhu na pozadí existuje
+    const walkJsCode = fs.readFileSync('src/walk.js', 'utf-8');
+    assert.ok(!walkJsCode.includes('const pagehide = () => pauseSession();'), 'pagehide nesmí volat pauseSession()');
+    assert.ok(walkJsCode.includes('walk-bg-record'), 'Indikátor walk-bg-record musí existovat v šabloně');
+    assert.ok(walkJsCode.includes('bg-record-status'), 'Indikátor bg-record-status musí existovat v šabloně');
   });
 });
 
