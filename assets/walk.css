@@ -3706,6 +3706,24 @@
   transition: transform 0.14s ease, background-color 0.14s ease;
 }
 
+#walk-zoom-in,
+#walk-zoom-out {
+  min-width: 46px;
+  min-height: 46px;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.route-corner-dot {
+  display: block;
+  width: 8px;
+  height: 8px;
+  background: #f59e0b;
+  border: 1.5px solid #ffffff;
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+}
+
 .map-right-btn:hover {
   background: #253d2c;
   transform: translateY(-1px);

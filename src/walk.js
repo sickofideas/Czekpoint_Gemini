@@ -48,7 +48,7 @@ import {
 import { renderPostcard, generatePostcardBlob, generatePostcardDataUrl } from './postcard.js';
 import { renderPostcardSvgDataUrl } from './postcards.js';
 import { fetchNearby } from './nearby.js';
-import { loadAutoPlacesForArea, buildLocalFallbackPlaces } from './auto-places.js';
+import { loadAutoPlacesForArea } from './auto-places.js';
 import {
   getFallbackBitmapUrl,
   getCachedPlacePhoto,
@@ -220,9 +220,10 @@ export function renderPlayerAvatarMarkerHtml(arg1 = 'liska', arg2 = 0, arg3 = fa
   const isWalking = Boolean(opts.isWalking);
   const imgSrc = avatarUrl(avatarId);
   const avatarMeta = ALLOWED_AVATARS.find(a => a.id === avatarId) || ALLOWED_AVATARS[0];
+  const showArrow = opts.orbitalArrow !== false && opts.showOrbitalArrow !== false;
   return `
     <div class="player-avatar-marker ${isWalking ? 'is-walking' : 'is-idle'}" data-avatar-id="${e(avatarMeta.id)}">
-      <div class="avatar-direction-pointer" style="transform: rotate(${Math.round(bearingDeg)}deg)" title="Směr k další zastávce">
+      <div class="avatar-direction-pointer" style="transform: rotate(${Math.round(bearingDeg)}deg); ${showArrow ? '' : 'display:none;'}" title="Směr k další zastávce">
         <svg viewBox="0 0 20 20" class="avatar-direction-arrow" aria-hidden="true">
           <path d="M10 1 L17 15 L10 11.5 L3 15 Z" fill="#ffd25a" stroke="#231709" stroke-width="1.6" stroke-linejoin="round"/>
         </svg>
@@ -372,6 +373,7 @@ export function mountWalk(root, routes, config, actions = {}) {
     plannedRoute.origin.id !== 'my-gps' &&
     plannedRoute.origin.custom
   );
+  let lockedExpeditionOrigin = null;
 
   let wizardCollapsed = true;
   let wizardScenario = userExplicitlyPickedOrigin ? 'from-home' : 'on-site';
@@ -1153,6 +1155,8 @@ export function mountWalk(root, routes, config, actions = {}) {
       if (wrap && wrap.dataset.avatarId === avatarId) {
         wrap.classList.toggle('is-walking', Boolean(isWalking));
         if (pointer) {
+          const showArrow = appSettings.orbitalArrow !== false;
+          pointer.style.display = showArrow ? '' : 'none';
           pointer.style.transform = `rotate(${Math.round(bearingDeg)}deg)`;
         }
         return;
@@ -1162,7 +1166,7 @@ export function mountWalk(root, routes, config, actions = {}) {
       player.setIcon(
         L.divIcon({
           className: 'player-avatar-marker-anchor',
-          html: renderPlayerAvatarMarkerHtml({ avatarId, bearingDeg, isWalking }),
+          html: renderPlayerAvatarMarkerHtml({ avatarId, bearingDeg, isWalking, orbitalArrow: appSettings.orbitalArrow !== false }),
           iconSize: [54, 54],
           iconAnchor: [27, 27],
         })
@@ -1215,7 +1219,7 @@ export function mountWalk(root, routes, config, actions = {}) {
       accuracyRing?.setLatLng([curLat, curLng]);
 
       if (follow) {
-        centerMapOnPlayer({ lat: curLat, lng: curLng }, false);
+        map.panTo([curLat, curLng], { animate: false });
       }
 
       if (t < 1) {
@@ -1519,6 +1523,14 @@ export function mountWalk(root, routes, config, actions = {}) {
    */
   function renderTrail() {
     if (!map || !trailLayer) return;
+    if (appSettings.footprints === false) {
+      trailLayer.clearLayers();
+      lastTrailRenderKey = 'disabled';
+      if ($('trail-info')) {
+        $('trail-info').textContent = 'Stopy pohorek jsou vypnuté v nastavení.';
+      }
+      return;
+    }
     const zoom = Math.round((map.getZoom() || 16.5) * 2) / 2;
     const footprints = computeFootprintPlacements(progress.walkSegments, zoom);
     const totalCount = footprints.length;
@@ -1629,6 +1641,9 @@ export function mountWalk(root, routes, config, actions = {}) {
     if (!map || !hikingTrailsLayer) return;
     hikingTrailsLayer.clearLayers();
     if (!showHikingTrails) return;
+    if (waymarkedHikingLayer && map.hasLayer(waymarkedHikingLayer)) {
+      return;
+    }
 
     for (const trail of loadedHikingTrails) {
       if (!Array.isArray(trail.coordinates) || trail.coordinates.length < 2) continue;
@@ -2294,6 +2309,9 @@ export function mountWalk(root, routes, config, actions = {}) {
   }
 
   function getRouteOriginPoint() {
+    if (lockedExpeditionOrigin) {
+      return lockedExpeditionOrigin;
+    }
     if (!userExplicitlyPickedOrigin && lastFix && Number.isFinite(lastFix.lat) && Number.isFinite(lastFix.lng)) {
       return lastFix;
     }
@@ -2398,42 +2416,62 @@ export function mountWalk(root, routes, config, actions = {}) {
     updatePlayerLead(lastFix);
     if (!coords) return;
 
-    // 2. Plánovaná trasa výpravy (vizuálně jasně odlišená od stop bot na skutečně prošlé trase — Bod 30):
-    L.polyline(coords, {
-      pane: 'quest-route-pane',
-      color: '#2c1d11',
-      weight: 7,
-      opacity: 0.8,
-      lineCap: 'round',
-      lineJoin: 'round',
-    }).addTo(plannedRouteLayer);
-
-    L.polyline(coords, {
-      pane: 'quest-route-pane',
-      color: isFallbackGeom ? '#e07a24' : '#f5b82e',
-      weight: 4,
-      dashArray: isFallbackGeom ? '6, 9' : null,
-      opacity: 0.96,
-      lineCap: 'round',
-      lineJoin: 'round',
-    }).addTo(plannedRouteLayer);
-
-    // 4. Směrové šipky podél plánované trasy
-    for (let i = 0; i < coords.length - 1; i += Math.max(1, Math.floor(coords.length / 8))) {
-      const p1 = coords[i];
-      const p2 = coords[i + 1];
-      if (!p1 || !p2) continue;
-      const angle = (Math.atan2(p2[1] - p1[1], p2[0] - p1[0]) * 180 / Math.PI + 360) % 360;
-      L.marker([(p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2], {
+    // 2. Plánovaná trasa výpravy (v režimu 'explorer' se nekreslí na zem, aby hráč prozkoumával terén):
+    if (appSettings.gameMode !== 'explorer') {
+      L.polyline(coords, {
         pane: 'quest-route-pane',
-        interactive: false,
-        icon: L.divIcon({
-          className: 'route-dir-marker',
-          html: `<span class="route-dir-arrow" style="transform:rotate(${angle}deg)">➤</span>`,
-          iconSize: [16, 16],
-          iconAnchor: [8, 8],
-        }),
+        color: '#2c1d11',
+        weight: 7,
+        opacity: 0.8,
+        lineCap: 'round',
+        lineJoin: 'round',
       }).addTo(plannedRouteLayer);
+
+      L.polyline(coords, {
+        pane: 'quest-route-pane',
+        color: isFallbackGeom ? '#e07a24' : '#f5b82e',
+        weight: 4,
+        dashArray: isFallbackGeom ? '6, 9' : null,
+        opacity: 0.96,
+        lineCap: 'round',
+        lineJoin: 'round',
+      }).addTo(plannedRouteLayer);
+
+      // ZADÁNÍ #11 (Bod 4.1): Zvýraznění detekovaných rohů ulic a odboček jako navigačních bodů podél trasy
+      if (lastRoutedGeometry && Array.isArray(lastRoutedGeometry.steps)) {
+        for (const step of lastRoutedGeometry.steps) {
+          if (step.maneuverType === 'turn' && Number.isFinite(step.lat) && Number.isFinite(step.lng)) {
+            L.marker([step.lat, step.lng], {
+              pane: 'quest-route-pane',
+              interactive: false,
+              icon: L.divIcon({
+                className: 'route-corner-dot-marker',
+                html: `<span class="route-corner-dot" title="${e(step.actionLabel || 'Roh')}"></span>`,
+                iconSize: [8, 8],
+                iconAnchor: [4, 4],
+              }),
+            }).addTo(plannedRouteLayer);
+          }
+        }
+      }
+
+      // 4. Směrové šipky podél plánované trasy
+      for (let i = 0; i < coords.length - 1; i += Math.max(1, Math.floor(coords.length / 8))) {
+        const p1 = coords[i];
+        const p2 = coords[i + 1];
+        if (!p1 || !p2) continue;
+        const angle = (Math.atan2(p2[1] - p1[1], p2[0] - p1[0]) * 180 / Math.PI + 360) % 360;
+        L.marker([(p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2], {
+          pane: 'quest-route-pane',
+          interactive: false,
+          icon: L.divIcon({
+            className: 'route-dir-marker',
+            html: `<span class="route-dir-arrow" style="transform:rotate(${angle}deg)">➤</span>`,
+            iconSize: [16, 16],
+            iconAnchor: [8, 8],
+          }),
+        }).addTo(plannedRouteLayer);
+      }
     }
   }
 
@@ -2612,7 +2650,8 @@ export function mountWalk(root, routes, config, actions = {}) {
   /**
    * Vykreslí místa v okolí a mapové značky (Bod 1, 7, 18, 23 & 26).
    */
-  function renderPlaces() {
+  function renderPlaces(options = {}) {
+    const skipListRebuild = Boolean(options?.skipListRebuild);
     if ($('nearby-origin')) {
       $('nearby-origin').textContent = demo
         ? 'Vzdálenosti od simulovaného bodu.'
@@ -2700,7 +2739,7 @@ export function mountWalk(root, routes, config, actions = {}) {
       return `${(m / 1000).toFixed(1).replace('.', ',')} km`;
     };
 
-    if ($('walk-places')) {
+    if (!skipListRebuild && $('walk-places')) {
       $('walk-places').innerHTML = sidebarList.slice(0, 18).map(p => {
         const visitedToday = isStopVisitedInSession(p);
         const earlierStamp = !visitedToday && hasLifetimeStamp(p);
@@ -2802,7 +2841,7 @@ export function mountWalk(root, routes, config, actions = {}) {
           `
         : `<span class="czekpoint-marker-glyph kind-${e(categoryKey)}">${glyphHtml}</span>`;
 
-      const iconStateKey = `${tierClass}|${animClass}|${stopOrderIdx}|${hasRealPhoto ? cachedPhoto.photoUrl : categoryKey}`;
+      const stateSig = `${p.lat},${p.lng}|${tierClass}|${animClass}|${stopOrderIdx}|${hasRealPhoto ? cachedPhoto.photoUrl : ''}`;
       const iconHtml = `
         <span class="czekpoint-marker-badge ${tierClass} ${animClass} ${hasRealPhoto ? 'has-real-photo' : 'has-bitmap-glyph'}" data-kind="${e(categoryKey)}">
           ${photoInnerHtml}
@@ -2818,7 +2857,7 @@ export function mountWalk(root, routes, config, actions = {}) {
           existing.lat = p.lat;
           existing.lng = p.lng;
         }
-        if (existing.iconStateKey !== iconStateKey) {
+        if (existing.stateSig !== stateSig) {
           existing.marker.setIcon(
             L.divIcon({
               className: 'czekpoint-marker-anchor',
@@ -2828,7 +2867,8 @@ export function mountWalk(root, routes, config, actions = {}) {
               popupAnchor: [0, -14],
             })
           );
-          existing.iconStateKey = iconStateKey;
+          existing.stateSig = stateSig;
+          existing.iconStateKey = stateSig;
         }
       } else {
         const marker = L.marker([p.lat, p.lng], {
@@ -2847,7 +2887,8 @@ export function mountWalk(root, routes, config, actions = {}) {
           place: p,
           lat: p.lat,
           lng: p.lng,
-          iconStateKey,
+          stateSig,
+          iconStateKey: stateSig,
         };
         placeMarkersById.set(p.id, entry);
 
@@ -3578,6 +3619,7 @@ export function mountWalk(root, routes, config, actions = {}) {
     if ($('arrival-goal-modal')) $('arrival-goal-modal').hidden = true;
     active = false;
     starting = false;
+    lockedExpeditionOrigin = null;
 
     if (!currentExpedition) {
       currentExpedition = createExpedition({ progress, goal: DEFAULT_GOALS[0] });
@@ -3733,6 +3775,7 @@ export function mountWalk(root, routes, config, actions = {}) {
       currentExpedition = resumeExpedition(currentExpedition);
       stateObj.activeExpedition = currentExpedition;
       telemetry.lastTickMs = Date.now();
+      fakeGpsSim?.resume?.();
       startBackgroundTracking({
         title: 'Výprava pokračuje · Czekpoint',
         artist: 'Czekpoint · Objevování a mapa',
@@ -3745,6 +3788,7 @@ export function mountWalk(root, routes, config, actions = {}) {
     } else {
       currentExpedition = pauseExpedition(currentExpedition);
       stateObj.activeExpedition = currentExpedition;
+      fakeGpsSim?.pause?.();
       pauseBackgroundTracking();
       status('⏸ Výprava pozastavena. Průzkum je uložený.');
     }
@@ -3804,7 +3848,7 @@ export function mountWalk(root, routes, config, actions = {}) {
     };
 
     lastFix = cleanFix;
-    if (!userExplicitlyPickedOrigin) {
+    if (!active && !lockedExpeditionOrigin && !userExplicitlyPickedOrigin) {
       const prev = plannedRoute.origin;
       const isUnset = !prev || prev.id === 'namesti' || prev.id === 'my-gps';
       if (isUnset || (haversineMeters(prev, cleanFix) ?? 0) > 40) {
@@ -3837,6 +3881,7 @@ export function mountWalk(root, routes, config, actions = {}) {
     updateGpsTelemetryUi(cleanFix);
     renderCompass(cleanFix);
     refreshWeatherStrip(cleanFix);
+    updateTurnNavPill(cleanFix);
 
     if (active || demo) {
       sample(cleanFix, coords.simulated ? fixTime : now);
@@ -3915,6 +3960,7 @@ export function mountWalk(root, routes, config, actions = {}) {
 
   function sample(fix, now = Date.now()) {
     if (disposed || (!active && !demo)) return;
+    if (currentExpedition && currentExpedition.state === 'paused') return;
 
     // 8.3 Background Gap Recovery: Pokud v kapse vznikla mezera > 12 s (do 3 km rychlostí <= 3.5 m/s),
     // dopočítáme body podél naplánované trasy, odkryjeme mlhu, přičteme metry a uznáme zastávky!
@@ -4185,6 +4231,10 @@ export function mountWalk(root, routes, config, actions = {}) {
       stateObj.activeExpedition = currentExpedition;
       active = true;
       anchor = null;
+      lockedExpeditionOrigin = plannedRoute.origin
+        ? { ...plannedRoute.origin }
+        : (lastFix ? { id: 'start-gps', label: 'Místo startu', lat: lastFix.lat, lng: lastFix.lng } : null);
+      if (map) map.setZoom(17);
       if (lastFix) centerMapOnPlayer(lastFix, false);
       updateMapActionBar();
       updateTopBarUi();
@@ -4236,6 +4286,10 @@ export function mountWalk(root, routes, config, actions = {}) {
     active = true;
     anchor = null;
     follow = true;
+    lockedExpeditionOrigin = plannedRoute.origin
+      ? { ...plannedRoute.origin }
+      : (lastFix ? { id: 'start-gps', label: 'Místo startu', lat: lastFix.lat, lng: lastFix.lng } : null);
+    if (map) map.setZoom(17);
     updateFollowUi();
     if (lastFix || telemetry.lastKnownPosition) {
       centerMapOnPlayer(lastFix || telemetry.lastKnownPosition, false);
@@ -4390,7 +4444,7 @@ export function mountWalk(root, routes, config, actions = {}) {
     map.on('zoomend', () => {
       lastUserZoomAt = Date.now();
       renderTrail();
-      renderPlaces();
+      renderPlaces({ skipListRebuild: true });
     });
     // Bod 25: Ruční posun mapy dočasně přepne do prohlížení a zobrazí výrazné „Zpět na mou polohu“
     map.on('dragstart', () => {
@@ -4398,7 +4452,7 @@ export function mountWalk(root, routes, config, actions = {}) {
       updateFollowUi();
     });
     map.on('moveend', () => {
-      renderPlaces();
+      renderPlaces({ skipListRebuild: true });
       updateScanMapAreaButtonState();
       scheduleMapPanAutoFetch();
     });
@@ -4903,6 +4957,7 @@ export function mountWalk(root, routes, config, actions = {}) {
 
   function updateZenMode() {
     $('walk-map-wrap').classList.toggle('zen-mode', zenMode);
+    document.body?.classList.toggle('has-zen-mode', zenMode);
     $('zen-close-btn').hidden = !zenMode;
     if ($('zen-follow-btn')) $('zen-follow-btn').hidden = !zenMode;
     if ($('quest-hud-panel')) $('quest-hud-panel').hidden = !zenMode || getPlannedPlaces().length === 0;
@@ -5109,22 +5164,6 @@ export function mountWalk(root, routes, config, actions = {}) {
     const p1ScanBtn = $('btn-p1-scan-map');
     if (scanBtn) scanBtn.classList.add('is-loading');
     if (p1ScanBtn) p1ScanBtn.classList.add('is-loading');
-
-    // Okamžitě (0 ms) doplníme blízké body v okolí, aby mapa nebyla prázdná během čekání na Overpass / Wikipedii
-    const existingCloseCount = getAllAvailablePlaces().filter(p => (haversineMeters(originPos, p) ?? Infinity) <= 1800).length;
-    if (existingCloseCount < 12) {
-      const gridSeedKey = `${originPos.lat.toFixed(2)}:${originPos.lng.toFixed(2)}`;
-      const localSeed = buildLocalFallbackPlaces(originPos, gridSeedKey);
-      const seedMap = new Map();
-      for (const p of nearby) {
-        if (p && p.id) seedMap.set(p.id, p);
-      }
-      for (const p of localSeed) {
-        if (p && p.id && !seedMap.has(p.id)) seedMap.set(p.id, p);
-      }
-      nearby = [...seedMap.values()];
-      renderPlaces();
-    }
 
     try {
       const autoPlaces = await loadAutoPlacesForArea(

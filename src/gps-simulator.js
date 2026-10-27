@@ -413,16 +413,29 @@ export class GpsSimulator {
     else this.open();
   }
 
+  pause() {
+    this.isPaused = true;
+    this.statusMessage = '⏸ Simulátor pozastaven.';
+    this.updateStatusText();
+  }
+
+  resume() {
+    this.isPaused = false;
+    this.lastWallTickMs = Date.now();
+    this.statusMessage = '▶ Simulátor pokračuje.';
+    this.updateStatusText();
+  }
+
   triggerLoopTick(now = Date.now()) {
-    if (!this.isOpen) return;
+    if (!this.isOpen || this.isPaused) return;
     if (this.lastWallTickMs && now - this.lastWallTickMs < 480) {
       return;
     }
     const elapsedSec = this.lastWallTickMs
-      ? Math.min(20, Math.max(0.5, (now - this.lastWallTickMs) / 1000))
+      ? Math.min(20, Math.max(0.2, (now - this.lastWallTickMs) / 1000))
       : 1;
     this.lastWallTickMs = now;
-    this.tick(now, elapsedSec * 2);
+    this.tick(now, elapsedSec);
   }
 
   startLoop() {

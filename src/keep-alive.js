@@ -293,30 +293,75 @@ export function playTurnAudioCue(direction = 'straight') {
     const now = ctx.currentTime;
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
-    osc.type = 'triangle';
+    osc.type = 'sine';
 
     if (direction === 'left') {
+      // 1x beep 440 Hz (~0.18s)
       osc.frequency.setValueAtTime(440, now);
-      osc.frequency.setValueAtTime(554.37, now + 0.11);
+      gain.gain.setValueAtTime(0.001, now);
+      gain.gain.exponentialRampToValueAtTime(0.18, now + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.18);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.20);
     } else if (direction === 'right') {
-      osc.frequency.setValueAtTime(523.25, now);
-      osc.frequency.setValueAtTime(659.25, now + 0.11);
+      // 2x beep 587 Hz
+      osc.frequency.setValueAtTime(587.33, now);
+      gain.gain.setValueAtTime(0.001, now);
+      gain.gain.exponentialRampToValueAtTime(0.18, now + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.09);
+      gain.gain.setValueAtTime(0.0001, now + 0.12);
+      gain.gain.exponentialRampToValueAtTime(0.18, now + 0.14);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.23);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.25);
     } else if (direction === 'arrive') {
+      // Akord 523.25, 659.25, 783.99 Hz
       osc.frequency.setValueAtTime(523.25, now);
-      osc.frequency.setValueAtTime(659.25, now + 0.1);
-      osc.frequency.setValueAtTime(783.99, now + 0.2);
+      gain.gain.setValueAtTime(0.001, now);
+      gain.gain.exponentialRampToValueAtTime(0.16, now + 0.03);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.35);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.37);
+
+      const osc2 = ctx.createOscillator();
+      const gain2 = ctx.createGain();
+      osc2.type = 'sine';
+      osc2.frequency.setValueAtTime(659.25, now);
+      gain2.gain.setValueAtTime(0.001, now);
+      gain2.gain.exponentialRampToValueAtTime(0.14, now + 0.03);
+      gain2.gain.exponentialRampToValueAtTime(0.0001, now + 0.35);
+      osc2.connect(gain2);
+      gain2.connect(ctx.destination);
+      osc2.start(now);
+      osc2.stop(now + 0.37);
     } else {
-      osc.frequency.setValueAtTime(493.88, now);
+      osc.frequency.setValueAtTime(440, now);
+      gain.gain.setValueAtTime(0.001, now);
+      gain.gain.exponentialRampToValueAtTime(0.12, now + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.15);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.16);
     }
 
-    gain.gain.setValueAtTime(0.001, now);
-    gain.gain.exponentialRampToValueAtTime(0.16, now + 0.025);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.32);
-
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start(now);
-    osc.stop(now + 0.34);
+    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+      try {
+        if (direction === 'right') {
+          navigator.vibrate([90, 60, 90]);
+        } else if (direction === 'left') {
+          navigator.vibrate([140]);
+        } else if (direction === 'arrive') {
+          navigator.vibrate([100, 50, 150]);
+        }
+      } catch {}
+    }
     return true;
   } catch (_) {
     return false;

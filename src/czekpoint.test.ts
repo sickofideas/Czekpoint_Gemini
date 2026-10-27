@@ -51,6 +51,7 @@ import {
   ensureLoopDetourWaypoints,
   insertStopAtBestPosition,
   orderRouteWaypoints,
+  buildDetailedCornerSteps,
 } from './planner.js';
 import {
   createExpedition,
@@ -104,7 +105,7 @@ import {
   GpsSimulator,
 } from './gps-simulator.js';
 import { routes as PILOT_ROUTES } from './data.js';
-import { classifyCzechPlaceTitle, loadAutoPlacesForArea } from './auto-places.js';
+import { classifyCzechPlaceTitle, loadAutoPlacesForArea, deduplicatePlaces, ensureRichLocalCoverage } from './auto-places.js';
 import {
   isCommerciallyUsableLicense,
   getFallbackBitmapUrl,
@@ -1102,7 +1103,7 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
     assert.ok(profile.gainM >= 0);
     assert.ok(profile.maxEle >= profile.minEle);
 
-    const profileHtml = renderElevationProfileCardHtml(profile, [{ title: 'Třemšín' }], 0.5);
+    const profileHtml = renderElevationProfileCardHtml(profile, [{ title: 'Třemšín' }] as any, 0.5 as any);
     assert.ok(profileHtml.includes('elevation-profile-card'), 'HTML musí obsahovat .elevation-profile-card');
     assert.ok(profileHtml.includes('Stoupání +'), 'HTML musí zobrazovat celkové stoupání');
     assert.ok(profileHtml.includes('Klesání -'), 'HTML musí zobrazovat celkové klesání');
@@ -1120,7 +1121,7 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
         { title: 'Kaple na Třemšíně', photoUrl: generateCategoryPlaceSvgDataUrl({ title: 'Kaple', kind: 'chapel' }), kind: 'culture' },
         { title: 'Pramen Lomnice', photoUrl: generateCategoryPlaceSvgDataUrl({ title: 'Pramen', kind: 'spring' }), kind: 'water' },
       ],
-      trailCoordinates: routeCoords,
+      trailCoordinates: routeCoords as any,
     });
     assert.ok(svgCollage.includes('POZDRAV Z VÝPRAVY'), 'Pohlednice musí obsahovat hlavičku POZDRAV Z VÝPRAVY');
     assert.ok(svgCollage.includes('Zámek Rožmitál'), 'Pohlednice musí obsahovat názvy navštívených míst v koláži');
@@ -1146,14 +1147,14 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
         [49.6014, 13.8644],
         [49.6023, 13.8657],
         [49.6032, 13.8670],
-      ],
-    });
+      ] as any,
+    } as any);
     assert.equal(gapRecovery.recovered, true, 'Mezera > 12 s při normální chůzi musí být dopočítána');
     assert.ok(gapRecovery.points.length >= 5, 'Musí vzniknout interpolované body pro odkrytí mlhy a zastávek');
 
-    // 7. Ověření v1.2 prvků v index.html a src/walk.js
+    // 7. Ověření v1.2/v1.3 prvků v index.html a src/walk.js
     const indexHtml = fs.readFileSync('index.html', 'utf-8');
-    assert.ok(indexHtml.includes('v1.2'), 'index.html musí mít verzi v1.2');
+    assert.ok(indexHtml.includes('v1.2') || indexHtml.includes('v1.3'), 'index.html musí mít verzi v1.2 nebo v1.3');
     const walkJs = fs.readFileSync('src/walk.js', 'utf-8');
     assert.ok(walkJs.includes('map-lupa-search-input'), 'Vyhledávací lupa v mapě musí existovat');
     assert.ok(walkJs.includes('btn-download-offline-map'), 'Tlačítko pro offline stažení oblasti musí existovat');
@@ -1162,7 +1163,7 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
   });
 
   it('Oprava blikání bodů, hustoty míst v okolí, přiblížení mapy (16.5 + tlačítka +/-), hlášení každého rohu domu a chůze postavičky při zhasnutém displeji', async () => {
-    // 1. Bohatá hustota míst v okolí (18+ bodů do 1,8 km i při výpadku Overpass API)
+    // 1. Ověřené načítání z auto-places
     const testCenter = { lat: 49.7500, lng: 14.1500 };
     const failingOverpassFetch = async () => ({ ok: false, status: 502, json: async () => ({}) });
     const nearbyPlaces = await loadAutoPlacesForArea(
@@ -1174,7 +1175,7 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
       null,
       { radiusM: 4000, forceRefresh: true }
     );
-    assert.ok(nearbyPlaces.length >= 15, `V okolí musí být alespoň 15 bodů i při výpadku Overpass API, získáno: ${nearbyPlaces.length}`);
+    assert.ok(Array.isArray(nearbyPlaces), 'Načítání bodů v okolí musí vracet pole');
 
     // 2. Detekce každého rohu domu / ulice (>= 15°) a 3-fázové hlasové hlášení (_adv, _app, _now)
     // Vytvoříme trasu vedoucí 60 m na sever a pak zahýbající doprava (na východ) za roh domu
@@ -1186,11 +1187,11 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
       [49.60154, 13.86500], // Cíl (+72 m východně)
     ];
     const targetStop = { id: 'cil-za-rohem', title: 'Kaplička za rohem', lat: 49.60154, lng: 13.86500 };
-    const steps = buildTurnStepsFromCoordinates(cornerCoords, [targetStop]);
+    const steps = buildDetailedCornerSteps(cornerCoords, [targetStop]);
     const rightCornerStep = steps.find((s: any) => s.coordIndex === 2);
     assert.ok(rightCornerStep, 'Každý roh ulice/domu musí být detekován jako odbočovací krok');
-    assert.match(rightCornerStep.actionLabel, /doprava za roh/i);
-    assert.match(rightCornerStep.voiceAction, /zahněte doprava za roh/i);
+    assert.match(rightCornerStep.actionLabel, /vpravo/i);
+    assert.match(rightCornerStep.voiceAction, /vpravo/i);
 
     const routeObj = {
       coordinates: cornerCoords,
@@ -1199,24 +1200,18 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
       isFallback: false,
     };
 
-    // Hráč je 45 m před rohem (fáze 1: předstih _adv)
+    // Hráč je 45 m před rohem (Fáze 1: Příprava prep_)
     const pos45mBefore = { lat: 49.60114, lng: 13.86400 };
-    const navAdv = computeActiveTurnInstruction(routeObj as any, pos45mBefore as any, [targetStop] as any, new Set());
-    assert.ok(navAdv.stepKey.endsWith('_adv'), `Ve vzdálenosti ~45 m před rohem má být fáze _adv, získáno: ${navAdv.stepKey}`);
+    const navAdv = computeActiveTurnInstruction(routeObj as any, pos45mBefore as any, [targetStop] as any, new Set() as any);
+    assert.ok(navAdv.stepKey.startsWith('prep_'), `Ve vzdálenosti ~45 m před rohem má být fáze prep_, získáno: ${navAdv.stepKey}`);
     assert.equal(navAdv.turnDirection, 'right');
-    assert.match(navAdv.voiceText, /zahněte doprava za roh/i);
+    assert.match(navAdv.voiceText, /Připravte se.*na rohu/i);
 
-    // Hráč je 22 m před rohem (fáze 2: přiblížení _app)
-    const pos22mBefore = { lat: 49.60134, lng: 13.86400 };
-    const navApp = computeActiveTurnInstruction(routeObj as any, pos22mBefore as any, [targetStop] as any, new Set());
-    assert.ok(navApp.stepKey.endsWith('_app'), `Ve vzdálenosti ~22 m před rohem má být fáze _app, získáno: ${navApp.stepKey}`);
-    assert.match(navApp.voiceText, /Připravte se.*zahněte doprava za roh/i);
-
-    // Hráč je 8 m před rohem (fáze 3: přímo u rohu _now — nesmí přeskočit roh předčasně!)
+    // Hráč je 8 m před rohem (Fáze 2: Akce na rohu exec_)
     const pos8mBefore = { lat: 49.60147, lng: 13.86400 };
-    const navNow = computeActiveTurnInstruction(routeObj as any, pos8mBefore as any, [targetStop] as any, new Set());
-    assert.ok(navNow.stepKey.endsWith('_now'), `Ve vzdálenosti ~8 m před rohem musí hlásit samotný roh (_now), získáno: ${navNow.stepKey}`);
-    assert.match(navNow.voiceText, /Teď zahněte doprava za roh/i);
+    const navNow = computeActiveTurnInstruction(routeObj as any, pos8mBefore as any, [targetStop] as any, new Set() as any);
+    assert.ok(navNow.stepKey.startsWith('exec_'), `Ve vzdálenosti ~8 m před rohem má být akce exec_, získáno: ${navNow.stepKey}`);
+    assert.match(navNow.voiceText, /Teď na rohu/i);
 
     // 3. Chůze postavičky (GpsSimulator) pokračuje v reálném čase i při zhasnutém displeji (triggerLoopTick)
     const fixesReceived: any[] = [];
@@ -1247,6 +1242,23 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
     assert.ok(walkJs.includes('id="walk-zoom-in"'), 'Tlačítko přiblížení #walk-zoom-in musí existovat');
     assert.ok(walkJs.includes('id="walk-zoom-out"'), 'Tlačítko oddálení #walk-zoom-out musí existovat');
     assert.ok(walkJs.includes('16.5'), 'Výchozí přiblížení mapy musí být detailní (16.5)');
+  });
+
+  it('v1.3 (ZADÁNÍ #11): Zákaz vymýšlení falešných míst, 2-fázová odbočovací navigace a uzamčený origin výpravy', () => {
+    const places = deduplicatePlaces([
+      { id: 'p1', title: 'Kaplička', lat: 49.601, lng: 13.864, category: 'castles', kind: 'culture' },
+      { id: 'p2', title: 'Křížek', lat: 49.601005, lng: 13.864005, category: 'castles', kind: 'culture' },
+      { id: 'p3', title: 'Památník', lat: 49.602, lng: 13.865, category: 'castles', kind: 'culture' },
+    ]);
+    assert.ok(places.length >= 2, 'Deduplikace na 18 m nesmí sloučit různé památky');
+
+    const rich = ensureRichLocalCoverage(places);
+    assert.equal(rich.length, places.length, 'ensureRichLocalCoverage nesmí vymýšlet žádná falešná místa');
+
+    const walkJs = fs.readFileSync('src/walk.js', 'utf-8');
+    assert.ok(walkJs.includes('lockedExpeditionOrigin'), 'lockedExpeditionOrigin musí uzamykat místo startu výpravy');
+    assert.ok(walkJs.includes('stateSig'), 'stateSig diffing brání zbytečnému re-renderování markerů');
+    assert.ok(walkJs.includes('updateTurnNavPill(cleanFix)'), 'Navigace a rohy se musí aktualizovat na každý GPS fix');
   });
 });
 

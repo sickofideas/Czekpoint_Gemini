@@ -1085,10 +1085,15 @@ export function computeBearingDeg(a, b) {
 }
 
 /**
- * Odvodí podrobné odbočovací instrukce (`steps`) pro každý roh domu / ohyb ulice či stezky ze souřadnic trasy.
- * Detekuje jak ostré rohy v jednom bodě, tak zaoblené rohy rozložené do 2–3 blízkých bodů (okno ~16 m).
+ * ZADÁNÍ #11 (Bod 4.1): Algoritmus rohů a zlomů trasy (`buildDetailedCornerSteps`).
+ * Posuvným oknem ~14 m (vektor ~12 m před vrcholem vs ~12 m za vrcholem) detekuje každý roh domu
+ * a ohyb cesty s úhlem >= 24° a odstupem >= 12 m.
+ * 24°–45°: ↖ Mírně vlevo / ↗ Mírně vpravo
+ * 45°–125°: ↰ Na rohu odboč vlevo / ↱ Na rohu odboč vpravo
+ * > 125°: ↩ Ostrá zatáčka vlevo / ↪ Ostrá zatáčka vpravo
+ * Pro každý roh spočítá nextStraightMeters.
  */
-export function buildTurnStepsFromCoordinates(coordinates = [], stopTargets = []) {
+export function buildDetailedCornerSteps(coordinates = [], stopTargets = [], osrmSteps = []) {
   if (!Array.isArray(coordinates) || coordinates.length < 2) return [];
   const steps = [];
   let accumM = 0;
@@ -1114,15 +1119,16 @@ export function buildTurnStepsFromCoordinates(coordinates = [], stopTargets = []
         actionLabel: `cíl ${stopHere.title}`,
         voiceAction: `jste u cíle ${stopHere.title}`,
         name: stopHere.title,
+        nextStraightMeters: 0,
       });
       accumM = 0;
       continue;
     }
 
-    // Měříme úhel přímo v vrcholu i přes krátké okno (~16 m), aby se neztratily zaoblené rohy ulic z OSRM
+    // Posuvné okno ~14 m (vektor ~12 m před vrcholem vs ~12 m za vrcholem)
     let lookBackIdx = i - 1;
     let backDist = segM;
-    while (lookBackIdx > 0 && backDist < 10) {
+    while (lookBackIdx > 0 && backDist < 12) {
       const pA = { lat: coordinates[lookBackIdx - 1][0], lng: coordinates[lookBackIdx - 1][1] };
       const pB = { lat: coordinates[lookBackIdx][0], lng: coordinates[lookBackIdx][1] };
       backDist += haversineMeters(pA, pB) ?? 0;
@@ -1131,7 +1137,7 @@ export function buildTurnStepsFromCoordinates(coordinates = [], stopTargets = []
 
     let lookAheadIdx = i + 1;
     let aheadDist = haversineMeters(curr, next) ?? 0;
-    while (lookAheadIdx < coordinates.length - 1 && aheadDist < 10) {
+    while (lookAheadIdx < coordinates.length - 1 && aheadDist < 12) {
       const pA = { lat: coordinates[lookAheadIdx][0], lng: coordinates[lookAheadIdx][1] };
       const pB = { lat: coordinates[lookAheadIdx + 1][0], lng: coordinates[lookAheadIdx + 1][1] };
       aheadDist += haversineMeters(pA, pB) ?? 0;
@@ -1143,27 +1149,37 @@ export function buildTurnStepsFromCoordinates(coordinates = [], stopTargets = []
 
     const b1 = computeBearingDeg(entryPt, curr);
     const b2 = computeBearingDeg(curr, exitPt);
-    const delta = ((b2 - b1 + 540) % 360) - 180; // -180..+180 (záporné = vlevo, kladné = vpravo)
+    const delta = ((b2 - b1 + 540) % 360) - 180; // -180..+180
     const absDelta = Math.abs(delta);
 
-    // Hlásíme každý roh domu / ohyb cesty od 15° výše (s minimálním odstupem 8 m od předchozího rohu)
-    if (absDelta >= 15 && accumM >= 8) {
+    // Každý zlom s úhlem >= 24° a minimální vzdáleností >= 12 m od předchozího ohlášeného rohu
+    if (absDelta >= 24 && accumM >= 12) {
       const isLeft = delta < 0;
       let modifier = isLeft ? 'left' : 'right';
       let icon = isLeft ? '↰' : '↱';
-      let actionLabel = isLeft ? 'zahni doleva za roh' : 'zahni doprava za roh';
-      let voiceAction = isLeft ? 'zahněte doleva za roh' : 'zahněte doprava za roh';
+      let actionLabel = isLeft ? 'na rohu odboč vlevo' : 'na rohu odboč vpravo';
+      let voiceAction = isLeft ? 'odbočte vlevo' : 'odbočte vpravo';
 
-      if (absDelta < 35) {
+      if (absDelta <= 45) {
         modifier = isLeft ? 'slight left' : 'slight right';
         icon = isLeft ? '↖' : '↗';
-        actionLabel = isLeft ? 'mírně vlevo za roh' : 'mírně vpravo za roh';
-        voiceAction = isLeft ? 'jděte mírně vlevo za roh' : 'jděte mírně vpravo za roh';
-      } else if (absDelta >= 120) {
+        actionLabel = isLeft ? 'mírně vlevo' : 'mírně vpravo';
+        voiceAction = isLeft ? 'jděte mírně vlevo' : 'jděte mírně vpravo';
+      } else if (absDelta > 125) {
         modifier = isLeft ? 'sharp left' : 'sharp right';
-        icon = isLeft ? '↰' : '↱';
-        actionLabel = isLeft ? 'ostře doleva za roh' : 'ostře doprava za roh';
-        voiceAction = isLeft ? 'zahněte ostře doleva za roh' : 'zahněte ostře doprava za roh';
+        icon = isLeft ? '↩' : '↪';
+        actionLabel = isLeft ? 'ostrá zatáčka vlevo' : 'ostrá zatáčka vpravo';
+        voiceAction = isLeft ? 'zahněte ostře vlevo' : 'zahněte ostře vpravo';
+      }
+
+      // Propojení s názvem ulice z OSRM kroků, pokud je k dispozici
+      const matchedOsrm = (osrmSteps || []).find(
+        st => st.name && (Math.abs(st.coordIndex - i) <= 2 || (haversineMeters(st, curr) ?? Infinity) <= 15)
+      );
+      const roadName = matchedOsrm?.name || '';
+      if (roadName) {
+        actionLabel += ` do ulice ${roadName}`;
+        voiceAction += ` do ulice ${roadName}`;
       }
 
       steps.push({
@@ -1177,7 +1193,8 @@ export function buildTurnStepsFromCoordinates(coordinates = [], stopTargets = []
         icon,
         actionLabel,
         voiceAction,
-        name: '',
+        name: roadName,
+        nextStraightMeters: 0,
       });
       accumM = 0;
     }
@@ -1200,9 +1217,29 @@ export function buildTurnStepsFromCoordinates(coordinates = [], stopTargets = []
     actionLabel: finalStop?.title ? `cíl ${finalStop.title}` : 'cíl trasy',
     voiceAction: finalStop?.title ? `jste u cíle ${finalStop.title}` : 'jste v cíli trasy',
     name: finalStop?.title || 'Cíl trasy',
+    nextStraightMeters: 0,
   });
 
+  // Výpočet nextStraightMeters pro každý roh (vzdálenost k dalšímu rohu / zastávce)
+  for (let s = 0; s < steps.length - 1; s++) {
+    const curStep = steps[s];
+    const nextStep = steps[s + 1];
+    let straightM = 0;
+    const startC = Math.min(curStep.coordIndex, coordinates.length - 1);
+    const endC = Math.min(nextStep.coordIndex, coordinates.length - 1);
+    for (let c = startC; c < endC; c++) {
+      const p1 = { lat: coordinates[c][0], lng: coordinates[c][1] };
+      const p2 = { lat: coordinates[c + 1][0], lng: coordinates[c + 1][1] };
+      straightM += haversineMeters(p1, p2) ?? 0;
+    }
+    curStep.nextStraightMeters = Math.max(5, Math.round(straightM));
+  }
+
   return steps;
+}
+
+export function buildTurnStepsFromCoordinates(coordinates = [], stopTargets = []) {
+  return buildDetailedCornerSteps(coordinates, stopTargets);
 }
 
 /**
@@ -1298,7 +1335,7 @@ export function extractStepsFromOsrmRoute(route, coordinates = [], stopTargets =
     }
   }
 
-  const geomCorners = buildTurnStepsFromCoordinates(coordinates, stopTargets);
+  const geomCorners = buildDetailedCornerSteps(coordinates, stopTargets, extracted);
   if (extracted.length === 0) {
     return geomCorners;
   }
@@ -1322,7 +1359,7 @@ export function extractStepsFromOsrmRoute(route, coordinates = [], stopTargets =
  * Najde nejbližší úsek lomené čáry trasy vůči pozici hráče a vrátí index výchozího vrcholu úseku (`segIdx`),
  * kolmou vzdálenost k úseku (`distanceToRouteM`) a kolik metrů zbývá do konce tohoto úseku (`distToSegEndM`).
  */
-function locatePlayerOnPolyline(currentPos, coords = []) {
+export function locatePlayerOnPolyline(currentPos, coords = []) {
   if (!currentPos || !Number.isFinite(currentPos.lat) || !Number.isFinite(currentPos.lng) || !Array.isArray(coords) || coords.length === 0) {
     return { segIdx: 0, distanceToRouteM: 0, distToSegEndM: 0 };
   }
@@ -1497,38 +1534,60 @@ export function computeActiveTurnInstruction(arg1, arg2, arg3 = null, arg4 = nul
     upcomingStep.icon === '↰' ||
     upcomingStep.icon === '↱' ||
     upcomingStep.icon === '↖' ||
-    upcomingStep.icon === '↗';
+    upcomingStep.icon === '↗' ||
+    upcomingStep.icon === '↩' ||
+    upcomingStep.icon === '↪';
 
   if (isTurn) {
     const turnDir = String(upcomingStep.modifier || '').includes('left') ? 'left' : 'right';
-    const voicePhrase = upcomingStep.voiceAction || upcomingStep.actionLabel;
-    let stage = 'far';
-    let speechText = `Za ${distM} metrů ${voicePhrase}.`;
-    let uiText = `${upcomingStep.icon} Za ${distM} m ${upcomingStep.actionLabel}${nextStopSuffix}`;
+    const voicePhrase = upcomingStep.voiceAction || upcomingStep.actionLabel || 'odbočte';
+    const actionLabel = upcomingStep.actionLabel || 'odboč';
 
-    if (distM <= 14) {
-      stage = 'now';
-      speechText = `Teď ${voicePhrase}!`;
-      uiText = `${upcomingStep.icon} TEĎ: ${upcomingStep.actionLabel} (${distM} m)${nextStopSuffix}`;
-    } else if (distM <= 32) {
-      stage = 'app';
-      const rounded5 = Math.max(15, Math.round(distM / 5) * 5);
-      speechText = `Připravte se, za ${rounded5} metrů ${voicePhrase}.`;
-    } else if (distM <= 85) {
-      stage = 'adv';
-      const rounded10 = Math.max(35, Math.round(distM / 10) * 10);
-      speechText = `Za ${rounded10} metrů ${voicePhrase}.`;
+    // Fáze 2: Akce na rohu (<= 15 m)
+    if (distM <= 15) {
+      const nextStraightStr = upcomingStep.nextStraightMeters ? ` a pokračujte ${upcomingStep.nextStraightMeters} metrů` : '';
+      const speechText = `Teď na rohu ${voicePhrase}${nextStraightStr}.`;
+      const uiText = `${upcomingStep.icon} TEĎ: ${actionLabel}${upcomingStep.nextStraightMeters ? ` (pak ${upcomingStep.nextStraightMeters} m rovně)` : ''}`;
+      return {
+        icon: upcomingStep.icon,
+        text: uiText,
+        speechText,
+        voiceText: speechText,
+        distanceToTurnM: distM,
+        isNearTurn: true,
+        turnDirection: turnDir,
+        stepKey: `exec_${upcomingStep.coordIndex}`,
+      };
     }
 
+    // Fáze 1: Příprava (30–55 m)
+    if (distM >= 30 && distM <= 55) {
+      const speechText = `Připravte se, za ${distM} metrů na rohu ${voicePhrase}.`;
+      const uiText = `${upcomingStep.icon} Za ${distM} m ${actionLabel}${nextStopSuffix}`;
+      return {
+        icon: upcomingStep.icon,
+        text: uiText,
+        speechText,
+        voiceText: speechText,
+        distanceToTurnM: distM,
+        isNearTurn: true,
+        turnDirection: turnDir,
+        stepKey: `prep_${upcomingStep.coordIndex}`,
+      };
+    }
+
+    // Mezidobí (po projetí rohu nebo 16–29 m či > 55 m)
+    // Pilulka nahoře u kompasu ukazuje: „↑ Rovně ${distM} m k dalšímu rohu (${upcomingStep.icon} pak ${actionLabel})“
+    const uiText = `↑ Rovně ${distM} m k dalšímu rohu (${upcomingStep.icon} pak ${actionLabel})`;
     return {
-      icon: upcomingStep.icon,
+      icon: '↑',
       text: uiText,
-      speechText,
-      voiceText: speechText,
+      speechText: '',
+      voiceText: '',
       distanceToTurnM: distM,
-      isNearTurn: distM <= 45,
-      turnDirection: turnDir,
-      stepKey: `turn_${upcomingStep.coordIndex}_${stage}`,
+      isNearTurn: distM <= 25,
+      turnDirection: 'straight',
+      stepKey: `mid_${upcomingStep.coordIndex}_${Math.floor(distM / 20)}`,
     };
   }
 

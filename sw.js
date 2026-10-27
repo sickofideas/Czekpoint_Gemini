@@ -1,12 +1,12 @@
 // ============================================================
-// CZEKPOINT v1.2 — Service Worker pro offline mapy a běh v lese bez signálu (sw.js)
+// CZEKPOINT v1.3 — Service Worker pro offline mapy a běh v lese bez signálu (sw.js)
 // - Automaticky ukládá aplikační soubory (index.html, src/*.js, assets/**)
 // - Ukládá mapové dlaždice (tile.openstreetmap.org, tile.opentopomap.org, tile.waymarkedtrails.org)
 // - Poskytuje cache-first strategii s doživotním fallbackem pro dlaždice při výpadku signálu
 // ============================================================
 
-const APP_CACHE_NAME = 'czekpoint-app-shell-v1.2.2';
-const TILE_CACHE_NAME = 'czekpoint-offline-tiles-v1.2';
+const APP_CACHE_NAME = 'czekpoint-app-shell-v1.3.0';
+const TILE_CACHE_NAME = 'czekpoint-offline-tiles-v1.3';
 
 const CORE_ASSETS = [
   './',
