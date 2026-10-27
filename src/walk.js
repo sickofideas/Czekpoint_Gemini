@@ -46,6 +46,7 @@ import {
   DEFAULT_GOALS,
 } from './expedition-engine.js';
 import { renderPostcard, generatePostcardBlob, generatePostcardDataUrl } from './postcard.js';
+import { renderPostcardSvgDataUrl } from './postcards.js';
 import { fetchNearby } from './nearby.js';
 import { loadAutoPlacesForArea } from './auto-places.js';
 import {
@@ -54,6 +55,25 @@ import {
   resolveVerifiedPlacePhoto,
   prefetchVerifiedPhotosForPlaces,
 } from './poi-photos.js';
+import {
+  getPlacePhotoSync,
+  resolvePlacePhoto,
+  prefetchPlacePhotos,
+} from './place-photos.js';
+import {
+  fetchRouteElevationProfile,
+  renderElevationProfileCardHtml,
+} from './elevation.js';
+import {
+  downloadOfflineArea,
+  loadOfflineAreaData,
+} from './offline-maps.js';
+import {
+  createCompassStabilizer,
+  interpolateBackgroundGap,
+  triggerPocketProximityAlert,
+  createKeepAliveController,
+} from './keep-alive.js';
 import { haversineMeters } from './domain.js';
 import { escapeHtml as e, number } from './ui.js';
 import { CHAPTERS, COLLECTIONS, RELICS } from './data.js';
@@ -267,12 +287,22 @@ export function mountWalk(root, routes, config, actions = {}) {
   let plannedRouteRenderToken = 0;
   let plannedRouteCoords = null;
   let lastRoutedGeometry = null;
+  let currentElevationProfile = null;
+  let elevationProfileToken = 0;
   let autoPlacesLoading = false;
   let autoPanFetchTimer = null;
   let lastAutoPanCenter = null;
   let pendingAutoPanCenter = null;
   let radiusCircle = null;
   let fakeGpsSim = null;
+
+  const compassStabilizer = createCompassStabilizer({ alpha: 0.12, deadbandDeg: 2.5, minIntervalMs: 80 });
+  const keepAliveCtrl = createKeepAliveController();
+  let lastSampledFix = null;
+  const alertedProximityStopIds = new Set();
+  let arrivalGoalPromptShownForKey = '';
+  let lupaSearchTimer = null;
+  let lastLupaResults = [];
 
   let anchor = null, lastFix = null, watch = null;
   let active = false, disposed = false, demo = false, demoIndex = 0;
@@ -375,14 +405,14 @@ export function mountWalk(root, routes, config, actions = {}) {
     });
 
   root.innerHTML = `
-    <h1 tabindex="-1" class="visually-hidden">Mapa objevování a procházka · Czekpoint v1.1</h1>
+    <h1 tabindex="-1" class="visually-hidden">Mapa objevování a procházka · Czekpoint v1.2</h1>
 
-    <!-- Horní přehledový panel trasy + Vizuální plán cesty (jaké body jsou v trase a kam jdu) -->
-    <section class="phase1-top-bar" id="phase1-top-bar" aria-label="Souhrn trasy, plán zastávek a spuštění výpravy">
+    <!-- Horní přehledový panel trasy: zobrazí se AŽ ve chvíli, kdy má uživatel vybraný alespoň 1 bod v trase (ZADÁNÍ #10 Bod 1.1) -->
+    <section class="phase1-top-bar" id="phase1-top-bar" hidden aria-label="Souhrn trasy, plán zastávek a spuštění výpravy">
       <div class="p1-top-main-row">
         <div class="p1-top-summary" id="phase1-top-summary" role="status" aria-live="polite">
           <span class="p1-top-icon">🧭</span>
-          <span class="p1-top-text" id="phase1-top-text">Půjdeš <strong>~1 hod 30 min (6,0 km)</strong> · <strong>4 zastávky v trase</strong></span>
+          <span class="p1-top-text" id="phase1-top-text">Vyber si zastávky v mapě nebo v seznamu níže</span>
         </div>
         <div class="p1-top-actions" id="phase1-top-actions">
           <button type="button" class="button accent-action-btn phase1-go-btn" id="btn-phase1-go">
@@ -392,7 +422,7 @@ export function mountWalk(root, routes, config, actions = {}) {
             ⏸ Pozastavit
           </button>
           <button type="button" class="button small dark-ctrl-btn" id="btn-top-fullscreen" title="Zvětšit mapu na celou obrazovku">
-            🔍 Celá obrazovka
+            ⛶ Celá obrazovka
           </button>
           <button type="button" class="button small dark-ctrl-btn" id="btn-top-edit-walk" title="Podrobně upravit zastávky a parametry trasy">
             ✏️ Upravit body
@@ -415,18 +445,18 @@ export function mountWalk(root, routes, config, actions = {}) {
       </div>
     </section>
 
-    <!-- Panel výběru 3 herních režimů, témat, délky a startu (umístěný přehledně nad mapou, nezakrývá mapu) -->
-    <section class="phase1-bottom-bar phase1-planner-card" id="phase1-bottom-bar" role="region" aria-label="Výběr herního režimu a parametrů trasy">
+    <!-- Zjednodušený panel pro 50+ (ZADÁNÍ #10 Bod 1.1 & 2.1): pouze velké dlaždice Herního režimu a Co chci vidět -->
+    <section class="phase1-bottom-bar phase1-planner-card" id="phase1-bottom-bar" role="region" aria-label="Výběr herního režimu a filtru míst">
       <div class="p1-row">
         <span class="p1-row-label">1. Herní režim:</span>
-        <div class="p1-btn-group" role="group" aria-label="Výběr ze 3 herních režimů">
-          <button type="button" class="p1-choice-btn ${appSettings.gameMode === 'explorer' ? 'active' : ''}" data-p1-gamemode="explorer" aria-pressed="${appSettings.gameMode === 'explorer'}" title="Zahalená mapa s mlhou, objevování podle kompasu a vlastních kroků">
+        <div class="p1-btn-group p1-gamemode-row" role="group" aria-label="Výběr ze 3 herních režimů">
+          <button type="button" class="p1-choice-btn p1-gamemode-btn ${appSettings.gameMode === 'explorer' ? 'active' : ''}" data-p1-gamemode="explorer" aria-pressed="${appSettings.gameMode === 'explorer'}">
             🧭 1. Objevitel (Mlha + kompas)
           </button>
-          <button type="button" class="p1-choice-btn ${appSettings.gameMode === 'gamified' ? 'active' : ''}" data-p1-gamemode="gamified" aria-pressed="${appSettings.gameMode === 'gamified'}" title="Doporučeno: KCD2 pergamen s odkrýváním, stopy pohorek, KČT značky a razítka">
+          <button type="button" class="p1-choice-btn p1-gamemode-btn ${(appSettings.gameMode || 'gamified') === 'gamified' ? 'active' : ''}" data-p1-gamemode="gamified" aria-pressed="${(appSettings.gameMode || 'gamified') === 'gamified'}">
             🥾 2. Výprava s pergamenem (KCD2)
           </button>
-          <button type="button" class="p1-choice-btn ${appSettings.gameMode === 'casual' ? 'active' : ''}" data-p1-gamemode="casual" aria-pressed="${appSettings.gameMode === 'casual'}" title="Čistá otevřená turistická mapa bez mlhy, vrstevnice a KČT stezky">
+          <button type="button" class="p1-choice-btn p1-gamemode-btn ${appSettings.gameMode === 'casual' ? 'active' : ''}" data-p1-gamemode="casual" aria-pressed="${appSettings.gameMode === 'casual'}">
             🗺️ 3. Čistá turistická mapa
           </button>
         </div>
@@ -435,42 +465,10 @@ export function mountWalk(root, routes, config, actions = {}) {
       <div class="p1-row">
         <span class="p1-row-label">2. Co chci vidět:</span>
         <div class="p1-btn-group" role="group" aria-label="Co chci vidět">
-          <button type="button" class="p1-choice-btn active" data-p1-theme="all" aria-pressed="true">✨ Vše zajímavé</button>
-          <button type="button" class="p1-choice-btn" data-p1-theme="castles" aria-pressed="false">🏰 Památky a hrady</button>
-          <button type="button" class="p1-choice-btn" data-p1-theme="nature" aria-pressed="false">🌲 Příroda a vyhlídky</button>
-          <button type="button" class="p1-choice-btn" data-p1-theme="water" aria-pressed="false">💧 Voda a rybníky</button>
-        </div>
-      </div>
-
-      <div class="p1-row">
-        <span class="p1-row-label">3. Délka a cíl:</span>
-        <div class="p1-btn-group" role="group" aria-label="Délka procházky a zakončení">
-          <button type="button" class="p1-choice-btn ${phase1DurationKm === 3 ? 'active' : ''}" data-p1-dur="3" aria-pressed="${phase1DurationKm === 3}">🕒 ~1 hod (3 km)</button>
-          <button type="button" class="p1-choice-btn ${phase1DurationKm === 6 ? 'active' : ''}" data-p1-dur="6" aria-pressed="${phase1DurationKm === 6}">🕒 ~2 hod (6 km)</button>
-          <button type="button" class="p1-choice-btn ${phase1DurationKm === 9 ? 'active' : ''}" data-p1-dur="9" aria-pressed="${phase1DurationKm === 9}">🕒 ~3 hod (9 km)</button>
-          <span class="p1-divider" aria-hidden="true">|</span>
-          <button type="button" class="p1-choice-btn ${phase1EndMode === 'loop' ? 'active' : ''}" data-p1-end="loop" aria-pressed="${phase1EndMode === 'loop'}">🔄 Okruh zpět sem</button>
-          <button type="button" class="p1-choice-btn ${phase1EndMode === 'custom' ? 'active' : ''}" data-p1-end="custom" aria-pressed="${phase1EndMode === 'custom'}">🏁 Jiný cíl (kliknu do mapy)</button>
-        </div>
-      </div>
-
-      <div class="p1-row">
-        <span class="p1-row-label">4. Oblast v ČR &amp; start:</span>
-        <div class="p1-btn-group" role="group" aria-label="Odkud vyrážím a oblast mapy">
-          <button type="button" class="p1-choice-btn ${!userExplicitlyPickedOrigin ? 'active' : ''}" data-p1-origin="gps">📍 Moje GPS / Rožmitál</button>
-          ${CZECH_PLACE_PRESETS.slice(0, 8).map(preset => `
-            <button type="button" class="p1-choice-btn ${plannedRoute.origin?.id === preset.id ? 'active' : ''}" data-p1-preset="${e(preset.id)}">
-              ${e(preset.label.split('(')[0].trim())}
-            </button>
-          `).join('')}
-          <button type="button" class="p1-choice-btn p1-scan-map-btn" id="btn-p1-scan-map" title="Vezme aktuálně zobrazenou část mapy kdekoliv v ČR, načte zajímavá místa v okolí a rovnou z nich postaví trasu">
-            ✨ Generovat trasu v aktuální mapě
-          </button>
-          <button type="button" class="p1-choice-btn" id="btn-p1-pick-start-map">🗺️ Kliknout start v mapě</button>
-          <div class="p1-search-inline">
-            <input type="search" id="p1-place-search-input" class="p1-search-input" placeholder="Jiné místo v ČR (např. Příbram, Karlštejn, Tábor…)" aria-label="Vyhledat libovolné město nebo místo v ČR" />
-            <button type="button" class="p1-choice-btn p1-search-submit-btn" id="btn-p1-search-place">🔍 Najít v ČR</button>
-          </div>
+          <button type="button" class="p1-choice-btn p1-cat-btn active" data-p1-theme="all" aria-pressed="true">✨ Vše zajímavé</button>
+          <button type="button" class="p1-choice-btn p1-cat-btn" data-p1-theme="castles" aria-pressed="false">🏰 Památky a hrady</button>
+          <button type="button" class="p1-choice-btn p1-cat-btn" data-p1-theme="nature" aria-pressed="false">🌲 Příroda a vyhlídky</button>
+          <button type="button" class="p1-choice-btn p1-cat-btn" data-p1-theme="water" aria-pressed="false">💧 Voda a rybníky</button>
         </div>
       </div>
     </section>
@@ -623,6 +621,26 @@ export function mountWalk(root, routes, config, actions = {}) {
     <div class="walk-map-wrap" id="walk-map-wrap">
       <div id="walk-map" aria-label="Interaktivní Mapa objevování"></div>
 
+      <!-- 2.2 Horní vyhledávací pole s lupou přímo v mapě (top: 12px; left: 12px; right: 12px; z-index: 800) -->
+      <div class="map-search-overlay" id="map-search-overlay" role="search" aria-label="Vyhledávání v mapě">
+        <div class="map-search-bar">
+          <span class="map-search-icon" aria-hidden="true">🔍</span>
+          <input
+            type="search"
+            id="map-lupa-search-input"
+            class="map-search-input"
+            placeholder="Hledat město, památku nebo rozcestí..."
+            aria-label="Hledat město, památku nebo rozcestí"
+            autocomplete="off"
+          />
+          <button type="button" id="map-lupa-search-clear" class="map-search-clear" hidden aria-label="Vymazat hledání">✕</button>
+        </div>
+        <div id="map-lupa-search-results" class="map-search-results" hidden role="listbox" aria-label="Výsledky vyhledávání"></div>
+      </div>
+
+      <!-- Ukazatel stahování offline mapy -->
+      <div id="offline-download-banner" class="offline-download-banner" hidden role="status" aria-live="polite"></div>
+
       <!-- Bublina po kliknutí na ikonu v mapě (Vynechat zastávku / Přidat po cestě / Nastavit jako nový konec) -->
       <div id="place-detail-sheet" class="place-detail-sheet" hidden role="dialog" aria-label="Úprava bodu na trase"></div>
 
@@ -631,15 +649,10 @@ export function mountWalk(root, routes, config, actions = {}) {
         📍 Zpět na mou polohu
       </button>
 
-      <!-- Tlačítko pro načtení zajímavých bodů a vygenerování trasy přímo z aktuálního výřezu mapy kdekoliv v ČR -->
-      <button type="button" id="btn-scan-map-area" class="scan-map-area-btn" title="Načte zajímavá místa z právě zobrazené mapy (kdekoliv v ČR) a navrhne z nich trasu">
-        ✨ Načíst zajímavá místa v této oblasti mapy a navrhnout trasu
-      </button>
-
       <!-- Aktivní otočný kompas -->
-      <div class="active-compass-widget" id="active-compass-widget" title="Aktivní kompas výpravy" role="button" tabindex="0">
-        <div class="compass-dial" id="compass-dial">
-          <svg viewBox="0 0 100 100" class="compass-dial-svg">
+      <div class="active-compass-widget compass-widget" id="active-compass-widget" title="Aktivní kompas výpravy" role="button" tabindex="0">
+        <div class="compass-dial compass-rose-svg" id="compass-dial">
+          <svg viewBox="0 0 100 100" class="compass-dial-svg" id="compass-rose-svg">
             <circle cx="50" cy="50" r="47" fill="#1e2d24" stroke="#d8b25c" stroke-width="3"/>
             <circle cx="50" cy="50" r="41" fill="#f7f2e4" stroke="#6e5332" stroke-width="1.5"/>
             <text x="50" y="21" text-anchor="middle" font-size="13" font-weight="900" fill="#b82518">S</text>
@@ -661,9 +674,9 @@ export function mountWalk(root, routes, config, actions = {}) {
       </div>
 
       <!-- Odbočovací navigace u kompasu (.turn-nav-pill) -->
-      <div class="turn-nav-pill" id="turn-nav-pill" role="status" aria-live="polite">
+      <div class="turn-nav-pill" id="turn-nav-pill" role="status" aria-live="polite" hidden>
         <span class="turn-nav-icon" id="turn-nav-icon">↑</span>
-        <span class="turn-nav-text" id="turn-nav-text">Trasa připravena · Klikni na ▶ VYRAZIT nahoře</span>
+        <span class="turn-nav-text" id="turn-nav-text">Trasa připravena</span>
         <button type="button" class="voice-nav-pill-btn ${voiceNavEnabled ? 'active' : ''}" id="btn-voice-nav-pill" title="Zapnout/vypnout českou hlasovou navigaci" aria-pressed="${voiceNavEnabled}">
           ${voiceNavEnabled ? '🔊 Hlas ZAP' : '🔈 Hlas'}
         </button>
@@ -696,30 +709,27 @@ export function mountWalk(root, routes, config, actions = {}) {
         <span class="zen-fab-label" id="zen-follow-label">Sleduji polohu</span>
       </button>
 
-      <!-- Ovládací lišta přímo v rohu mapy: Celá obrazovka, Pergamen/Mapa, KČT trasy, Vrstevnice, Moje poloha -->
-      <div class="walk-map-toolbar">
-        <button type="button" class="button small map-tool-btn" id="walk-zen-toggle" aria-pressed="false" title="Zvětšit mapu na celou obrazovku">🔍 Celá obrazovka</button>
-        <button type="button" class="button small map-tool-btn" id="walk-center" title="Vycentrovat na moji polohu">◎ Moje poloha</button>
-        <button type="button" class="button small map-tool-btn active" id="walk-fog-toggle" title="Přepnout KCD2 pergamen / obyčejnou mapu / mlhu">📜 Pergamen</button>
-        <button type="button" class="button small map-tool-btn active" id="walk-trails-toggle" aria-pressed="true" title="Zobrazit/skrýt české turistické značky KČT">🥾 KČT: ZAP</button>
-        <button type="button" class="button small map-tool-btn" id="walk-contours-toggle" aria-pressed="false" title="Zobrazit/skrýt vrstevnice a terén">⛰️ Vrstevnice</button>
+      <!-- 2.2 Jediný nekolizní svislý sloupec ovládacích tlačítek u pravého okraje mapy (right: 12px; top: 74px) -->
+      <div class="walk-map-toolbar map-right-toolbar" role="toolbar" aria-label="Ovládání mapy">
+        <button type="button" class="map-right-btn" id="walk-center" title="Vycentrovat na mě">🎯</button>
+        <button type="button" class="map-right-btn active" id="walk-fog-toggle" title="Přepnout pergamen / běžnou mapu">📜</button>
+        <button type="button" class="map-right-btn" id="btn-download-offline-map" title="Stáhnout tuto oblast offline">📥</button>
+        <button type="button" class="map-right-btn" id="btn-pocket-mode" title="Kapesní režim (zhasnutí obrazovky)">🌙</button>
+        <button type="button" class="map-right-btn" id="walk-zen-toggle" aria-pressed="false" title="Celá obrazovka">⛶</button>
       </div>
 
-      <!-- TRVALE VIDITELNÁ AKČNÍ LIŠTA PŘÍMO U MAPY (.map-action-bar — ZADÁNÍ FLASH #09) -->
+      <!-- TRVALE VIDITELNÁ AKČNÍ LIŠTA PŘÍMO U MAPY (.map-action-bar) -->
       <div class="map-action-bar" id="map-action-bar" role="region" aria-label="Hlavní ovládání výpravy">
         <!-- Stav 1 — Výprava ještě neběží (!active) -->
         <div class="mab-inactive-group" id="mab-inactive-group">
           <button type="button" class="button mab-btn mab-start-btn" id="walk-start-unified">
-            ▶ VYRAZIT NA VÝPRAVU
-          </button>
-          <button type="button" class="button mab-btn mab-planner-btn" id="btn-toggle-quick-planner">
-            ✨ Rychlý návrh trasy
+            ▶ VYRAZIT NA TRASU
           </button>
         </div>
         <!-- Stav 2 — Výprava běží (active === true nebo Test GPS Simulátor) -->
         <div class="mab-active-group" id="mab-active-group" hidden>
           <button type="button" class="button mab-btn mab-finish-btn" id="walk-finish">
-            ⏹ Ukončit výpravu (Dokončit)
+            ⏹ Ukončit výpravu
           </button>
           <button type="button" class="button mab-btn mab-shorten-btn" id="walk-shorten-to-start">
             🏠 Zkrátit zpět na start
@@ -758,51 +768,28 @@ export function mountWalk(root, routes, config, actions = {}) {
     <section class="bottom-sheet" id="walk-bottom-sheet" aria-label="Plán a zastávky procházky">
       <div class="bottom-sheet-bar">
         <div class="sheet-header-summary">
-          <strong>🧭 Podrobný itinerář a zastávky na trase (<span id="basket-count">${plannedRoute.selectedPlaceIds.length}</span>)</strong>
-          <span class="sheet-header-sub" id="sheet-header-sub">Potvrzení návštěvy automaticky pod ${STOP_CONFIRM_RADIUS_M} m</span>
+          <strong>🧭 Zastávky na trase (<span id="basket-count">${plannedRoute.selectedPlaceIds.length}</span>) a místa v okolí</strong>
+          <span class="sheet-header-sub" id="sheet-header-sub">Seřazeno od nejbližšího místa · Potvrzení návštěvy pod ${STOP_CONFIRM_RADIUS_M} m</span>
         </div>
         <div class="sheet-bar-actions">
-          <button type="button" class="button small primary" id="btn-sheet-edit-walk">✏️ Upravit procházku</button>
           <button type="button" class="button small ghost sheet-toggle-btn" id="sheet-toggle-btn" aria-expanded="true">⬇ Sbalit panel</button>
         </div>
       </div>
 
       <div class="sheet-body" id="sheet-body">
         <div class="planner-box">
-          <div class="stops-box-header">
-            <div style="display:flex;gap:6px;flex-wrap:wrap">
-              <button type="button" class="button small lime" id="btn-optimize-route" ${plannedRoute.selectedPlaceIds.length < 2 ? 'disabled' : ''}>
-                🔄 Uspořádat zastávky
-              </button>
-              <button type="button" class="button small" id="btn-quick-auto-trip">
-                ✨ Navrhnout okruh
-              </button>
-            </div>
-          </div>
-
           <div id="planner-basket-list" class="planner-basket-list"></div>
           <div id="stop-replace-picker" class="stop-replace-picker" hidden></div>
         </div>
 
-        <!-- Souhrn zbývající a celkové trasy (Přehled trasy) -->
+        <!-- Souhrn zbývající a celkové trasy + SVG Výškový profil (.elevation-profile-card) -->
         <div class="route-xray-card" id="route-xray-card"></div>
 
-        <!-- Legenda turistických tras v oblasti (Bod 24) -->
-        <div class="planner-box hiking-trails-box" id="hiking-trails-box">
-          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-            <span class="eyebrow">🥾 Značené turistické trasy v okolí (OpenStreetMap)</span>
-            <span class="small-note">Licence ODbL · © přispěvatelé OpenStreetMap</span>
-          </div>
-          <div id="hiking-trails-list" class="hiking-trails-list"></div>
-        </div>
-
-        <!-- Místa v dosahu pro rychlé přidání do zastávek -->
+        <!-- 4. Místa v okolí seřazená striktně od nejbližšího s fotkou (88x72 px) -->
         <div class="planner-box" style="margin-top:4px">
           <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-            <span class="eyebrow">Místa a zastávky v dosahu (${plannedRoute.radiusKm || 10} km)</span>
-            <button type="button" class="button small" id="walk-nearby">Načíst místa v okolí</button>
+            <span class="eyebrow">📍 Zajímavá místa v okolí (seřazeno od nejbližšího)</span>
           </div>
-          <p class="small-note" style="margin:4px 0">Zastávka na trase se automaticky odškrtne při přiblížení pod ${STOP_CONFIRM_RADIUS_M} m potvrzeném opakovaným přesným měřením (≤ ${MAX_GPS_ACCURACY_M} m).</p>
           <div id="nearby-status" role="status"></div>
           <p id="nearby-origin" class="small-note"></p>
           <div id="walk-places"></div>
@@ -818,6 +805,35 @@ export function mountWalk(root, routes, config, actions = {}) {
         </div>
       </div>
     </section>
+
+    <!-- 1.2 Krok 4: Dialogové okno po příchodu do cíle trasy -->
+    <div id="arrival-goal-modal" class="arrival-goal-backdrop" hidden role="dialog" aria-modal="true" aria-labelledby="arrival-goal-title">
+      <div class="arrival-goal-dialog" style="position:relative">
+        <button type="button" class="button small ghost" id="btn-arrival-close-x" aria-label="Zavřít okno" style="position:absolute;top:10px;right:10px;padding:4px 10px;min-height:36px;font-weight:800">✕</button>
+        <h2 id="arrival-goal-title" class="arrival-goal-title">🎉 Jsi v cíli své trasy! Co chceš udělat dál?</h2>
+        <p class="arrival-goal-sub" id="arrival-goal-sub">Prošel jsi všemi vybranými zastávkami na trase. Chceš se nechat navést zpátky na místo startu, nebo výpravu rovnou uzavřít a převzít pohlednici?</p>
+        <div class="arrival-goal-actions">
+          <button type="button" class="arrival-goal-btn return-start" id="btn-arrival-return-start">
+            🏠 Navést zpět na místo startu
+          </button>
+          <button type="button" class="arrival-goal-btn finish-postcard" id="btn-arrival-finish-postcard">
+            🏁 Ukončit výpravu a převzít pohlednici
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 8.2 Kapesní režim (#000000 černá obrazovka šetřící baterii) -->
+    <div id="pocket-mode-overlay" class="pocket-mode-overlay" hidden role="dialog" aria-modal="true" aria-label="Kapesní režim aktivní">
+      <div class="pocket-mode-box">
+        <h2 class="pocket-mode-title">🌙 Kapesní režim aktivní</h2>
+        <p class="pocket-mode-stats" id="pocket-mode-stats">GPS zaznamenává trasu na pozadí</p>
+        <p class="pocket-mode-hint">Obrazovka je zhasnutá pro maximální úsporu baterie (až 90 %). Při přiblížení k zastávce (&lt; 35 m) telefon zavibruje a cinkne.<br><br>Pro návrat do mapy dvakrát poklepej nebo stiskni tlačítko níže.</p>
+        <button type="button" class="pocket-mode-unlock-btn" id="btn-pocket-unlock">
+          🔓 Rozsvítit mapu
+        </button>
+      </div>
+    </div>
 
     <!-- Sjednocený modální dialog „Upravit procházku“ s „Potvrdit změny“ a „Zrušit“ (Bod 20) -->
     <div class="edit-walk-modal-backdrop" id="edit-walk-modal" hidden role="dialog" aria-modal="true" aria-labelledby="edit-walk-title">
@@ -1737,13 +1753,17 @@ export function mountWalk(root, routes, config, actions = {}) {
 
   function updateCompassRotation(heading) {
     currentDeviceHeading = heading;
+    const stab = compassStabilizer.update(heading, Date.now());
+    currentDeviceHeading = stab.smoothedHeading;
     const dial = $('compass-dial');
     const targetArrow = $('compass-target-arrow');
-    if (dial) {
-      dial.style.transform = `rotate(${-heading}deg)`;
+    if (dial && stab.updated) {
+      dial.style.transition = 'transform 0.25s ease-out';
+      dial.style.transform = `rotate(${(-stab.continuousAngle).toFixed(1)}deg)`;
     }
-    if (targetArrow) {
-      targetArrow.style.transform = `rotate(${targetBearing - heading}deg)`;
+    if (targetArrow && stab.updated) {
+      targetArrow.style.transition = 'transform 0.25s ease-out';
+      targetArrow.style.transform = `rotate(${(targetBearing - stab.continuousAngle).toFixed(1)}deg)`;
     }
   }
 
@@ -1816,7 +1836,19 @@ export function mountWalk(root, routes, config, actions = {}) {
     if (!topBar || !topText) return;
 
     const isWalking = Boolean(active || demo);
+    const plannedPlaces = getPlannedPlaces();
+    const isPaused = Boolean(!isWalking && currentExpedition && currentExpedition.state === 'paused');
+
+    // ZADÁNÍ #10 (Bod 1.1): Souhrn trasy (#phase1-top-bar) se smí ukázat AŽ ve chvíli,
+    // kdy má uživatel vybraný alespoň 1 bod v trase (nebo když už běží chůze)!
+    const shouldShowTopBar = plannedPlaces.length >= 1 || isWalking || isPaused || pickingStartOnMap || pickingCustomEndOnMap;
+    topBar.hidden = !shouldShowTopBar;
     topBar.classList.toggle('is-walking', isWalking);
+
+    if ($('turn-nav-pill')) {
+      $('turn-nav-pill').hidden = !shouldShowTopBar;
+    }
+
     if (bottomBar) {
       bottomBar.hidden = isWalking || p1PlannerCollapsed;
     }
@@ -1836,17 +1868,15 @@ export function mountWalk(root, routes, config, actions = {}) {
       if (toggleBtn) toggleBtn.setAttribute('aria-expanded', String(Boolean(isWalking && phase4MenuOpen)));
     }
     if (goBtn) goBtn.hidden = isWalking;
-    const isPaused = Boolean(!isWalking && currentExpedition && currentExpedition.state === 'paused');
     if (pauseBtn) {
       pauseBtn.hidden = !isWalking && !isPaused;
       pauseBtn.textContent = isPaused ? '▶ Pokračovat' : '⏸ Pauza';
     }
     if (fsBtn) {
       fsBtn.setAttribute('aria-pressed', String(zenMode));
-      fsBtn.textContent = zenMode ? '× Zmenšit mapu' : '🔍 Celá obrazovka';
+      fsBtn.textContent = zenMode ? '× Zmenšit mapu' : '⛶ Celá obrazovka';
     }
 
-    const plannedPlaces = getPlannedPlaces();
     const currentOrigin = getRouteOriginPoint();
     const isLoop = plannedRoute.routeType === 'loop' && plannedPlaces.length >= 1;
     const speedKmH = getCompanionSpeedKmH();
@@ -1855,10 +1885,10 @@ export function mountWalk(root, routes, config, actions = {}) {
     if (itineraryStrip) {
       const startLabel = plannedRoute.origin?.label
         ? plannedRoute.origin.label.split('—')[0].trim()
-        : 'Start (Rožmitál)';
+        : 'Start (Moje poloha)';
       if (plannedPlaces.length === 0) {
         itineraryStrip.innerHTML = `
-          <span class="itinerary-empty">Žádné vybrané zastávky — klikni na místo v mapě nebo vyber téma a délku níže.</span>
+          <span class="itinerary-empty">Žádné vybrané zastávky — klikni na místo v mapě nebo v seznamu pod mapou.</span>
         `;
       } else {
         let firstUnvisitedFound = false;
@@ -1901,35 +1931,16 @@ export function mountWalk(root, routes, config, actions = {}) {
       }
     }
 
-    // Aktualizace aktivních tlačítek ve Fázi 1 (3 režimy, témata, délka, konec, start)
+    // Aktualizace aktivních tlačítek ve Fázi 1 (opravuje zaseknuté prostřední tlačítko v Herním režimu!)
     if (bottomBar) {
+      const currentMode = appSettings.gameMode || stateObj.gameMode || 'gamified';
       bottomBar.querySelectorAll('[data-p1-gamemode]').forEach(btn => {
-        const isAct = btn.dataset.p1Gamemode === (stateObj.gameMode || 'gamified');
+        const isAct = btn.dataset.p1Gamemode === currentMode;
         btn.classList.toggle('active', isAct);
         btn.setAttribute('aria-pressed', String(isAct));
       });
       bottomBar.querySelectorAll('[data-p1-theme]').forEach(btn => {
         const isAct = btn.dataset.p1Theme === phase1Theme;
-        btn.classList.toggle('active', isAct);
-        btn.setAttribute('aria-pressed', String(isAct));
-      });
-      bottomBar.querySelectorAll('[data-p1-dur]').forEach(btn => {
-        const isAct = Number(btn.dataset.p1Dur) === phase1DurationKm;
-        btn.classList.toggle('active', isAct);
-        btn.setAttribute('aria-pressed', String(isAct));
-      });
-      bottomBar.querySelectorAll('[data-p1-end]').forEach(btn => {
-        const isAct = btn.dataset.p1End === phase1EndMode;
-        btn.classList.toggle('active', isAct);
-        btn.setAttribute('aria-pressed', String(isAct));
-      });
-      const isGpsOrigin = !plannedRoute.origin || plannedRoute.origin.id === 'my-gps' || plannedRoute.origin.id === 'rozmital-namesti';
-      bottomBar.querySelectorAll('[data-p1-origin="gps"]').forEach(btn => {
-        btn.classList.toggle('active', isGpsOrigin);
-        btn.setAttribute('aria-pressed', String(isGpsOrigin));
-      });
-      bottomBar.querySelectorAll('[data-p1-preset]').forEach(btn => {
-        const isAct = plannedRoute.origin?.id === btn.dataset.p1Preset;
         btn.classList.toggle('active', isAct);
         btn.setAttribute('aria-pressed', String(isAct));
       });
@@ -2364,7 +2375,6 @@ export function mountWalk(root, routes, config, actions = {}) {
     if (plannedPlaces.length > 0) {
       let geomResult = await getCachedWalkingGeometry(allWaypoints, geomKey);
       if (token !== plannedRouteRenderToken || disposed) return;
-      // Pokud síťové OSRM není dostupné, sestavíme lokální pěší geometrii se zohledněním mostů a břehových cest kolem rybníků
       if (!geomResult || geomResult.isFallback || !geomResult.coordinates || geomResult.coordinates.length < 2) {
         geomResult = buildLocalRoutedGeometry(allWaypoints);
       }
@@ -2373,11 +2383,23 @@ export function mountWalk(root, routes, config, actions = {}) {
       coords = geomResult?.coordinates;
       isFallbackGeom = Boolean(!geomResult || geomResult.isFallback || geomResult.mode !== 'routed');
       if (!coords || coords.length < 2) coords = allWaypoints.map(p => [p.lat, p.lng]);
+
+      const myEleToken = ++elevationProfileToken;
+      fetchRouteElevationProfile(coords, { signal: aborter.signal })
+        .then(eleProfile => {
+          if (disposed || myEleToken !== elevationProfileToken) return;
+          currentElevationProfile = eleProfile;
+          renderPlannerBasketAndXray();
+        })
+        .catch(() => {});
+
       renderPlannerBasketAndXray();
       renderQuestHud(lastFix || plannedRoute.origin);
     } else {
       lastRoutedGeometry = null;
+      currentElevationProfile = null;
       fakeGpsSim?.setSharedWalkingRoute(null);
+      renderPlannerBasketAndXray();
       renderTouristStatsHud(lastFix || plannedRoute.origin);
       renderPhase1AndPhase4Ui(lastFix || plannedRoute.origin);
     }
@@ -2585,6 +2607,14 @@ export function mountWalk(root, routes, config, actions = {}) {
       ? remShared.remainingMinutes
       : totalAnalysis.estimatedMinutes;
 
+    const totalDistM = Math.max(1, totalAnalysis.estimatedWalkDistanceM || remDistM || 1000);
+    const playerProgressRatio = (active || demo)
+      ? Math.max(0, Math.min(1, 1 - (remDistM / totalDistM)))
+      : 0;
+    const elevationHtml = currentElevationProfile
+      ? renderElevationProfileCardHtml(currentElevationProfile, plannedPlaces, playerProgressRatio)
+      : '';
+
     xrayCardEl.innerHTML = `
       <div class="xray-header">
         <strong>🧭 Přehled trasy (${unvisitedPlaces.length} zbývajících z ${plannedPlaces.length} zastávek${isLoop ? ' · okruh' : ''})</strong>
@@ -2599,6 +2629,7 @@ export function mountWalk(root, routes, config, actions = {}) {
           <span>Již ušlá vzdálenost (zachována)</span>
         </div>
       </div>
+      ${elevationHtml}
     `;
   }
 
@@ -2659,14 +2690,20 @@ export function mountWalk(root, routes, config, actions = {}) {
       return false;
     });
 
-    // 3. Seznam pro panel (#walk-places):
-    //    Seřazený podle vzdálenosti od referenčního středu (střed mapy při prohlížení, jinak uživatel/start)
+    // 3. Seznam míst pod mapou (#walk-places):
+    //    ZADÁNÍ #10 (Bod 4.1): Strikně seřazený vzestupně podle vzdálenosti (distanceM od nejbližšího po nejvzdálenější)
+    //    vůči aktuálnímu bodu startu / pozici hráče, s fotkou/ilustrací (88x72 px) a velkou vzdáleností.
+    const refOrigin = normalized || plannedRoute.origin || viewCenter;
     const sidebarList = all
-      .map(p => ({
-        ...p,
-        distanceFromUser: normalized ? (haversineMeters(normalized, p) ?? Infinity) : Infinity,
-        distanceFromView: haversineMeters(viewCenter, p) ?? Infinity,
-      }))
+      .map(p => {
+        const distM = haversineMeters(refOrigin, p) ?? Infinity;
+        return {
+          ...p,
+          distanceM: distM,
+          distanceFromUser: distM,
+          distanceFromView: haversineMeters(viewCenter, p) ?? Infinity,
+        };
+      })
       .filter(p => {
         if (plannedPlaceIds.has(p.id)) return true;
         if (
@@ -2677,43 +2714,56 @@ export function mountWalk(root, routes, config, actions = {}) {
           return false;
         }
         if (mapBounds && mapBounds.contains([p.lat, p.lng])) return true;
-        if (p.distanceFromView <= 30000) return true;
+        if (p.distanceM <= 30000) return true;
         return false;
       })
-      .sort((a, b) => a.distanceFromView - b.distanceFromView);
+      .sort((a, b) => a.distanceM - b.distanceM);
+
+    const formatBigDist = (m) => {
+      if (!Number.isFinite(m)) return '—';
+      if (m < 1000) return `${Math.round(m)} m`;
+      return `${(m / 1000).toFixed(1).replace('.', ',')} km`;
+    };
 
     if ($('walk-places')) {
-      $('walk-places').innerHTML = sidebarList.slice(0, 16).map(p => {
+      $('walk-places').innerHTML = sidebarList.slice(0, 18).map(p => {
         const visitedToday = isStopVisitedInSession(p);
         const earlierStamp = !visitedToday && hasLifetimeStamp(p);
         const isRouteStart = p.pointKind === 'route-start';
         const isPlanned = plannedPlaceIds.has(p.id);
-        const distText = Number.isFinite(p.distanceFromUser)
-          ? `${Math.round(p.distanceFromUser)} m od tebe`
-          : Number.isFinite(p.distanceFromView)
-          ? `${(p.distanceFromView / 1000).toFixed(1)} km od zobrazení`
-          : 'Vzdálenost neurčena';
+        const bigDistStr = formatBigDist(p.distanceM);
+        const photoInfo = getPlacePhotoSync(p);
         const statusText = visitedToday
           ? '✓ Navštíveno v této výpravě'
           : earlierStamp
           ? '📜 Razítko v pasu z dřívějška'
           : isRouteStart
           ? '🥾 Začátek trasy'
-          : `📍 Samostatné místo`;
+          : '📍 Zajímavé místo v okolí';
 
-        return `<div class="nearby-place">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
-            <strong>${e(p.title)}</strong>
-            <button type="button" class="button small ${isPlanned ? 'ghost' : 'lime'} toggle-plan-place-btn" data-place-id="${e(p.id)}">
-              ${isPlanned ? '✓ V zastávkách' : '+ Přidat zastávku'}
-            </button>
-          </div>
-          <span>${distText} · ${statusText}</span>
-          <div style="display:flex;gap:8px;align-items:center;margin-top:4px">
-            <button type="button" class="button ghost small open-map-detail-btn" data-place-id="${e(p.id)}">
-              🔍 Detail & v mapě
-            </button>
-            <a href="${e(p.url)}" ${p.url?.startsWith('#') ? '' : 'target="_blank" rel="noopener"'}>Článek ↗</a>
+        return `<div class="nearby-place" data-distance-m="${Math.round(p.distanceM || 0)}" style="display:flex;gap:12px;align-items:center">
+          <img
+            class="place-card-thumb"
+            src="${e(photoInfo.photoUrl)}"
+            alt="${e(p.title)}"
+            width="88"
+            height="72"
+            loading="lazy"
+          />
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+              <strong style="font-size:1.02rem">${e(p.title)}</strong>
+              <span class="place-distance-big">${e(bigDistStr)}</span>
+            </div>
+            <span style="display:block;margin:3px 0;font-size:0.84rem">${statusText}</span>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px">
+              <button type="button" class="button small ${isPlanned ? 'ghost' : 'lime'} toggle-plan-place-btn" data-place-id="${e(p.id)}">
+                ${isPlanned ? '✓ V trase (odebrat)' : '+ Přidat do trasy'}
+              </button>
+              <button type="button" class="button ghost small open-map-detail-btn" data-place-id="${e(p.id)}">
+                🔍 Ukázat v mapě
+              </button>
+            </div>
           </div>
         </div>`;
       }).join('') || '<p class="small-note">V této části mapy zatím nejsou žádná místa. Posuň mapu nebo chvíli počkej na automatické načtení.</p>';
@@ -2806,10 +2856,18 @@ export function mountWalk(root, routes, config, actions = {}) {
 
     renderPlannedRouteOnMap();
 
-    // Asynchronně ověříme reálné fotky (CC0 / Public Domain / CC BY / CC BY-SA z Wikimedia Commons) pro zobrazené body na mapě
-    prefetchVerifiedPhotosForPlaces([...plannedPlaces, ...mapPlaces.slice(0, 18)], {
+    // Asynchronně načteme fotky míst z Wikipedie / OSM (ZADÁNÍ #10 Bod 4.2)
+    prefetchPlacePhotos([...plannedPlaces, ...sidebarList.slice(0, 12)], {
       signal: aborter.signal,
-      maxCount: 18,
+      maxCount: 12,
+      onUpdated: () => {
+        if (disposed) return;
+        renderPlaces();
+      },
+    });
+    prefetchVerifiedPhotosForPlaces([...plannedPlaces, ...mapPlaces.slice(0, 14)], {
+      signal: aborter.signal,
+      maxCount: 14,
       onBatchUpdated: () => {
         if (disposed) return;
         renderPlaces();
@@ -2821,14 +2879,6 @@ export function mountWalk(root, routes, config, actions = {}) {
     });
   }
 
-  /**
-   * ZADÁNÍ #09 (Fáze 3): Bublina po kliknutí na ikonu v mapě:
-   * - Zobrazí ověřenou reálnou fotku místa (pokud existuje a je komerčně použitelná), jinak dosavadní bitmap/ilustraci.
-   * - Pokud bod UŽ JE v dnešní trase -> 1 velké tlačítko [ ✕ Vynechat tuto zastávku ]
-   * - Pokud bod v trase NENÍ -> 2 jasné volby:
-   *     [ ➕ Přidat jako zastávku po cestě ] (automaticky vloží na nejlepší místo bez křížení)
-   *     [ 🏁 Nastavit jako nový konec trasy ] (ukončí výpravu v tomto bodě místo návratu na start)
-   */
   function openPlaceDetail(p) {
     if (!p) return;
     selectedDetailPlace = p;
@@ -2852,12 +2902,10 @@ export function mountWalk(root, routes, config, actions = {}) {
       ? '<span class="pds-stamp-badge lifetime">📜 Razítko v pasu</span>'
       : `<span class="pds-stamp-badge pending">📍 ${distStr}${mins != null ? ` · ~${mins} min` : ''}</span>`;
 
-    const cachedPhoto = getCachedPlacePhoto(p);
-    const fallbackBitmapUrl = getFallbackBitmapUrl(p);
-    const hasVerified = Boolean(cachedPhoto && cachedPhoto.photoUrl);
-    const imgSrc = hasVerified ? cachedPhoto.photoUrl : fallbackBitmapUrl;
-    const badgeHtml = hasVerified
-      ? `<span class="pds-photo-source-badge is-verified" id="pds-photo-badge">📸 Ověřená fotka · ${e(cachedPhoto.license || 'Wikimedia')}</span>`
+    const placePhoto = getPlacePhotoSync(p);
+    const imgSrc = placePhoto.photoUrl;
+    const badgeHtml = placePhoto.isRealPhoto
+      ? `<span class="pds-photo-source-badge is-verified" id="pds-photo-badge">📸 Fotka · ${e(placePhoto.source || 'Wikipedia')}</span>`
       : `<span class="pds-photo-source-badge is-bitmap" id="pds-photo-badge">🎨 Ilustrace místa</span>`;
 
     const actionsHtml = isPlanned
@@ -2871,7 +2919,7 @@ export function mountWalk(root, routes, config, actions = {}) {
       : `
         <div class="pds-actions phase3-bubble-actions">
           <button type="button" class="button lime phase3-action-btn" id="btn-p3-insert-stop" data-place-id="${e(p.id)}">
-            ➕ Přidat do trasy
+            + Přidat do trasy
           </button>
           <button type="button" class="button primary phase3-action-btn" id="btn-p3-set-end" data-place-id="${e(p.id)}">
             🏁 Nastavit jako konečný cíl
@@ -2882,21 +2930,20 @@ export function mountWalk(root, routes, config, actions = {}) {
     sheet.hidden = false;
     sheet.innerHTML = `
       <div class="pds-card phase3-bubble-card">
-        <div class="pds-media-box">
+        <div class="pds-header" style="display:flex;gap:12px;align-items:center">
           <img
             id="pds-photo-img"
-            class="pds-photo-img ${hasVerified ? 'is-real-photo' : 'is-fallback-bitmap'}"
+            class="pds-thumb"
             src="${e(imgSrc)}"
             alt="${e(p.title)}"
+            width="88"
+            height="72"
             loading="lazy"
-            onerror="this.onerror=null;this.src='${e(fallbackBitmapUrl)}';this.classList.remove('is-real-photo');this.classList.add('is-fallback-bitmap');const b=document.getElementById('pds-photo-badge');if(b){b.textContent='🎨 Ilustrace místa';b.className='pds-photo-source-badge is-bitmap';}"
           />
-          ${badgeHtml}
-        </div>
-        <div class="pds-header">
-          <div class="pds-title-wrap">
+          <div class="pds-title-wrap" style="flex:1;min-width:0">
             <span class="pds-kind-badge">${e(kindLabel)}</span>
             <h3 class="pds-title">${e(p.title)}</h3>
+            ${badgeHtml}
           </div>
           <button type="button" class="button small ghost pds-close-btn" id="btn-close-place-detail" aria-label="Zavřít bublinu">✕</button>
         </div>
@@ -2907,23 +2954,18 @@ export function mountWalk(root, routes, config, actions = {}) {
       </div>
     `;
 
-    if (!hasVerified) {
-      resolveVerifiedPlacePhoto(p, { signal: aborter.signal }).then(res => {
+    if (!placePhoto.isRealPhoto) {
+      resolvePlacePhoto(p, { signal: aborter.signal }).then(res => {
         if (disposed || !selectedDetailPlace || selectedDetailPlace.id !== p.id) return;
-        if (res && res.hasVerifiedPhoto && res.photoUrl) {
+        if (res && res.isRealPhoto && res.photoUrl) {
           const imgEl = $('pds-photo-img');
           const badgeEl = $('pds-photo-badge');
-          if (imgEl) {
-            imgEl.src = res.photoUrl;
-            imgEl.classList.remove('is-fallback-bitmap');
-            imgEl.classList.add('is-real-photo');
-          }
+          if (imgEl) imgEl.src = res.photoUrl;
           if (badgeEl) {
-            badgeEl.textContent = `📸 Ověřená fotka · ${res.license || 'Wikimedia'}`;
+            badgeEl.textContent = `📸 Fotka · ${res.source || 'Wikipedia'}`;
             badgeEl.className = 'pds-photo-source-badge is-verified';
           }
           renderPlaces();
-          renderNextCheckpointHero(lastFix || telemetry.lastKnownPosition);
         }
       }).catch(() => {});
     }
@@ -3006,26 +3048,11 @@ export function mountWalk(root, routes, config, actions = {}) {
     const curPos = pos || getRouteOriginPoint();
 
     if (plannedPlaces.length === 0) {
-      heroCard.innerHTML = `
-        <div class="hero-card-inner hero-free-walk">
-          <div class="hero-card-main">
-            <span class="hero-card-badge">Volná chůze · Objevování</span>
-            <strong class="hero-card-title">🚶 Procházka bez pevných zastávek</strong>
-            <span class="hero-card-sub">Odkrývej mapu kolem sebe a sbírej dílky území. Chceš-li naplánovat okruh se zastávkami, otevři Průvodce.</span>
-          </div>
-          <div class="hero-card-actions">
-            <button type="button" class="button small lime" id="btn-hero-open-wizard">✨ Připravit trasu</button>
-          </div>
-        </div>
-      `;
-      $('btn-hero-open-wizard')?.addEventListener('click', () => {
-        wizardCollapsed = false;
-        renderTripWizardUi();
-        $('trip-wizard-sheet')?.scrollIntoView({ behavior: 'smooth' });
-        playTick(stateObj.soundEnabled);
-      });
+      heroCard.hidden = true;
+      heroCard.innerHTML = '';
       return;
     }
+    heroCard.hidden = false;
 
     const unvisited = plannedPlaces.filter(p => !isStopVisited(p));
     if (unvisited.length === 0) {
@@ -3124,9 +3151,10 @@ export function mountWalk(root, routes, config, actions = {}) {
   function applyGameMode(mode) {
     if (!['explorer', 'gamified', 'casual'].includes(mode)) mode = 'gamified';
     appSettings.gameMode = mode;
+    stateObj.gameMode = mode;
     if (mode === 'explorer') {
       fogMode = 'full';
-      showHikingTrails = false;
+      showHikingTrails = true;
       showContourLayer = false;
     } else if (mode === 'casual') {
       fogMode = 'none';
@@ -3138,6 +3166,17 @@ export function mountWalk(root, routes, config, actions = {}) {
       showHikingTrails = true;
       showContourLayer = true;
     }
+    // Oprava zaseknutého prostředního tlačítka v Herním režimu (ZADÁNÍ #10 Bod 2.1):
+    // vždy nejprve odebereme .active a aria-pressed="true" ze všech sourozenců a nastavíme výhradně na aktivní!
+    root.querySelectorAll('[data-p1-gamemode]').forEach(btn => {
+      const isAct = btn.dataset.p1Gamemode === mode;
+      btn.classList.remove('active');
+      btn.setAttribute('aria-pressed', 'false');
+      if (isAct) {
+        btn.classList.add('active');
+        btn.setAttribute('aria-pressed', 'true');
+      }
+    });
     stateObj.appSettings = { ...appSettings };
     saveAppState();
     updateFogToggleLabel();
@@ -3150,7 +3189,7 @@ export function mountWalk(root, routes, config, actions = {}) {
     renderAppSettingsModalUi();
     renderNextCheckpointHero(lastFix || telemetry.lastKnownPosition);
     playStampChord(stateObj.soundEnabled);
-    status(`Herní styl přepnut: ${mode === 'explorer' ? '🧭 1. Objevitel' : mode === 'casual' ? '🗺️ 3. Pohodová procházka' : '🥾 2. Výprava s gamifikací'}.`);
+    status(`Herní styl přepnut: ${mode === 'explorer' ? '🧭 1. Objevitel' : mode === 'casual' ? '🗺️ 3. Čistá turistická mapa' : '🥾 2. Výprava s pergamenem (KCD2)'}.`);
   }
 
   const SETTINGS_ITEMS = [
@@ -3363,9 +3402,10 @@ export function mountWalk(root, routes, config, actions = {}) {
     const dataUrl = generatePostcardDataUrl(summary);
 
     container.innerHTML = `
-      <div class="session-modal" id="postcard-modal">
-        <div class="session-modal-card" style="max-width:520px;text-align:center">
-          <h2>Výprava úspěšně ukončena! 🎉</h2>
+      <div class="session-modal" id="postcard-modal" role="dialog" aria-modal="true" aria-label="Pohlednice z výpravy">
+        <div class="session-modal-card" style="max-width:520px;text-align:center;position:relative">
+          <button type="button" class="button small ghost" id="btn-close-postcard-x" aria-label="Zavřít pohlednici" style="position:absolute;top:10px;right:10px;padding:4px 10px;min-height:36px;font-weight:800">✕</button>
+          <h2 style="padding-right:28px">Výprava úspěšně ukončena! 🎉</h2>
           <p>${simSandboxActive ? 'Testovací výprava v simulátoru byla vyhodnocena (skutečný profil zůstal beze změny).' : 'Tvoje výprava byla zaznamenána do osobního atlasu.'}</p>
           <div class="session-stats-grid" style="margin-bottom:12px">
             <div class="session-stat-box"><strong>${summary.distanceMeters >= 1000 ? (summary.distanceMeters / 1000).toFixed(1).replace('.', ',') + ' km' : Math.round(summary.distanceMeters) + ' m'}</strong><span>Ušlá vzdálenost</span></div>
@@ -3384,6 +3424,17 @@ export function mountWalk(root, routes, config, actions = {}) {
         </div>
       </div>
     `;
+
+    const closePostcard = () => {
+      container.innerHTML = '';
+      playTick(stateObj.soundEnabled);
+    };
+
+    $('postcard-modal')?.addEventListener('click', (ev) => {
+      if (ev.target === $('postcard-modal') || !ev.target.closest('.session-modal-card')) {
+        closePostcard();
+      }
+    });
 
     $('btn-download-postcard')?.addEventListener('click', () => {
       const a = document.createElement('a');
@@ -3413,7 +3464,8 @@ export function mountWalk(root, routes, config, actions = {}) {
       }
     });
 
-    $('btn-close-postcard')?.addEventListener('click', () => { container.innerHTML = ''; });
+    $('btn-close-postcard')?.addEventListener('click', closePostcard);
+    $('btn-close-postcard-x')?.addEventListener('click', closePostcard);
   }
 
   async function releaseWake() {
@@ -3490,10 +3542,12 @@ export function mountWalk(root, routes, config, actions = {}) {
     stopWatchdog();
     releaseWake();
     stopBackgroundTracking();
+    keepAliveCtrl.stop();
+    if ($('pocket-mode-overlay')) $('pocket-mode-overlay').hidden = true;
+    if ($('arrival-goal-modal')) $('arrival-goal-modal').hidden = true;
     active = false;
     starting = false;
 
-    // ZADÁNÍ FLASH #09: Nikdy tiše neskončit na chybějící currentExpedition!
     if (!currentExpedition) {
       currentExpedition = createExpedition({ progress, goal: DEFAULT_GOALS[0] });
     }
@@ -3502,6 +3556,32 @@ export function mountWalk(root, routes, config, actions = {}) {
     const gainedC = Math.max(0, progress.cells.length - (currentExpedition.startCells || 0));
     const gainedS = Math.max(0, progress.discoveries.length - (currentExpedition.startDiscoveries || 0));
     const earnedPoints = expeditionPointsDelta(currentExpedition, progress);
+
+    // 6.1 Uložíme do dat pohlednice pole navštívených míst včetně jejich fotek/obrázků (visitedPlacesWithPhotos)
+    const allKnownPlaces = getAllAvailablePlaces();
+    const plannedPlaces = getPlannedPlaces();
+    const visitedIdsList = [
+      ...new Set([
+        ...confirmedStopIds,
+        ...(currentExpedition.visitedPlaces || []).map(v => v.id || v),
+        ...plannedPlaces.filter(p => isStopVisited(p)).map(p => p.id),
+      ]),
+    ];
+    const visitedSourcePlaces = visitedIdsList
+      .map(id => allKnownPlaces.find(p => p.id === id) || plannedPlaces.find(p => p.id === id))
+      .filter(Boolean);
+    const fallbackVisitedPlaces = visitedSourcePlaces.length > 0 ? visitedSourcePlaces : plannedPlaces.slice(0, 4);
+    const visitedPlacesWithPhotos = fallbackVisitedPlaces.map(p => {
+      const photoInfo = getPlacePhotoSync(p);
+      return {
+        id: p.id,
+        title: p.title,
+        kind: p.kind || 'forest',
+        category: p.category || 'nature',
+        photoUrl: photoInfo.photoUrl,
+        isRealPhoto: photoInfo.isRealPhoto,
+      };
+    });
 
     let endResult = null;
     try {
@@ -3513,18 +3593,29 @@ export function mountWalk(root, routes, config, actions = {}) {
       });
     } catch {}
 
-    const summary = endResult?.summary || {
+    const baseSummary = endResult?.summary || {
       id: currentExpedition.id,
       date: new Date().toISOString(),
       distanceMeters: gainedM,
       cellsCount: gainedC,
       stampsCount: gainedS,
+      newCellsCount: gainedC,
+      newStampsCount: gainedS,
       durationMs: Math.max(60000, Date.now() - (currentExpedition.createdAt || Date.now())),
       activeDurationMs: Math.max(60000, Date.now() - (currentExpedition.createdAt || Date.now())),
       pointsEarned: earnedPoints || 10,
       goal: currentExpedition.goal || DEFAULT_GOALS[0],
       avatarId: stateObj.profile?.avatarId || 'liska',
       companionMode: 'solo',
+    };
+
+    const summary = {
+      ...baseSummary,
+      visitedPlacesWithPhotos,
+      elevationGainM: currentElevationProfile?.gainM || 0,
+      trailCoordinates: memoryTrail.length >= 2
+        ? memoryTrail.filter(pt => pt && Number.isFinite(pt.lat)).map(pt => [pt.lat, pt.lng])
+        : (plannedRouteCoords || []),
     };
 
     const prevStateSnapshot = { ...stateObj };
@@ -3777,8 +3868,56 @@ export function mountWalk(root, routes, config, actions = {}) {
    * Jednotný průběh průzkumu pro skutečnou chůzi i autopilota (Body 7, 8, 16, 19, 28, 30, 31, 32):
    * přijatá poloha -> odkrytí území a přírodních objektů -> potvrzení zastávek (< 20 m) -> překreslení mapy -> uložení.
    */
+  function showArrivalGoalModal() {
+    const modal = $('arrival-goal-modal');
+    if (!modal) return;
+    modal.hidden = false;
+    triggerPocketProximityAlert('stamp');
+  }
+
   function sample(fix, now = Date.now()) {
     if (disposed || (!active && !demo)) return;
+
+    // 8.3 Background Gap Recovery: Pokud v kapse vznikla mezera > 12 s (do 3 km rychlostí <= 3.5 m/s),
+    // dopočítáme body podél naplánované trasy, odkryjeme mlhu, přičteme metry a uznáme zastávky!
+    if (lastSampledFix && !fix.interpolated && (now - lastSampledFix.ts) > 12000 && fix.accuracy <= MAX_GPS_ACCURACY_M) {
+      const gapRes = interpolateBackgroundGap({
+        prevFix: lastSampledFix,
+        nextFix: { lat: fix.lat, lng: fix.lng, ts: now },
+        plannedCoords: plannedRouteCoords || [],
+      });
+      if (gapRes.recovered && gapRes.points.length > 1) {
+        for (let i = 0; i < gapRes.points.length - 1; i++) {
+          const pt = gapRes.points[i];
+          const stepRes = acceptFix(progress, anchor, { lat: pt.lat, lng: pt.lng, accuracy: 12, simulated: fix.simulated, interpolated: true }, pt.ts);
+          anchor = stepRes.anchor;
+          if (stepRes.accepted) {
+            progress = {
+              ...progress,
+              cells: stepRes.progress.cells,
+              meters: stepRes.progress.meters,
+              walkSegments: stepRes.progress.walkSegments || progress.walkSegments,
+            };
+          }
+          const plannedForGap = getPlannedPlaces();
+          if (plannedForGap.length > 0) {
+            for (const sp of plannedForGap) {
+              if (!confirmedStopIds.has(sp.id) && (haversineMeters(pt, sp) ?? Infinity) <= 35) {
+                confirmedStopIds.add(sp.id);
+                if (currentExpedition) {
+                  currentExpedition = recordExpeditionVisit(currentExpedition, sp);
+                  stateObj.activeExpedition = currentExpedition;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    if (fix.accuracy <= MAX_GPS_ACCURACY_M) {
+      lastSampledFix = { lat: fix.lat, lng: fix.lng, ts: now };
+    }
+
     const result = acceptFix(progress, anchor, fix, now);
     anchor = result.anchor;
 
@@ -3796,8 +3935,6 @@ export function mountWalk(root, routes, config, actions = {}) {
     if (validFix && fix.accuracy <= MAX_GPS_ACCURACY_M) {
       memoryTrail = appendTrail(memoryTrail, validFix, now);
 
-      // 1. Odkrývání přírodních objektů podle jejich skutečného tvaru (Bod 32):
-      // Oddělené od nachozených metrů a buněk; nepotvrzuje zastávky na opačném břehu!
       const natEval = evaluateNaturalFeatureReveals(validFix, progress.revealedFeatures, BUILTIN_NATURAL_FEATURES);
       activeLocalReveals = natEval.activeLocalReveals || [];
       if (natEval.newlyRevealedFeatures.length > 0) {
@@ -3811,9 +3948,19 @@ export function mountWalk(root, routes, config, actions = {}) {
         status(`💧 Odhalena celá vodní plocha: ${pondNames}.`);
       }
 
-      // 2. Jednotné potvrzení zastávky trasy při vzdálenosti < 20 m opakovanými přesnými měřeními (Bod 7 & 19)
+      // 8.4 Vibrace v kapse a zvuk při přiblížení k zastávce (< 35 m)
       const plannedPlaces = getPlannedPlaces();
       if (plannedPlaces.length > 0) {
+        for (const sp of plannedPlaces) {
+          if (!confirmedStopIds.has(sp.id) && !alertedProximityStopIds.has(sp.id)) {
+            const dToStop = haversineMeters(validFix, sp) ?? Infinity;
+            if (dToStop < 35) {
+              alertedProximityStopIds.add(sp.id);
+              triggerPocketProximityAlert('proximity');
+            }
+          }
+        }
+
         const stopEval = evaluateStopConfirmation(validFix, plannedPlaces, pendingStopSamples, confirmedStopIds, now);
         if (stopEval.newlyConfirmedIds.length > 0) {
           stateChanged = true;
@@ -3839,22 +3986,32 @@ export function mountWalk(root, routes, config, actions = {}) {
           stateObj.discoveries = progress.discoveries;
 
           playStampChord(stateObj.soundEnabled);
-          triggerHaptic([35, 50, 35]);
+          triggerPocketProximityAlert('stamp');
 
           const confirmedNames = stopEval.newlyConfirmedStops.map(s => s.title).join(', ');
           const nextStop = getPlannedPlaces().find(p => !isStopVisitedInSession(p));
           speakCzechNav(
             nextStop
               ? `Jste u cíle ${confirmedNames}, získáváte razítko. Další zastávka: ${nextStop.title}.`
-              : `Jste u cíle ${confirmedNames}, získáváte razítko. Všechny zastávky trasy jsou splněny!`,
+              : `Jste u cíle ${confirmedNames}, získáváte razítko. Jsi v cíli své trasy!`,
             `stamp:${stopEval.newlyConfirmedIds.join(',')}`
           );
           status(
             nextStop
               ? `✓ Zastávka potvrzena (<${STOP_CONFIRM_RADIUS_M} m): ${confirmedNames}. Další cíl: ${nextStop.title}.`
-              : `🎉 Zastávka potvrzena (<${STOP_CONFIRM_RADIUS_M} m): ${confirmedNames}. Všechny zastávky trasy jsou splněny!`
+              : `🎉 Jsi v cíli své trasy (${confirmedNames})!`
           );
           plannedRouteRenderKey = null;
+
+          // 1.2 Krok 4: Jakmile uživatel během výpravy projde posledním vybraným bodem trasy (dosažen cíl),
+          // automaticky zobrazíme velké, přehledné dialogové okno!
+          if (!nextStop) {
+            const routeFinishKey = plannedPlaces.map(p => p.id).join(',');
+            if (arrivalGoalPromptShownForKey !== routeFinishKey) {
+              arrivalGoalPromptShownForKey = routeFinishKey;
+              showArrivalGoalModal();
+            }
+          }
         }
       }
 
@@ -4051,9 +4208,10 @@ export function mountWalk(root, routes, config, actions = {}) {
     playStampChord(stateObj.soundEnabled);
 
     if (source !== 'sim') {
+      keepAliveCtrl.start('Czekpoint GPS aktivní');
       startBackgroundTracking({
-        title: 'Výprava odstartována · Czekpoint',
-        artist: 'Czekpoint · Objevování a mapa',
+        title: 'Výprava běží',
+        artist: 'Czekpoint GPS aktivní',
         album: 'Záznam chůze i při zhasnutém displeji',
         onPause: () => { togglePauseUnified(); },
         onResume: () => { togglePauseUnified(); },
@@ -4155,7 +4313,8 @@ export function mountWalk(root, routes, config, actions = {}) {
           ? (haversineMeters(lastAutoPanCenter, currentCenter) ?? Infinity)
           : Infinity;
 
-        // Pokud se uživatel posunul po mapě o více než 1200 metrů, automaticky načteme nová místa v ČR
+        // ZADÁNÍ #10 (Bod 1.1): 100% automatické načítání míst z Overpass API na pozadí při posunu mapy
+        // s debounce 700 ms, pokud se střed posunul o > 1,2 km (1200 m).
         if (distFromLast >= 1200) {
           if (autoPlacesLoading) {
             pendingAutoPanCenter = currentCenter;
@@ -4168,7 +4327,7 @@ export function mountWalk(root, routes, config, actions = {}) {
             forceRefresh: false,
           });
         }
-      }, 450);
+      }, 700);
     }
 
     map.on('move zoom viewreset resize', scheduleFog);
@@ -4188,6 +4347,12 @@ export function mountWalk(root, routes, config, actions = {}) {
     });
 
     map.on('click', ev => {
+      if ($('place-detail-sheet') && !$('place-detail-sheet').hidden) {
+        closePlaceDetail();
+      }
+      if ($('map-lupa-search-results') && !$('map-lupa-search-results').hidden) {
+        $('map-lupa-search-results').hidden = true;
+      }
       if (pickingCustomEndOnMap) {
         pickingCustomEndOnMap = false;
         phase1EndMode = 'custom';
@@ -4470,11 +4635,11 @@ export function mountWalk(root, routes, config, actions = {}) {
 
   // Události uvnitř modálu „Upravit procházku“
   $('edit-walk-modal')?.addEventListener('click', ev => {
-    if (!editDraft) return;
-    if (ev.target === $('edit-walk-modal')) {
+    if (ev.target === $('edit-walk-modal') || !ev.target.closest('.edit-walk-modal-card')) {
       cancelEditWalkModal();
       return;
     }
+    if (!editDraft) return;
 
     const originBtn = ev.target.closest('[data-draft-origin]');
     if (originBtn) {
@@ -4731,13 +4896,13 @@ export function mountWalk(root, routes, config, actions = {}) {
     playTick(stateObj.soundEnabled);
   });
 
-  $('walk-zen-toggle').addEventListener('click', () => {
+  $('walk-zen-toggle')?.addEventListener('click', () => {
     zenMode = !zenMode;
     updateZenMode();
     playTick(stateObj.soundEnabled);
   });
 
-  $('zen-close-btn').addEventListener('click', () => {
+  $('zen-close-btn')?.addEventListener('click', () => {
     zenMode = false;
     updateZenMode();
     playTick(stateObj.soundEnabled);
@@ -4745,9 +4910,46 @@ export function mountWalk(root, routes, config, actions = {}) {
 
   const onEscapeKey = (ev) => {
     if (ev.key === 'Escape') {
-      if (editModalOpen) {
+      if ($('postcard-modal')) {
+        if ($('session-summary-container')) $('session-summary-container').innerHTML = '';
+        playTick(stateObj.soundEnabled);
+        return;
+      }
+      if ($('arrival-goal-modal') && !$('arrival-goal-modal').hidden) {
+        $('arrival-goal-modal').hidden = true;
+        playTick(stateObj.soundEnabled);
+        return;
+      }
+      if ($('pocket-mode-overlay') && !$('pocket-mode-overlay').hidden) {
+        setPocketModeUi(false);
+        playTick(stateObj.soundEnabled);
+        return;
+      }
+      if (appSettingsModalOpen || ($('app-settings-modal') && !$('app-settings-modal').hidden)) {
+        appSettingsModalOpen = false;
+        if ($('app-settings-modal')) $('app-settings-modal').hidden = true;
+        playTick(stateObj.soundEnabled);
+        return;
+      }
+      if (editModalOpen || ($('edit-walk-modal') && !$('edit-walk-modal').hidden)) {
         cancelEditWalkModal();
-      } else if (zenMode) {
+        return;
+      }
+      if ($('place-detail-sheet') && !$('place-detail-sheet').hidden) {
+        closePlaceDetail();
+        playTick(stateObj.soundEnabled);
+        return;
+      }
+      if ($('map-lupa-search-results') && !$('map-lupa-search-results').hidden) {
+        $('map-lupa-search-results').hidden = true;
+        return;
+      }
+      if (replacingStopIndex !== null) {
+        replacingStopIndex = null;
+        renderReplaceStopPicker();
+        return;
+      }
+      if (zenMode) {
         zenMode = false;
         updateZenMode();
         playTick(stateObj.soundEnabled);
@@ -5017,7 +5219,7 @@ export function mountWalk(root, routes, config, actions = {}) {
   });
 
   // Sdílení a import kódu trasy
-  $('btn-share-route-code').addEventListener('click', async () => {
+  $('btn-share-route-code')?.addEventListener('click', async () => {
     try {
       const code = encodeRouteShareCode(plannedRoute, getAllAvailablePlaces());
       if (navigator.clipboard?.writeText) {
@@ -5032,7 +5234,7 @@ export function mountWalk(root, routes, config, actions = {}) {
     }
   });
 
-  $('btn-import-route-code').addEventListener('click', () => {
+  $('btn-import-route-code')?.addEventListener('click', () => {
     const input = window.prompt('Vlož sdílený kód trasy (např. CZK1-...):');
     if (!input) return;
     try {
@@ -5062,19 +5264,22 @@ export function mountWalk(root, routes, config, actions = {}) {
     const btn = $('walk-fog-toggle');
     if (!btn) return;
     if (fogMode === 'none') {
-      btn.textContent = '🗺️ Čistá mapa';
-      btn.title = 'Čistá turistická mapa bez mlhy (kliknutím přepneš na KCD2 pergamen)';
+      btn.textContent = '🗺️';
+      btn.title = 'Přepnout pergamen / běžnou mapu (nyní: Čistá mapa)';
+      btn.setAttribute('aria-label', 'Přepnout pergamen nebo běžnou mapu');
     } else if (fogMode === 'full') {
-      btn.textContent = '🌑 Plná mlha';
-      btn.title = 'Režim Objevitel: plná mlha (kliknutím přepneš na KCD2 pergamen)';
+      btn.textContent = '🌑';
+      btn.title = 'Přepnout pergamen / běžnou mapu (nyní: Plná mlha)';
+      btn.setAttribute('aria-label', 'Přepnout pergamen nebo běžnou mapu');
     } else {
-      btn.textContent = '📜 Pergamen';
-      btn.title = 'KCD2 pergamen s měkkým odkrýváním (kliknutím přepneš na čistou mapu)';
+      btn.textContent = '📜';
+      btn.title = 'Přepnout pergamen / běžnou mapu (nyní: Pergamen)';
+      btn.setAttribute('aria-label', 'Přepnout pergamen nebo běžnou mapu');
     }
     btn.dataset.fogMode = fogMode;
     btn.classList.toggle('active', fogMode !== 'none');
   }
-  $('walk-fog-toggle').addEventListener('click', () => {
+  $('walk-fog-toggle')?.addEventListener('click', () => {
     const idx = FOG_MODE_ORDER.indexOf(fogMode);
     fogMode = FOG_MODE_ORDER[(idx + 1) % FOG_MODE_ORDER.length];
     updateFogToggleLabel();
@@ -5167,10 +5372,19 @@ export function mountWalk(root, routes, config, actions = {}) {
     );
   }
 
-  // Události Fáze 1: Panel voleb trasy a 3 režimů (#phase1-bottom-bar)
+  // Události Fáze 1: Panel voleb herního režimu a filtrů (#phase1-bottom-bar)
   $('phase1-bottom-bar')?.addEventListener('click', (ev) => {
     const gmBtn = ev.target.closest('[data-p1-gamemode]');
     if (gmBtn) {
+      const parent = gmBtn.parentElement;
+      if (parent) {
+        parent.querySelectorAll('[data-p1-gamemode]').forEach(btn => {
+          btn.classList.remove('active');
+          btn.setAttribute('aria-pressed', 'false');
+        });
+      }
+      gmBtn.classList.add('active');
+      gmBtn.setAttribute('aria-pressed', 'true');
       applyGameMode(gmBtn.dataset.p1Gamemode);
       renderPhase1AndPhase4Ui(lastFix || telemetry.lastKnownPosition);
       return;
@@ -5178,105 +5392,282 @@ export function mountWalk(root, routes, config, actions = {}) {
 
     const themeBtn = ev.target.closest('[data-p1-theme]');
     if (themeBtn) {
+      const parent = themeBtn.parentElement;
+      if (parent) {
+        parent.querySelectorAll('[data-p1-theme]').forEach(btn => {
+          btn.classList.remove('active');
+          btn.setAttribute('aria-pressed', 'false');
+        });
+      }
+      themeBtn.classList.add('active');
+      themeBtn.setAttribute('aria-pressed', 'true');
       phase1Theme = themeBtn.dataset.p1Theme || 'all';
-      applyPhase1QuickSelection();
-      playTick(stateObj.soundEnabled);
-      return;
-    }
-
-    const durBtn = ev.target.closest('[data-p1-dur]');
-    if (durBtn) {
-      phase1DurationKm = Number(durBtn.dataset.p1Dur) || 6;
-      applyPhase1QuickSelection();
-      playTick(stateObj.soundEnabled);
-      return;
-    }
-
-    const endBtn = ev.target.closest('[data-p1-end]');
-    if (endBtn) {
-      const mode = endBtn.dataset.p1End;
-      if (mode === 'custom') {
-        phase1EndMode = 'custom';
-        pickingCustomEndOnMap = true;
-        plannedRoute.routeType = 'oneway';
-        renderPhase1AndPhase4Ui(lastFix || telemetry.lastKnownPosition);
-        status('🏁 Klikni kamkoliv do mapy nebo na ikonu místa pro výběr jiného cíle trasy…');
-      } else {
-        phase1EndMode = 'loop';
-        pickingCustomEndOnMap = false;
-        plannedRoute.routeType = 'loop';
-        plannedRoute.embeddedStops = (plannedRoute.embeddedStops || []).filter(s => s.id !== 'custom-end-stop');
-        plannedRoute.selectedPlaceIds = (plannedRoute.selectedPlaceIds || []).filter(id => id !== 'custom-end-stop');
-        applyPhase1QuickSelection();
-      }
-      playTick(stateObj.soundEnabled);
-      return;
-    }
-
-    const origBtn = ev.target.closest('[data-p1-origin="gps"]');
-    if (origBtn) {
-      pickingStartOnMap = false;
-      userExplicitlyPickedOrigin = false;
-      if (lastFix) {
-        plannedRoute.origin = { id: 'my-gps', label: 'Moje aktuální GPS poloha', lat: lastFix.lat, lng: lastFix.lng };
-        if (map) centerMapOnPlayer(lastFix, false);
-      } else {
-        plannedRoute.origin = { ...START_PRESETS[0] };
-        if (map) map.setView([START_PRESETS[0].lat, START_PRESETS[0].lng], 13);
-      }
-      applyPhase1QuickSelection(true);
-      refreshAutoPlaces(plannedRoute.origin, { autoPlan: true });
-      playTick(stateObj.soundEnabled);
-      return;
-    }
-
-    const presetBtn = ev.target.closest('[data-p1-preset]');
-    if (presetBtn) {
-      pickingStartOnMap = false;
-      const presetId = presetBtn.dataset.p1Preset;
-      const preset = CZECH_PLACE_PRESETS.find(p => p.id === presetId) || START_PRESETS.find(p => p.id === presetId);
-      if (preset) {
-        userExplicitlyPickedOrigin = true;
-        plannedRoute.origin = { id: preset.id, label: preset.label, lat: preset.lat, lng: preset.lng };
-        if (map) {
-          follow = false;
-          updateFollowUi();
-          map.setView([preset.lat, preset.lng], 13);
-        }
-        refreshWeatherStrip(preset);
-        applyPhase1QuickSelection(true);
-        refreshAutoPlaces(preset, { autoPlan: true, forceRefresh: true });
-        status(`📍 Start výpravy nastaven na: ${preset.label}.`);
-        playTick(stateObj.soundEnabled);
-      }
-      return;
-    }
-
-    if (ev.target.closest('#btn-p1-scan-map')) {
-      scanCurrentMapViewAndPlan();
-      return;
-    }
-
-    if (ev.target.closest('#btn-p1-search-place')) {
-      const inp = $('p1-place-search-input');
-      searchCzechPlaceAndPlan(inp?.value || '');
-      return;
-    }
-
-    if (ev.target.closest('#btn-p1-pick-start-map')) {
-      pickingStartOnMap = true;
-      pickingCustomEndOnMap = false;
+      const cats = phase1Theme === 'castles'
+        ? ['castles']
+        : phase1Theme === 'nature'
+          ? ['nature', 'views']
+          : phase1Theme === 'water'
+            ? ['water']
+            : PLANNER_CATEGORIES.map(c => c.id);
+      plannedRoute.categories = [...cats];
+      wizardCategories = [...cats];
+      renderPlaces();
       renderPhase1AndPhase4Ui(lastFix || telemetry.lastKnownPosition);
-      status('🗺️ Klikni kamkoliv do mapy pro nastavení nového startu výpravy…');
+      playTick(stateObj.soundEnabled);
+      return;
+    }
+  });
+
+  // 2.2 Lupa vyhledávání přímo v mapě (#map-lupa-search-input)
+  async function performInMapLupaSearch(rawQuery) {
+    const resultsBox = $('map-lupa-search-results');
+    const clearBtn = $('map-lupa-search-clear');
+    const q = String(rawQuery || '').trim();
+    if (clearBtn) clearBtn.hidden = q.length === 0;
+    if (!resultsBox) return;
+    if (q.length < 2) {
+      resultsBox.hidden = true;
+      resultsBox.innerHTML = '';
+      return;
+    }
+
+    const qNorm = normalizeSearchQuery(q);
+    const localCandidates = [
+      ...CZECH_PLACE_PRESETS.map(p => ({ id: p.id, title: p.label, lat: p.lat, lng: p.lng, sub: 'Město / oblast v ČR' })),
+      ...getAllAvailablePlaces().map(p => ({ id: p.id, title: p.title, lat: p.lat, lng: p.lng, sub: 'Zajímavé místo v okolí', kind: p.kind, category: p.category })),
+    ].filter(item => normalizeSearchQuery(item.title).includes(qNorm));
+
+    let nominatimItems = [];
+    if (localCandidates.length < 5) {
+      try {
+        const nom = await searchPlaceNominatim(q, aborter.signal);
+        nominatimItems = (nom || []).map((n, i) => ({
+          id: `nom-${Date.now()}-${i}`,
+          title: n.label.split(',')[0].trim(),
+          sub: n.label,
+          lat: n.lat,
+          lng: n.lng,
+          kind: 'culture',
+          category: 'views',
+        }));
+      } catch {}
+    }
+
+    const combined = [...localCandidates, ...nominatimItems].slice(0, 8);
+    lastLupaResults = combined;
+
+    if (combined.length === 0) {
+      resultsBox.hidden = false;
+      resultsBox.innerHTML = `<div class="map-search-item"><span class="map-search-item-sub">Nic nenalezeno pro „${e(q)}“. Zkus jiný název města nebo památky.</span></div>`;
+      return;
+    }
+
+    resultsBox.hidden = false;
+    resultsBox.innerHTML = combined.map((item, idx) => `
+      <div class="map-search-item" role="option" data-lupa-idx="${idx}">
+        <div class="map-search-item-head">
+          <strong class="map-search-item-title">${e(item.title)}</strong>
+          <span class="map-search-item-sub">${e(item.sub || '')}</span>
+        </div>
+        <div class="map-search-item-actions">
+          <button type="button" class="button small map-search-action-btn start-here" data-lupa-action="start" data-lupa-idx="${idx}">
+            📍 Začít výpravu zde
+          </button>
+          <button type="button" class="button small map-search-action-btn add-stop" data-lupa-action="add" data-lupa-idx="${idx}">
+            + Přidat do trasy
+          </button>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  $('map-lupa-search-input')?.addEventListener('input', (ev) => {
+    const val = ev.target.value;
+    if (lupaSearchTimer) clearTimeout(lupaSearchTimer);
+    lupaSearchTimer = setTimeout(() => {
+      performInMapLupaSearch(val);
+    }, 240);
+  });
+
+  $('map-lupa-search-input')?.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') {
+      ev.preventDefault();
+      if (lupaSearchTimer) clearTimeout(lupaSearchTimer);
+      performInMapLupaSearch(ev.currentTarget.value);
+    }
+  });
+
+  $('map-lupa-search-clear')?.addEventListener('click', () => {
+    const inp = $('map-lupa-search-input');
+    if (inp) inp.value = '';
+    if ($('map-lupa-search-clear')) $('map-lupa-search-clear').hidden = true;
+    if ($('map-lupa-search-results')) {
+      $('map-lupa-search-results').hidden = true;
+      $('map-lupa-search-results').innerHTML = '';
+    }
+  });
+
+  $('map-lupa-search-results')?.addEventListener('click', (ev) => {
+    const btn = ev.target.closest('[data-lupa-action]');
+    if (!btn) return;
+    const action = btn.dataset.lupaAction;
+    const idx = Number(btn.dataset.lupaIdx);
+    const item = lastLupaResults[idx];
+    if (!item) return;
+
+    if ($('map-lupa-search-results')) $('map-lupa-search-results').hidden = true;
+
+    if (action === 'start') {
+      userExplicitlyPickedOrigin = true;
+      plannedRoute.origin = {
+        id: item.id || `lupa-${Date.now()}`,
+        label: item.title,
+        lat: item.lat,
+        lng: item.lng,
+        custom: true,
+      };
+      if (map) {
+        follow = false;
+        updateFollowUi();
+        map.setView([item.lat, item.lng], 14);
+      }
+      refreshWeatherStrip(plannedRoute.origin);
+      refreshAutoPlaces(plannedRoute.origin, { autoPlan: false, forceRefresh: true });
+      recalculateRemainingRoute(`📍 Start výpravy nastaven na: ${item.title}.`);
+      playStampChord(stateObj.soundEnabled);
+    } else if (action === 'add') {
+      const stopObj = {
+        id: item.id || `stop-${Date.now()}`,
+        title: item.title,
+        lat: item.lat,
+        lng: item.lng,
+        kind: item.kind || 'culture',
+        category: item.category || 'views',
+      };
+      if (!plannedRoute.embeddedStops) plannedRoute.embeddedStops = [];
+      if (!getAllAvailablePlaces().some(p => p.id === stopObj.id)) {
+        plannedRoute.embeddedStops.push(stopObj);
+      }
+      const curStops = getPlannedPlaces();
+      const inserted = insertStopAtBestPosition(getRouteOriginPoint(), curStops, stopObj, {
+        returnToOrigin: plannedRoute.routeType === 'loop',
+        visitedStopIds: confirmedStopIds,
+        currentPosition: (active || demo) && lastFix ? lastFix : null,
+      });
+      plannedRoute.selectedPlaceIds = inserted.map(p => p.id);
+      if (map) {
+        follow = false;
+        updateFollowUi();
+        map.setView([item.lat, item.lng], Math.max(map.getZoom(), 14));
+      }
+      recalculateRemainingRoute(`+ Místo „${item.title}“ přidáno do trasy.`);
+      playStampChord(stateObj.soundEnabled);
+    }
+  });
+
+  // 7.2 Tlačítko „📥 Stáhnout tuto oblast offline“ (#btn-download-offline-map)
+  $('btn-download-offline-map')?.addEventListener('click', async () => {
+    const banner = $('offline-download-banner');
+    const bounds = map ? map.getBounds() : { south: 49.56, west: 13.80, north: 49.64, east: 13.92 };
+    const center = map ? map.getCenter() : getRouteOriginPoint();
+    if (banner) {
+      banner.hidden = false;
+      banner.textContent = 'Stahuji mapu do paměti: 0 %...';
+    }
+    playTick(stateObj.soundEnabled);
+    await downloadOfflineArea({
+      bounds,
+      center: { lat: center.lat, lng: center.lng },
+      places: getAllAvailablePlaces(),
+      plannedRoute,
+      onProgress: (info) => {
+        if (banner) {
+          banner.hidden = false;
+          banner.textContent = info.text;
+        }
+        status(info.text);
+      },
+    });
+    playStampChord(stateObj.soundEnabled);
+    setTimeout(() => {
+      if (banner && !disposed) banner.hidden = true;
+    }, 4500);
+  });
+
+  // 8.2 Kapesní režim (#btn-pocket-mode a #pocket-mode-overlay)
+  function setPocketModeUi(enabled) {
+    keepAliveCtrl.setPocketMode(enabled);
+    const overlay = $('pocket-mode-overlay');
+    if (!overlay) return;
+    overlay.hidden = !enabled;
+    if (enabled) {
+      const plannedPlaces = getPlannedPlaces();
+      const rem = computeRemainingFromSharedRoute({
+        sharedRoute: lastRoutedGeometry,
+        currentPos: lastFix || getRouteOriginPoint(),
+        plannedPlaces,
+        confirmedStopIds,
+        companionMode: 'solo',
+        returnToOrigin: plannedRoute.routeType === 'loop',
+        origin: getRouteOriginPoint(),
+      });
+      const statsEl = $('pocket-mode-stats');
+      if (statsEl) {
+        if (rem.nextStop) {
+          statsEl.textContent = `Další cíl: ${rem.nextStop.title} (${formatDistanceLabel(rem.nextStopDistanceM)})`;
+        } else if (plannedPlaces.length > 0) {
+          statsEl.textContent = `Zbývá do cíle: ${formatDistanceLabel(rem.remainingDistanceM)}`;
+        } else {
+          const gainedM = currentExpedition ? Math.max(0, progress.meters - (currentExpedition.startMeters || 0)) : progress.meters;
+          statsEl.textContent = `Ušlá vzdálenost: ${formatMetersCz(gainedM)}`;
+        }
+      }
+    }
+  }
+
+  $('btn-pocket-mode')?.addEventListener('click', () => {
+    setPocketModeUi(true);
+    playTick(stateObj.soundEnabled);
+  });
+
+  $('btn-pocket-unlock')?.addEventListener('click', () => {
+    setPocketModeUi(false);
+    playTick(stateObj.soundEnabled);
+  });
+
+  $('pocket-mode-overlay')?.addEventListener('dblclick', () => {
+    setPocketModeUi(false);
+    playTick(stateObj.soundEnabled);
+  });
+
+  $('pocket-mode-overlay')?.addEventListener('click', (ev) => {
+    if (ev.target === $('pocket-mode-overlay') || !ev.target.closest('.pocket-mode-box')) {
+      setPocketModeUi(false);
       playTick(stateObj.soundEnabled);
     }
   });
 
-  $('p1-place-search-input')?.addEventListener('keydown', (ev) => {
-    if (ev.key === 'Enter') {
-      ev.preventDefault();
-      searchCzechPlaceAndPlan(ev.currentTarget.value);
+  // 1.2 Krok 4: Obsluha tlačítek v dialogu „🎉 Jsi v cíli své trasy! Co chceš udělat dál?“
+  $('arrival-goal-modal')?.addEventListener('click', (ev) => {
+    if (ev.target === $('arrival-goal-modal') || !ev.target.closest('.arrival-goal-dialog')) {
+      $('arrival-goal-modal').hidden = true;
+      playTick(stateObj.soundEnabled);
     }
+  });
+
+  $('btn-arrival-close-x')?.addEventListener('click', () => {
+    if ($('arrival-goal-modal')) $('arrival-goal-modal').hidden = true;
+    playTick(stateObj.soundEnabled);
+  });
+
+  $('btn-arrival-return-start')?.addEventListener('click', () => {
+    if ($('arrival-goal-modal')) $('arrival-goal-modal').hidden = true;
+    shortenRouteToStart();
+  });
+
+  $('btn-arrival-finish-postcard')?.addEventListener('click', () => {
+    if ($('arrival-goal-modal')) $('arrival-goal-modal').hidden = true;
+    finishUnifiedExpedition();
   });
 
   // Interaktivní itinerář zastávek v horní liště (#top-route-itinerary-strip)
@@ -6035,7 +6426,7 @@ export function mountWalk(root, routes, config, actions = {}) {
   $('walk-center')?.addEventListener('click', restoreFollowOnPlayer);
   $('btn-return-to-gps')?.addEventListener('click', restoreFollowOnPlayer);
 
-  $('walk-demo').addEventListener('click', () => {
+  $('walk-demo')?.addEventListener('click', () => {
     pauseSession();
     demo = !demo;
     lastFix = null; anchor = null;
@@ -6090,9 +6481,102 @@ export function mountWalk(root, routes, config, actions = {}) {
     demoIndex++;
     handleGpsFix(fix);
   }
-  $('walk-step').addEventListener('click', stepDemo);
+  $('walk-step')?.addEventListener('click', stepDemo);
 
-  // Globální delegace pro správu zastávek (Nahoru, Dolů, Nahradit, Odebrat), přidávání míst a turistické trasy
+  // Globální delegace pro správu zastávek (Nahoru, Dolů, Nahradit, Odebrat), přidávání míst, turistické trasy a zavírání vyskakovacích oken kliknutím mimo ně
+  const handleDocumentOutsideClick = (event) => {
+    if (disposed) return;
+    const t = event.target;
+    if (!t || typeof t.closest !== 'function') return;
+
+    // 1. Zavření modálu s pohlednicí (#postcard-modal) při kliknutí kamkoliv mimo .session-modal-card
+    if ($('postcard-modal')) {
+      const clickedInsidePostcard = t.closest('.session-modal-card');
+      const clickedFinishTrigger =
+        t.closest('#walk-finish') ||
+        t.closest('#walk-end') ||
+        t.closest('#btn-phase4-finish-now') ||
+        t.closest('#btn-arrival-finish-postcard');
+      if (!clickedInsidePostcard && !clickedFinishTrigger) {
+        if ($('session-summary-container')) $('session-summary-container').innerHTML = '';
+        playTick(stateObj.soundEnabled);
+        return;
+      }
+    }
+
+    // 2. Zavření cílového okna (#arrival-goal-modal) při kliknutí kamkoliv mimo .arrival-goal-dialog
+    if ($('arrival-goal-modal') && !$('arrival-goal-modal').hidden) {
+      if (!t.closest('.arrival-goal-dialog')) {
+        $('arrival-goal-modal').hidden = true;
+        playTick(stateObj.soundEnabled);
+        return;
+      }
+    }
+
+    // 3. Zavření kapesního režimu (#pocket-mode-overlay) při kliknutí mimo .pocket-mode-box
+    if ($('pocket-mode-overlay') && !$('pocket-mode-overlay').hidden) {
+      if (!t.closest('.pocket-mode-box') && !t.closest('#btn-pocket-mode')) {
+        setPocketModeUi(false);
+        playTick(stateObj.soundEnabled);
+        return;
+      }
+    }
+
+    // 4. Zavření modálu „Upravit procházku“ (#edit-walk-modal) při kliknutí mimo .edit-walk-modal-card
+    if ($('edit-walk-modal') && !$('edit-walk-modal').hidden) {
+      const clickedOpenEdit =
+        t.closest('#btn-open-edit-walk') ||
+        t.closest('#btn-sheet-edit-walk') ||
+        t.closest('#btn-top-edit-walk');
+      if (!t.closest('.edit-walk-modal-card') && !clickedOpenEdit) {
+        cancelEditWalkModal();
+        return;
+      }
+    }
+
+    // 5. Zavření modálu „Nastavení aplikace“ (#app-settings-modal) při kliknutí mimo .edit-walk-modal-card
+    if ($('app-settings-modal') && !$('app-settings-modal').hidden) {
+      const clickedOpenSettings =
+        t.closest('#btn-open-settings-modal') ||
+        t.closest('#btn-top-settings');
+      if (!t.closest('.edit-walk-modal-card') && !clickedOpenSettings) {
+        appSettingsModalOpen = false;
+        $('app-settings-modal').hidden = true;
+        playTick(stateObj.soundEnabled);
+        return;
+      }
+    }
+
+    // 6. Zavření výsledků lupy vyhledávání při kliknutí mimo vyhledávací lištu
+    if ($('map-lupa-search-results') && !$('map-lupa-search-results').hidden) {
+      if (!t.closest('#map-search-overlay')) {
+        $('map-lupa-search-results').hidden = true;
+      }
+    }
+
+    // 7. Zavření bubliny detailu místa (#place-detail-sheet) při kliknutí mimo ni
+    if ($('place-detail-sheet') && !$('place-detail-sheet').hidden) {
+      const clickedInsideSheet = t.closest('#place-detail-sheet');
+      const clickedTrigger =
+        t.closest('.czekpoint-marker-anchor') ||
+        t.closest('.open-map-detail-btn') ||
+        t.closest('#btn-hero-place-detail') ||
+        t.closest('[data-itinerary-focus]');
+      if (!clickedInsideSheet && !clickedTrigger) {
+        closePlaceDetail();
+      }
+    }
+
+    // 8. Zavření výběru náhradní zastávky (#stop-replace-picker) při kliknutí mimo něj
+    if (replacingStopIndex !== null && $('stop-replace-picker') && !$('stop-replace-picker').hidden) {
+      if (!t.closest('#stop-replace-picker') && !t.closest('[data-stop-action="replace"]')) {
+        replacingStopIndex = null;
+        renderReplaceStopPicker();
+      }
+    }
+  };
+  document.addEventListener('click', handleDocumentOutsideClick, { signal: aborter.signal });
+
   root.addEventListener('click', async event => {
     const stopActionBtn = event.target.closest('[data-stop-action]');
     if (stopActionBtn) {
@@ -6235,7 +6719,11 @@ export function mountWalk(root, routes, config, actions = {}) {
       return;
     }
 
-    if (event.target.closest('#btn-close-app-settings') || event.target.closest('#btn-close-app-settings-x') || event.target === $('app-settings-modal')) {
+    if (
+      event.target.closest('#btn-close-app-settings') ||
+      event.target.closest('#btn-close-app-settings-x') ||
+      (event.target.closest('#app-settings-modal') && !event.target.closest('.edit-walk-modal-card'))
+    ) {
       appSettingsModalOpen = false;
       const modal = $('app-settings-modal');
       if (modal) modal.hidden = true;
@@ -6276,11 +6764,11 @@ export function mountWalk(root, routes, config, actions = {}) {
     }
   }, { signal: aborter.signal });
 
-  $('walk-nearby').addEventListener('click', async () => {
-    if (demo) { $('nearby-status').textContent = 'Ukázka používá připravený katalog.'; return; }
+  $('walk-nearby')?.addEventListener('click', async () => {
+    if (demo) { if ($('nearby-status')) $('nearby-status').textContent = 'Ukázka používá připravený katalog.'; return; }
     const queryOrigin = lastFix || plannedRoute.origin || { lat: 49.6014, lng: 13.8644 };
-    $('walk-nearby').disabled = true;
-    $('nearby-status').textContent = 'Hledám místa v okolí…';
+    if ($('walk-nearby')) $('walk-nearby').disabled = true;
+    if ($('nearby-status')) $('nearby-status').textContent = 'Hledám místa v okolí…';
     try {
       const found = await fetchNearby(queryOrigin, config.overpassUrl, aborter.signal, routes, {
         radiusM: (plannedRoute.radiusKm || 10) * 1000,
@@ -6289,16 +6777,16 @@ export function mountWalk(root, routes, config, actions = {}) {
       if (disposed || demo) return;
       nearby = found;
       renderPlaces();
-      $('nearby-status').textContent = found.length ? `Načteno ${found.length} míst v okolí.` : 'V okolí nejsou další známá místa.';
+      if ($('nearby-status')) $('nearby-status').textContent = found.length ? `Načteno ${found.length} míst v okolí.` : 'V okolí nejsou další známá místa.';
     } catch (error) {
-      if (!disposed) $('nearby-status').textContent = error.name === 'AbortError' ? 'Hledání trvalo příliš dlouho.' : error.message;
+      if (!disposed && $('nearby-status')) $('nearby-status').textContent = error.name === 'AbortError' ? 'Hledání trvalo příliš dlouho.' : error.message;
     } finally {
-      if (!disposed) $('walk-nearby').disabled = false;
+      if (!disposed && $('walk-nearby')) $('walk-nearby').disabled = false;
     }
   });
 
   // Export a obnova ze zálohy JSON
-  $('walk-export').addEventListener('click', () => {
+  $('walk-export')?.addEventListener('click', () => {
     try {
       const jsonStr = exportStateJson();
       const today = new Date().toISOString().slice(0, 10);
@@ -6398,9 +6886,8 @@ export function mountWalk(root, routes, config, actions = {}) {
   };
   window.addEventListener('storage', storageChanged, { signal: aborter.signal });
 
-  if (!plannedRoute.selectedPlaceIds || plannedRoute.selectedPlaceIds.length === 0) {
-    applyPhase1QuickSelection(true);
-  }
+  // ZADÁNÍ #10 (Bod 1.1): Při prvním otevření mapy NEVYBÍRÁME automaticky zastávky,
+  // aby horní lišta „Půjdeš ~X hod...“ nesvítila bez kontextu hned po otevření!
   renderTripWizardUi();
   stats();
   renderQuestHud(plannedRoute.origin);
@@ -6408,6 +6895,7 @@ export function mountWalk(root, routes, config, actions = {}) {
 
   return () => {
     disposed = true;
+    keepAliveCtrl.stop();
     stopBackgroundTracking();
     if (playerLerpRafId) {
       cancelAnimationFrame(playerLerpRafId);

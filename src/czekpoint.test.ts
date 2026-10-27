@@ -58,6 +58,31 @@ import {
   createStickBadge,
 } from './walking-stick.js';
 import {
+  generateCategoryPlaceSvgDataUrl,
+  getPlacePhotoSync,
+  resolvePlacePhoto,
+} from './place-photos.js';
+import {
+  sampleRouteCoordinates,
+  computeElevationMetrics,
+  fetchRouteElevationProfile,
+  renderElevationProfileCardHtml,
+} from './elevation.js';
+import {
+  renderPostcardSvg,
+  renderPostcardSvgDataUrl,
+} from './postcards.js';
+import {
+  latLngToTileXY,
+  buildOfflineTileListForBounds,
+  downloadOfflineArea,
+} from './offline-maps.js';
+import {
+  createCompassStabilizer,
+  interpolateBackgroundGap,
+  triggerPocketProximityAlert,
+} from './keep-alive.js';
+import {
   renderBootFootprintSvg,
   renderPlayerAvatarMarkerHtml,
 } from './walk.js';
@@ -1012,6 +1037,124 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
     assert.ok(!walkJsCode.includes('const pagehide = () => pauseSession();'), 'pagehide nesmí volat pauseSession()');
     assert.ok(walkJsCode.includes('walk-bg-record'), 'Indikátor walk-bg-record musí existovat v šabloně');
     assert.ok(walkJsCode.includes('bg-record-status'), 'Indikátor bg-record-status musí existovat v šabloně');
+  });
+
+  it('ZADÁNÍ #10 (v1.2): Stabilizace kompasu, Výškový profil, Fotky míst, Koláž pohlednic, Offline mapy, Kapesní režim a obnova mezery', async () => {
+    // 1. Stabilizace kompasu (sin/cos low-pass, deadband 2.5°, plynulý přechod přes 360° bez otočky o -358°)
+    const stab = createCompassStabilizer({ alpha: 0.12, deadbandDeg: 2.5, minIntervalMs: 80 });
+    const r0 = stab.update(359, 1000);
+    assert.equal(r0.updated, true);
+    assert.equal(Math.round(r0.continuousAngle), 359);
+
+    // Drobný šum < 2.5° v pásmu necitlivosti (deadband) nebo pod 80 ms se ignoruje
+    const rNoise = stab.update(359.5, 1100);
+    assert.equal(rNoise.updated, false, 'Změna pod 2.5° musí být odfiltrována deadbandem');
+
+    // Přechod přes sever 359° -> 2° (více kroků filtru) nesmí udělat skok o -357°, ale plynule narůst nad 360°
+    let lastCont = r0.continuousAngle;
+    for (let step = 1; step <= 12; step++) {
+      const rStep = stab.update(5, 1100 + step * 100);
+      assert.ok(
+        Math.abs(rStep.continuousAngle - lastCont) < 15,
+        `Spojitý úhel kompasu nesmí skočit o stovky stupňů (delta=${rStep.continuousAngle - lastCont})`
+      );
+      lastCont = rStep.continuousAngle;
+    }
+    assert.ok(lastCont > 359, 'Při přechodu 359° -> 5° musí spojitý úhel růst nad 359° (např. ~364°), nikoliv klesnout k 0°');
+
+    // 2. Fotky míst a vektorové ilustrace (src/place-photos.js)
+    const castlePlace = { id: 'p-zamek', title: 'Zámek Rožmitál', kind: 'culture', category: 'castles', lat: 49.601, lng: 13.864 };
+    const syncPhoto = getPlacePhotoSync(castlePlace);
+    assert.ok(syncPhoto.photoUrl.startsWith('data:image/svg+xml;charset=utf-8,'), 'Fallback musí být SVG Data URL ilustrace podle kategorie');
+
+    const mockWikiFetch = async () => ({
+      ok: true,
+      json: async () => ({
+        query: {
+          pages: {
+            '101': {
+              title: 'Zámek Rožmitál pod Třemšínem',
+              thumbnail: { source: 'https://upload.wikimedia.org/wikipedia/commons/thumb/zamek.jpg', width: 400, height: 300 },
+            },
+          },
+        },
+      }),
+    });
+    const asyncPhoto = await resolvePlacePhoto(castlePlace, { fetchImpl: mockWikiFetch as any });
+    assert.equal(asyncPhoto.isRealPhoto, true);
+    assert.equal(asyncPhoto.photoUrl, 'https://upload.wikimedia.org/wikipedia/commons/thumb/zamek.jpg');
+
+    // 3. Výškový profil trasy (src/elevation.js)
+    const routeCoords: [number, number][] = [
+      [49.6014, 13.8644],
+      [49.5850, 13.8400],
+      [49.5675, 13.8380], // Třemšín oblast
+    ];
+    const sampled = sampleRouteCoordinates(routeCoords, 30);
+    assert.ok(sampled.length >= 25 && sampled.length <= 40, 'Vzorkování musí vytvořit 25–40 bodů');
+
+    const profile = await fetchRouteElevationProfile(routeCoords, { fetchImpl: null as any });
+    assert.ok(profile.points.length >= 25);
+    assert.ok(profile.gainM >= 0);
+    assert.ok(profile.maxEle >= profile.minEle);
+
+    const profileHtml = renderElevationProfileCardHtml(profile, [{ title: 'Třemšín' }], 0.5);
+    assert.ok(profileHtml.includes('elevation-profile-card'), 'HTML musí obsahovat .elevation-profile-card');
+    assert.ok(profileHtml.includes('Stoupání +'), 'HTML musí zobrazovat celkové stoupání');
+    assert.ok(profileHtml.includes('Klesání -'), 'HTML musí zobrazovat celkové klesání');
+
+    // 4. Pohlednicová koláž z navštívených míst (src/postcards.js)
+    const svgCollage = renderPostcardSvg({
+      id: 'exp-collage-1',
+      date: '2026-10-27T10:00:00Z',
+      distanceMeters: 4200,
+      elevationGainM: 135,
+      pointsEarned: 180,
+      stampsCount: 3,
+      visitedPlacesWithPhotos: [
+        { title: 'Zámek Rožmitál', photoUrl: syncPhoto.photoUrl, kind: 'culture' },
+        { title: 'Kaple na Třemšíně', photoUrl: generateCategoryPlaceSvgDataUrl({ title: 'Kaple', kind: 'chapel' }), kind: 'culture' },
+        { title: 'Pramen Lomnice', photoUrl: generateCategoryPlaceSvgDataUrl({ title: 'Pramen', kind: 'spring' }), kind: 'water' },
+      ],
+      trailCoordinates: routeCoords,
+    });
+    assert.ok(svgCollage.includes('POZDRAV Z VÝPRAVY'), 'Pohlednice musí obsahovat hlavičku POZDRAV Z VÝPRAVY');
+    assert.ok(svgCollage.includes('Zámek Rožmitál'), 'Pohlednice musí obsahovat názvy navštívených míst v koláži');
+    assert.ok(svgCollage.includes('+135 m'), 'Pohlednice musí obsahovat nastoupané metry');
+    assert.ok(renderPostcardSvgDataUrl({ distanceMeters: 1200 }).startsWith('data:image/svg+xml;charset=utf-8,'));
+
+    // 5. Offline mapy (src/offline-maps.js) a Service Worker (sw.js)
+    const tile = latLngToTileXY(49.6014, 13.8644, 14);
+    assert.equal(tile.z, 14);
+    assert.ok(tile.x > 0 && tile.y > 0);
+    const tileList = buildOfflineTileListForBounds(
+      { south: 49.58, west: 13.82, north: 49.62, east: 13.90 },
+      { zooms: [13, 14, 15], maxTiles: 120 }
+    );
+    assert.ok(tileList.length > 0 && tileList.length <= 120, 'Počet dlaždic pro offline stažení musí být max 120');
+    assert.equal(fs.existsSync('sw.js'), true, 'Service Worker sw.js musí existovat v kořeni projektu');
+
+    // 6. Background Gap Recovery (src/keep-alive.js): mezera > 12 s do 3 km při chůzi <= 3.5 m/s
+    const gapRecovery = interpolateBackgroundGap({
+      prevFix: { lat: 49.6014, lng: 13.8644, ts: 1000 },
+      nextFix: { lat: 49.6032, lng: 13.8670, ts: 141000 }, // 140 sekund v kapse (~275 m -> ~1.96 m/s)
+      plannedCoords: [
+        [49.6014, 13.8644],
+        [49.6023, 13.8657],
+        [49.6032, 13.8670],
+      ],
+    });
+    assert.equal(gapRecovery.recovered, true, 'Mezera > 12 s při normální chůzi musí být dopočítána');
+    assert.ok(gapRecovery.points.length >= 5, 'Musí vzniknout interpolované body pro odkrytí mlhy a zastávek');
+
+    // 7. Ověření v1.2 prvků v index.html a src/walk.js
+    const indexHtml = fs.readFileSync('index.html', 'utf-8');
+    assert.ok(indexHtml.includes('v1.2'), 'index.html musí mít verzi v1.2');
+    const walkJs = fs.readFileSync('src/walk.js', 'utf-8');
+    assert.ok(walkJs.includes('map-lupa-search-input'), 'Vyhledávací lupa v mapě musí existovat');
+    assert.ok(walkJs.includes('btn-download-offline-map'), 'Tlačítko pro offline stažení oblasti musí existovat');
+    assert.ok(walkJs.includes('btn-pocket-mode'), 'Tlačítko Kapesního režimu musí existovat');
+    assert.ok(walkJs.includes('arrival-goal-modal'), 'Dialog po příchodu do cíle musí existovat');
   });
 });
 

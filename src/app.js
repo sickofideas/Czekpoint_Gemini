@@ -435,13 +435,14 @@ function renderPassport() {
               const dist = exp.distanceMeters >= 1000 ? (exp.distanceMeters / 1000).toFixed(1).replace('.', ',') + ' km' : Math.round(exp.distanceMeters) + ' m';
               return `
                 <div class="postcard-card">
-                  <img src="${dataUrl}" alt="Pohlednice z výpravy" loading="lazy">
+                  <img src="${dataUrl}" alt="Pohlednice z výpravy" loading="lazy" data-action="preview-postcard" data-exp-id="${e(exp.id)}" style="cursor:pointer" title="Klikni pro zvětšení pohlednice">
                   <div class="postcard-card-stats">
                     <span>👣 ${dist}</span>
                     <span>🗺️ +${exp.newCellsCount} dílků</span>
                     <span>⭐ +${exp.newStampsCount} razítek</span>
                   </div>
                   <div class="postcard-actions">
+                    <button type="button" class="button small ghost" data-action="preview-postcard" data-exp-id="${e(exp.id)}">🔍 Zvětšit</button>
                     <button type="button" class="button small primary" data-action="download-postcard" data-exp-id="${e(exp.id)}">Stáhnout pohlednici (PNG)</button>
                     <button type="button" class="button small" data-action="share-postcard" data-exp-id="${e(exp.id)}">Sdílet</button>
                   </div>
@@ -449,6 +450,7 @@ function renderPassport() {
               `;
             }).join('')}
           </div>
+          <div id="passport-postcard-modal-slot"></div>
         ` : `
           <div class="empty-state" style="padding:24px 12px;text-align:center">
             <p class="small-note">Zatím nemáš žádnou pohlednici. Vydej se na procházku, ukonči výpravu a vytvoř svou první ilustrovanou vzpomínku!</p>
@@ -999,6 +1001,15 @@ document.addEventListener('click', async event => {
       setTimeout(() => renderPassport(), 180);
       return;
     }
+    if (action === 'preview-postcard') {
+      const expId = button.dataset.expId;
+      const stateObj = loadState();
+      const exp = (stateObj.expeditionHistory || []).find(x => x.id === expId);
+      if (exp) {
+        openPassportPostcardModal(exp);
+      }
+      return;
+    }
     if (action === 'download-postcard') {
       const expId = button.dataset.expId;
       const stateObj = loadState();
@@ -1100,7 +1111,15 @@ document.addEventListener('change', async event => {
 window.addEventListener('hashchange', () => { if (reportDialog.open) reportDialog.close(); renderPage({ focus: true }).catch(error => toast(errorMessage(error), true)); });
 window.addEventListener('pageshow', event => { if (event.persisted && state.repo) refreshPersonal().then(() => renderPage()).catch(error => toast(errorMessage(error), true)); });
 
+function registerOfflineServiceWorker() {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') return;
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('./sw.js').catch(() => {});
+  }
+}
+
 async function boot() {
+  registerOfflineServiceWorker();
   mountAnimatedBrandLogo();
   mountAmbientBackground();
   try {
