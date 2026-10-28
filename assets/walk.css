@@ -3970,6 +3970,393 @@
   cursor: pointer;
 }
 
+/* ==========================================================================
+   DÁVKA 1 (Verze v1.4-part1):
+   1. Plovoucí indikátor načítání a výpočtu v mapě (#map-busy-indicator, .map-spinner)
+   2. Sjednocená tlačítka, nabídka ⋯ Další a nepropustná Pauza
+   3. Oprava celé obrazovky (.walk-map-wrap.zen-mode) a mobilního zobrazení (360 / 390 px)
+   ========================================================================== */
 
+.map-busy-indicator {
+  position: absolute;
+  top: 72px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1200;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 16px;
+  border-radius: 999px;
+  background: rgba(20, 34, 25, 0.96);
+  color: #fef08a;
+  border: 2px solid #d4af37;
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.48);
+  font-size: 0.88rem;
+  font-weight: 800;
+  line-height: 1.25;
+  max-width: calc(100% - 28px);
+  pointer-events: none;
+  backdrop-filter: blur(8px);
+}
 
+.map-busy-indicator[hidden] {
+  display: none !important;
+}
 
+.map-spinner {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2.5px solid rgba(254, 240, 138, 0.28);
+  border-top-color: #fef08a;
+  animation: mapSpinnerRotate 0.75s linear infinite;
+  flex-shrink: 0;
+  display: inline-block;
+}
+
+@keyframes mapSpinnerRotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.map-busy-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Kontrastní purpurové šipky směru trasy (#9333ea s lemem #2e1065) */
+.route-dir-arrow {
+  color: #ffffff !important;
+  text-shadow: 0 0 4px #2e1065, 0 0 8px #9333ea !important;
+}
+
+/* Sjednocená tlačítka v pravém sloupci mapy (>= 44x44 px) */
+.map-right-btn,
+#walk-zoom-in,
+#walk-zoom-out,
+#walk-search-toggle,
+#walk-zen-toggle {
+  min-width: 46px !important;
+  min-height: 46px !important;
+  width: 46px;
+  height: 46px;
+  padding: 0 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  font-size: 20px !important;
+}
+
+.map-right-btn[hidden] {
+  display: none !important;
+}
+
+/* Nabídka ⋯ Další v akční liště mapy */
+.mab-more-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.mab-more-btn {
+  background: #18261ceb !important;
+  color: #f8f5ec !important;
+  border: 1.5px solid rgba(212, 175, 55, 0.75) !important;
+  font-size: 0.9rem !important;
+  padding: 11px 14px !important;
+  min-height: 50px !important;
+  min-width: 48px !important;
+}
+
+.mab-more-menu {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  right: 0;
+  z-index: 1250;
+  min-width: 230px;
+  background: rgba(20, 33, 24, 0.98);
+  border: 2px solid #d4af37;
+  border-radius: 16px;
+  padding: 8px;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.58);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mab-more-menu[hidden] {
+  display: none !important;
+}
+
+.mab-more-item {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.07);
+  color: #f8f5ec;
+  font-size: 0.88rem;
+  font-weight: 750;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.mab-more-item:hover {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: #fef08a;
+}
+
+/* Oprava celé obrazovky (.walk-map-wrap.zen-mode) a mobilního zobrazení (360 / 390 px) */
+.walk-map-wrap.zen-mode {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 100vw !important;
+  height: 100dvh !important;
+  max-width: 100vw !important;
+  max-height: 100dvh !important;
+  margin: 0 !important;
+  border-radius: 0 !important;
+  border: 0 !important;
+  z-index: 9999 !important;
+}
+
+.walk-map-wrap.zen-mode #walk-map {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.walk-map-wrap.zen-mode .zen-close-btn,
+.walk-map-wrap.zen-mode .zen-follow-fab,
+.zen-close-btn[hidden],
+.zen-follow-fab[hidden] {
+  display: none !important;
+}
+
+@media (max-width: 420px) {
+  .map-search-overlay {
+    left: 8px;
+    right: 8px;
+    top: 8px;
+  }
+  .map-right-toolbar {
+    right: 8px !important;
+    top: 66px !important;
+    gap: 6px !important;
+  }
+  .map-action-bar {
+    width: calc(100% - 16px);
+    bottom: 10px;
+  }
+  .mab-active-group {
+    gap: 6px;
+    flex-wrap: nowrap;
+  }
+  .mab-pause-btn,
+  .mab-finish-btn,
+  .mab-more-btn {
+    min-width: 0 !important;
+    padding: 10px 11px !important;
+    font-size: 0.85rem !important;
+  }
+  .mab-pause-btn {
+    flex: 1.15;
+  }
+  .mab-finish-btn {
+    flex: 1.15;
+  }
+  .return-to-gps-btn {
+    bottom: 70px;
+    font-size: 0.84rem;
+    padding: 8px 14px;
+  }
+}
+
+/* DÁVKA 2 (Verze v1.4-part2): Osobní atlas malých objevů, výzvy všímavosti a stav trasy */
+.mab-memory-btn {
+  background: linear-gradient(135deg, #fef08a 0%, #f59e0b 100%) !important;
+  color: #1f1606 !important;
+  border: 2px solid #fffbeb !important;
+  font-weight: 800 !important;
+  min-height: 44px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+  white-space: nowrap;
+}
+
+.mab-memory-btn:hover {
+  filter: brightness(1.05);
+}
+
+.mindfulness-prompt-card {
+  background: linear-gradient(135deg, #f3f9ec 0%, #e7f3dc 100%);
+  border: 1.5px solid #84a969;
+  border-radius: 14px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mindfulness-prompt-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.mindfulness-prompt-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.mindfulness-prompt-text {
+  margin: 0;
+  font-size: 0.98rem;
+  font-weight: 700;
+  color: #1c3823;
+  line-height: 1.4;
+}
+
+.mindfulness-prompt-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.memory-symbols-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px;
+}
+
+.memory-symbol-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 2px solid rgba(84, 65, 38, 0.24);
+  background: #fffdf8;
+  color: #23180c;
+  font-weight: 700;
+  cursor: pointer;
+  text-align: left;
+  min-height: 46px;
+}
+
+.memory-symbol-btn.selected {
+  background: #fef9c3;
+  border-color: #ca8a04;
+  box-shadow: 0 2px 10px rgba(202, 138, 4, 0.22);
+}
+
+.memory-symbol-icon {
+  font-size: 1.35rem;
+  line-height: 1;
+}
+
+.memory-note-textarea {
+  width: 100%;
+  border-radius: 10px;
+  border: 1.5px solid rgba(84, 65, 38, 0.32);
+  padding: 10px 12px;
+  font-family: inherit;
+  font-size: 0.95rem;
+  background: #fffdf9;
+  color: #1f170d;
+  resize: vertical;
+}
+
+.personal-memories-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.personal-memory-item {
+  background: #fffdf7;
+  border: 1.5px solid #e2d5b5;
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.personal-memory-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.personal-memory-title {
+  font-size: 0.96rem;
+  color: #24190c;
+}
+
+.personal-memory-badge {
+  font-size: 0.74rem;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #fef3c7;
+  color: #78350f;
+  border: 1px solid #f59e0b;
+}
+
+.personal-memory-note {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #362919;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.personal-memory-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.czekpoint-marker-badge.tier-user-memory {
+  background: linear-gradient(135deg, #fef08a 0%, #f59e0b 100%);
+  border: 2.5px solid #78350f;
+  box-shadow: 0 4px 12px rgba(120, 53, 15, 0.38);
+}
+
+.xray-route-status-banner {
+  margin: 6px 0 10px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 0.86rem;
+  line-height: 1.35;
+}
+
+.xray-route-status-banner.is-routed {
+  background: #ecfdf5;
+  border: 1.5px solid #10b981;
+  color: #064e3b;
+}
+
+.xray-route-status-banner.is-fallback {
+  background: #fffbeb;
+  border: 1.5px dashed #d97706;
+  color: #78350f;
+}

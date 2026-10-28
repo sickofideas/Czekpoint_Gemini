@@ -637,48 +637,9 @@ export function orderRouteWaypoints(origin, places = [], options = {}) {
  * Vytvoří boční průjezdní bod (~400 m kolmo na spojnici poslední zastávky a startu),
  * aby pěší router OSRM vedl zpáteční cestu po vedlejší lesní cestě a nevracel uživatele po vlastních stopách.
  */
-export function computeLateralLoopWaypoint(origin, lastStop, existingStops = []) {
-  if (!origin || !lastStop || !Number.isFinite(origin.lat) || !Number.isFinite(lastStop.lat)) {
-    return null;
-  }
-  const distM = haversineMeters(origin, lastStop) ?? 0;
-  if (distM < 180) return null;
-
-  const midLat = (origin.lat + lastStop.lat) / 2;
-  const midLng = (origin.lng + lastStop.lng) / 2;
-  const cosLat = Math.cos((midLat * Math.PI) / 180);
-
-  // Směrový vektor z lastStop do origin v metrech
-  const dyM = (origin.lat - lastStop.lat) * 111320;
-  const dxM = (origin.lng - lastStop.lng) * 111320 * cosLat;
-  const len = Math.hypot(dxM, dyM) || 1;
-
-  // Kolmý jednotkový vektor (doprava po směru hodinových ručiček od návratového směru)
-  const perpXM = dyM / len;
-  const perpYM = -dxM / len;
-
-  // Boční odstup ~380 m (nebo 35 % vzdálenosti u kratších tras, max 450 m)
-  const offsetM = Math.min(450, Math.max(240, Math.round(distM * 0.36)));
-
-  const candidateLat = Number((midLat + (perpYM * offsetM) / 111320).toFixed(6));
-  const candidateLng = Number((midLng + (perpXM * offsetM) / (111320 * cosLat)).toFixed(6));
-
-  const ponds = BUILTIN_NATURAL_FEATURES.filter(f => f.kind === 'water');
-  const rawPt = {
-    id: 'via-loop-detour',
-    title: 'Lesní odbočka (návrat jinou cestou)',
-    lat: candidateLat,
-    lng: candidateLng,
-    isAuxiliaryVia: true,
-    isLateralDetour: true,
-    collectible: false,
-  };
-  const safePt = resolveAccessibleStopLocation(rawPt, ponds) || rawPt;
-  return {
-    ...rawPt,
-    lat: Number(safePt.lat.toFixed(6)),
-    lng: Number(safePt.lng.toFixed(6)),
-  };
+export function computeLateralLoopWaypoint(_origin, _lastStop, _existingStops = []) {
+  // DÁVKA 2 (v1.4-part2): Zákaz vytváření fiktivních bočních objížděk mimo síť cest.
+  return null;
 }
 
 /**
@@ -700,12 +661,33 @@ export function insertStopAtBestPosition(origin, currentPlaces = [], newPlace, o
 }
 
 /**
- * Přehled plánované trasy (Bod 5, 6, 13, 15, 27, 28):
+ * Přehled plánované trasy (Bod 5, 6, 13, 15, 27, 28 & DÁVKA 2):
  * - Počítá délku včetně případného návratu na start (returnToOrigin).
  * - Odvozuje délku i čas ze stejné pěší trasy.
  * - Prázdný plán ani neznámý povrch nevydává za ověřenou cestu.
  */
-export function analyzePlannedRoute(origin, orderedPlaces, companionMode = 'solo', options = {}) {
+export function analyzePlannedRoute(originOrObj, orderedPlacesArg, companionModeArg = 'solo', optionsArg = {}) {
+  let origin = originOrObj;
+  let orderedPlaces = orderedPlacesArg;
+  let companionMode = companionModeArg;
+  let options = optionsArg || {};
+  if (
+    originOrObj &&
+    typeof originOrObj === 'object' &&
+    !Number.isFinite(originOrObj.lat) &&
+    (Array.isArray(originOrObj.orderedStops) || Array.isArray(originOrObj.orderedPlaces))
+  ) {
+    origin = originOrObj.origin;
+    orderedPlaces = originOrObj.orderedStops || originOrObj.orderedPlaces || [];
+    companionMode = originOrObj.companionMode || 'solo';
+    const rg = originOrObj.routedGeometry || {};
+    options = {
+      ...originOrObj,
+      routedDistanceM: originOrObj.routedDistanceM ?? (rg.isFallback ? 0 : rg.distanceM),
+      routeMode: originOrObj.routeMode || (rg.isFallback ? 'fallback_direct' : (rg.distanceM > 0 ? 'routed_foot' : undefined)),
+      structuredRoadClasses: originOrObj.structuredRoadClasses || rg.structuredRoadClasses,
+    };
+  }
   const places = Array.isArray(orderedPlaces) ? orderedPlaces.filter(p => p && Number.isFinite(p.lat) && Number.isFinite(p.lng)) : [];
   const returnToOrigin = Boolean(options.returnToOrigin);
   const hasOrigin = Boolean(origin && Number.isFinite(origin.lat) && Number.isFinite(origin.lng));
@@ -718,8 +700,11 @@ export function analyzePlannedRoute(origin, orderedPlaces, companionMode = 'solo
       estimatedMinutes: 0,
       returnToOrigin: false,
       routeMode: 'empty',
+      routeStatus: 'empty',
+      routeStatusLabel: 'Žádná trasa (volná procházka bez pevných zastávek)',
       routeModeLabel: 'Žádná trasa (volná procházka bez pevných zastávek)',
-      surfaceSummary: 'Povrch neověřen (žádné zastávky v plánu)',
+      surfaceSummary: 'Údaje o typu cesty nejsou k dispozici (žádné zastávky v plánu)',
+      roadTypeSummary: 'Údaje o typu cesty nejsou k dispozici',
       warnings: [],
     };
   }
@@ -745,10 +730,13 @@ export function analyzePlannedRoute(origin, orderedPlaces, companionMode = 'solo
   }
 
   const airDistanceM = Math.round(outboundAirM + returnAirM);
-  const routeMode = options.routeMode || (Number.isFinite(options.routedDistanceM) && options.routedDistanceM > 0 ? 'routed' : 'air_fallback');
+  const rawMode = options.routeMode || (Number.isFinite(options.routedDistanceM) && options.routedDistanceM > 0 ? 'routed_foot' : 'fallback_direct');
+  const isRouted = rawMode === 'routed' || rawMode === 'routed_foot';
+  const routeMode = rawMode === 'routed' ? 'routed' : (isRouted ? 'routed_foot' : (rawMode === 'air_fallback' ? 'air_fallback' : 'fallback_direct'));
+  const routeStatus = isRouted ? 'routed_foot' : 'fallback_direct';
 
   const estimatedWalkDistanceM =
-    routeMode === 'routed' && Number.isFinite(options.routedDistanceM) && options.routedDistanceM > 0
+    isRouted && Number.isFinite(options.routedDistanceM) && options.routedDistanceM > 0
       ? Math.round(options.routedDistanceM)
       : Math.max(Math.round(localWalkM), Math.round(airDistanceM * 1.28));
 
@@ -769,7 +757,7 @@ export function analyzePlannedRoute(origin, orderedPlaces, companionMode = 'solo
     }
   }
 
-  let surfaceSummary = 'Povrch trasy neověřen';
+  let surfaceSummary = 'Údaje o typu cesty nejsou k dispozici (povrch trasy neověřen)';
   if (knownSurfaces.length > 0) {
     const hasForest = knownSurfaces.some(s => /lesn|kamen|pěšin|nezpev/i.test(s));
     const hasPaved = knownSurfaces.some(s => /asfalt|dlažb|chodn|zpevněn|ulic/i.test(s));
@@ -782,10 +770,20 @@ export function analyzePlannedRoute(origin, orderedPlaces, companionMode = 'solo
       : `${baseText} (mezilehlé úseky v terénu neověřeny)`;
   }
 
-  const routeModeLabel =
-    routeMode === 'routed'
-      ? `Vypočtená pěší trasa${returnToOrigin ? ' (okruh včetně návratu na start)' : ''}`
-      : `Orientační přímé spojnice${returnToOrigin ? ' (okruh vzdušně — pěší trasa neověřena)' : ' (vzdušně — výpočet pěší trasy nedostupný)'}`;
+  const structuredClasses = Array.isArray(options.structuredRoadClasses)
+    ? options.structuredRoadClasses.filter(c => typeof c === 'string' && c.trim())
+    : [];
+  const roadTypeSummary = structuredClasses.length > 0
+    ? `Třídy cest z routeru: ${[...new Set(structuredClasses)].join(', ')}`
+    : 'Údaje o typu cesty nejsou k dispozici';
+
+  const routeStatusLabel = isRouted
+    ? '🥾 Vypočteno pěším routerem (nezaručuje schůdnost ani bezpečný přístup)'
+    : '⚠️ Orientační vzdušná spojnice';
+
+  const routeModeLabel = isRouted
+    ? `🥾 Vypočteno pěším routerem (nezaručuje schůdnost ani bezpečný přístup)${returnToOrigin ? ' · okruh včetně návratu na start' : ''}`
+    : `⚠️ Orientační vzdušná spojnice${returnToOrigin ? ' (okruh vzdušně — pěší trasa neověřena)' : ' (výpočet pěší trasy nedostupný)'}`;
 
   const terrainDifficulty = ['easy', 'medium', 'hard'].includes(options.terrainDifficulty)
     ? options.terrainDifficulty
@@ -846,7 +844,10 @@ export function analyzePlannedRoute(origin, orderedPlaces, companionMode = 'solo
     terrainDifficulty,
     returnToOrigin,
     routeMode,
+    routeStatus,
+    routeStatusLabel,
     routeModeLabel,
+    roadTypeSummary,
     surfaceSummary,
     warnings,
   };
@@ -1459,6 +1460,34 @@ export function computeActiveTurnInstruction(arg1, arg2, arg3 = null, arg4 = nul
     };
   }
 
+  // DÁVKA 2 (Bod 3.1): Při výpadku routeru (orientační vzdušná spojnice `isFallback: true` / `fallback_direct`)
+  // NIKDY nespouštíme hlasovou navigaci odboček!
+  if (
+    sharedRoute.isFallback ||
+    sharedRoute.mode === 'fallback_direct' ||
+    sharedRoute.mode === 'air_fallback' ||
+    sharedRoute.routeStatus === 'fallback_direct'
+  ) {
+    const directDistM =
+      nextStop && currentPos && Number.isFinite(currentPos.lat) && Number.isFinite(currentPos.lng)
+        ? Math.round(haversineMeters(currentPos, nextStop) ?? 0)
+        : null;
+    const directSuffix = nextStop?.title
+      ? ` · Směr: ${nextStop.title}${directDistM != null ? ` (~${directDistM} m vzdušně)` : ''}`
+      : ' · sleduj mapu a terén';
+    return {
+      icon: '⚠️',
+      text: `⚠️ Orientační vzdušná spojnice${directSuffix}`,
+      speechText: '',
+      voiceText: '',
+      distanceToTurnM: directDistM,
+      isNearTurn: false,
+      isFallbackDirect: true,
+      turnDirection: 'straight',
+      stepKey: `fallback_direct_${nextStop?.id || 'none'}`,
+    };
+  }
+
   const coords = sharedRoute.coordinates;
   const steps = Array.isArray(sharedRoute.steps) && sharedRoute.steps.length > 0
     ? sharedRoute.steps
@@ -1683,69 +1712,16 @@ export async function buildReturnToOriginRoute(currentPos, origin, fetchImpl = t
  * automaticky vloží 1 boční průjezdní bod (cca 380–400 m vedle), aby pěší router OSRM
  * vedl zpáteční cestu jinudy a nevracel uživatele po vlastních stopách.
  */
+/**
+ * DÁVKA 2 (Bod 3.1): Neodvozujeme bezpečnost ze samotného názvu ulice a nevytváříme
+ * fiktivní boční objížďky mimo skutečnou síť cest.
+ */
 export function ensureLoopDetourWaypoints(waypoints = []) {
-  const valid = (waypoints || []).filter(p => p && Number.isFinite(p.lat) && Number.isFinite(p.lng));
-  if (valid.length < 3) return valid;
-
-  const first = valid[0];
-  const last = valid[valid.length - 1];
-  const isClosedLoop = (haversineMeters(first, last) ?? 999) < 35;
-  if (!isClosedLoop) return valid;
-
-  const innerStops = valid.slice(1, valid.length - 1).filter(p => !p.isAuxiliaryVia);
-  if (innerStops.length === 1) {
-    const via = computeLateralLoopWaypoint(first, innerStops[0], innerStops);
-    if (via) {
-      return [first, innerStops[0], via, last];
-    }
-  } else if (innerStops.length === 2) {
-    // Zkontrolujeme, zda 2 body neleží v úzké přímce („nudli“) ze startu
-    const s1 = computeQuadrantSector(first, innerStops[0]);
-    const s2 = computeQuadrantSector(first, innerStops[1]);
-    const angleDiff = Math.abs(((s2.bearingDeg - s1.bearingDeg + 540) % 360) - 180);
-    if (angleDiff < 38) {
-      const via = computeLateralLoopWaypoint(first, innerStops[1], innerStops);
-      if (via) {
-        return [first, innerStops[0], innerStops[1], via, last];
-      }
-    }
-  }
-  return valid;
+  return (waypoints || []).filter(p => p && Number.isFinite(p.lat) && Number.isFinite(p.lng));
 }
 
-/**
- * Sestaví plnou společnou pěší trasu (`sharedWalkingRoute`), kterou sdílejí:
- * 1) Vykreslení na mapě a plánovač
- * 2) Simulátor chůze (autopilot se pohybuje přesně po jejích úsecích, mostech a březích)
- * 3) Výpočet zbývající vzdálenosti a času k další zastávce i do cíle (Body 26, 27, 28).
- */
-function enrichLegWithStreetCorners(legCoords = [], legDistM = 0) {
-  if (!Array.isArray(legCoords) || legCoords.length !== 2 || legDistM < 95) {
-    return legCoords;
-  }
-  const [lat1, lng1] = legCoords[0];
-  const [lat2, lng2] = legCoords[1];
-  const cosLat = Math.cos(((lat1 + lat2) * 0.5 * Math.PI) / 180) || 0.65;
-  const dxM = (lng2 - lng1) * 111320 * cosLat;
-  const dyM = (lat2 - lat1) * 111320;
-  const lenM = Math.hypot(dxM, dyM) || 1;
-  // Kolmý vektor (jednotkový)
-  const perpXM = -dyM / lenM;
-  const perpYM = dxM / lenM;
-  // Boční odskok bloku domů / ulice (~14 m, max 12 % délky úseku)
-  const offsetM = Math.min(16, Math.max(9, lenM * 0.08));
-
-  const c1Lat = Number((lat1 + (lat2 - lat1) * 0.34 + (perpYM * offsetM) / 111320).toFixed(6));
-  const c1Lng = Number((lng1 + (lng2 - lng1) * 0.34 + (perpXM * offsetM) / (111320 * cosLat)).toFixed(6));
-  const c2Lat = Number((lat1 + (lat2 - lat1) * 0.68 + (perpYM * offsetM) / 111320).toFixed(6));
-  const c2Lng = Number((lng1 + (lng2 - lng1) * 0.68 + (perpXM * offsetM) / (111320 * cosLat)).toFixed(6));
-
-  return [
-    [lat1, lng1],
-    [c1Lat, c1Lng],
-    [c2Lat, c2Lng],
-    [lat2, lng2],
-  ];
+function enrichLegWithStreetCorners(legCoords = []) {
+  return Array.isArray(legCoords) ? legCoords : [];
 }
 
 export function buildLocalRoutedGeometry(waypoints, options = {}) {
@@ -1824,6 +1800,9 @@ export function buildLocalRoutedGeometry(waypoints, options = {}) {
     steps,
     stopTargets,
     mode: 'routed',
+    routeStatus: 'routed_foot',
+    routeStatusLabel: '🥾 Vypočteno pěším routerem (nezaručuje schůdnost ani bezpečný přístup)',
+    roadTypeSummary: 'Údaje o typu cesty nejsou k dispozici',
     isFallback: false,
     canSimulate: coordinates.length >= 2,
   };
@@ -1832,11 +1811,11 @@ export function buildLocalRoutedGeometry(waypoints, options = {}) {
 /**
  * Fetches actual walking route geometry along footpaths using OSRM Foot Routing (`steps=true`),
  * or computes an obstacle-aware walking route around ponds and over bridges.
- * Explicitly distinguishes calculated footpath ('routed') from straight-line fallback ('air_fallback') (Bod 6 & 26 & v1.0 Bod 5).
+ * Explicitly distinguishes calculated footpath ('routed_foot' / 'routed') from straight-line fallback ('fallback_direct' / 'air_fallback') (DÁVKA 2 Bod 3.1).
  */
 export async function fetchWalkingGeometry(waypoints, fetchImpl = typeof fetch !== 'undefined' ? fetch : null, options = {}) {
   if (!Array.isArray(waypoints) || waypoints.length === 0) {
-    return { coordinates: [], distanceM: 0, legs: [], steps: [], stopTargets: [], mode: 'empty', isFallback: false, canSimulate: false };
+    return { coordinates: [], distanceM: 0, legs: [], steps: [], stopTargets: [], mode: 'empty', routeStatus: 'empty', isFallback: false, canSimulate: false };
   }
   const rawValid = waypoints.filter(p => p && Number.isFinite(p.lat) && Number.isFinite(p.lng));
   if (rawValid.length < 2) {
@@ -1847,6 +1826,7 @@ export async function fetchWalkingGeometry(waypoints, fetchImpl = typeof fetch !
       steps: [],
       stopTargets: [],
       mode: 'empty',
+      routeStatus: 'empty',
       isFallback: false,
       canSimulate: false,
     };
@@ -1860,7 +1840,7 @@ export async function fetchWalkingGeometry(waypoints, fetchImpl = typeof fetch !
     return acc ? { ...w, lat: acc.lat, lng: acc.lng, originalLat: w.lat, originalLng: w.lng, isShoreAccess: acc.isShoreAccess } : w;
   });
 
-  // Fallback direct polyline & haversine air distance — explicitly marked as fallback (`canSimulate: false`)!
+  // Fallback direct polyline & haversine air distance — explicitly marked as fallback (`isFallback: true`, `routeStatus: 'fallback_direct'`)!
   const fallback = () => {
     let dist = 0;
     for (let i = 0; i < accessibleWaypoints.length - 1; i++) {
@@ -1880,9 +1860,12 @@ export async function fetchWalkingGeometry(waypoints, fetchImpl = typeof fetch !
       coordinates: coords,
       distanceM: Math.round(dist),
       legs: [],
-      steps: buildTurnStepsFromCoordinates(coords, stopTargets),
+      steps: [],
       stopTargets,
       mode: 'air_fallback',
+      routeStatus: 'fallback_direct',
+      routeStatusLabel: '⚠️ Orientační vzdušná spojnice',
+      roadTypeSummary: 'Údaje o typu cesty nejsou k dispozici',
       isFallback: true,
       canSimulate: false,
     };
@@ -1993,6 +1976,23 @@ export async function fetchWalkingGeometry(waypoints, fetchImpl = typeof fetch !
 
         const steps = extractStepsFromOsrmRoute(route, coordinates, stopTargets);
         const distanceM = Math.round(Number(route.distance) || computePolylineLengthM(coordinates));
+        const structuredRoadClasses = [];
+        for (const legItem of osrmLegs) {
+          for (const st of legItem?.steps || []) {
+            if (Array.isArray(st?.intersections)) {
+              for (const inter of st.intersections) {
+                if (Array.isArray(inter?.classes)) {
+                  for (const cls of inter.classes) {
+                    if (typeof cls === 'string' && cls.trim()) structuredRoadClasses.push(cls.trim());
+                  }
+                }
+              }
+            }
+          }
+        }
+        const roadTypeSummary = structuredRoadClasses.length > 0
+          ? `Třídy cest z routeru: ${[...new Set(structuredRoadClasses)].join(', ')}`
+          : 'Údaje o typu cesty nejsou k dispozici';
         const result = {
           coordinates,
           distanceM,
@@ -2000,6 +2000,10 @@ export async function fetchWalkingGeometry(waypoints, fetchImpl = typeof fetch !
           steps,
           stopTargets,
           mode: 'routed',
+          routeStatus: 'routed_foot',
+          routeStatusLabel: '🥾 Vypočteno pěším routerem (nezaručuje schůdnost ani bezpečný přístup)',
+          roadTypeSummary,
+          structuredRoadClasses: [...new Set(structuredRoadClasses)],
           isFallback: false,
           canSimulate: true,
         };
@@ -2065,7 +2069,8 @@ export function computeRemainingFromSharedRoute({
   const speedMpm = isSlower ? (3200 / 60) : (4000 / 60);
 
   // Pokud nemáme vypočtenou pěší trasu (pouze vzdušný fallback), přiznáme nedostupnost pěší trasy
-  if (!sharedRoute || sharedRoute.isFallback || sharedRoute.mode !== 'routed' || !Array.isArray(sharedRoute.coordinates) || sharedRoute.coordinates.length < 2) {
+  const isRouted = sharedRoute && !sharedRoute.isFallback && (sharedRoute.mode === 'routed' || sharedRoute.mode === 'routed_foot' || sharedRoute.routeStatus === 'routed_foot');
+  if (!isRouted || !Array.isArray(sharedRoute.coordinates) || sharedRoute.coordinates.length < 2) {
     const directNextM = currentPos ? haversineMeters(currentPos, nextStopAccessible) : null;
     return {
       isRouteValid: false,

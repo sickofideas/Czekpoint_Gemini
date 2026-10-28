@@ -61,18 +61,11 @@ export function buildOfflineTileListForBounds(bounds, options = {}) {
 
     for (const coord of zoomCoords) {
       if (tiles.length >= maxTiles) break;
-      const sub = ['a', 'b', 'c'][(coord.x + coord.y) % 3];
-      const osmUrl = `https://${sub}.tile.openstreetmap.org/${coord.z}/${coord.x}/${coord.y}.png`;
-      if (!seen.has(osmUrl)) {
-        seen.add(osmUrl);
-        tiles.push({ url: osmUrl, z: coord.z, x: coord.x, y: coord.y, layer: 'osm' });
-      }
-      if (includeHikingOverlay && coord.z <= 14 && tiles.length < maxTiles) {
-        const hikingUrl = `https://tile.waymarkedtrails.org/hiking/${coord.z}/${coord.x}/${coord.y}.png`;
-        if (!seen.has(hikingUrl)) {
-          seen.add(hikingUrl);
-          tiles.push({ url: hikingUrl, z: coord.z, x: coord.x, y: coord.y, layer: 'hiking' });
-        }
+      const key = `${coord.z}/${coord.x}/${coord.y}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        // Hromadné předstahování z tile.openstreetmap.org je vypnuto kvůli licenčním podmínkám OSM
+        tiles.push({ url: null, z: coord.z, x: coord.x, y: coord.y, layer: 'passive-cache-only' });
       }
     }
     if (tiles.length >= maxTiles) break;
@@ -83,7 +76,7 @@ export function buildOfflineTileListForBounds(bounds, options = {}) {
 
 export function saveOfflineAreaData({ bounds, center, places = [], plannedRoute = null, label = '' } = {}) {
   const payload = {
-    version: '1.2.0',
+    version: '1.4.0',
     savedAt: Date.now(),
     label: label || 'Uložená oblast',
     center: center || { lat: 49.712, lng: 13.996 },
@@ -91,6 +84,7 @@ export function saveOfflineAreaData({ bounds, center, places = [], plannedRoute 
     placesCount: Array.isArray(places) ? places.length : 0,
     places: Array.isArray(places) ? places.slice(0, 250) : [],
     plannedRoute: plannedRoute || null,
+    bulkTilesDisabled: true,
   };
 
   try {
@@ -119,14 +113,7 @@ export async function downloadOfflineArea({
   places = [],
   plannedRoute = null,
   onProgress = null,
-  fetchImpl = typeof fetch !== 'undefined' ? fetch : null,
 } = {}) {
-  const tileList = buildOfflineTileListForBounds(bounds, {
-    zooms: [13, 14, 15],
-    maxTiles: MAX_OFFLINE_TILES,
-    includeHikingOverlay: true,
-  });
-
   const savedBundle = saveOfflineAreaData({
     bounds: bounds
       ? {
@@ -141,91 +128,28 @@ export async function downloadOfflineArea({
     plannedRoute,
   });
 
-  const total = Math.max(1, tileList.length);
-  let completed = 0;
-  let cachedCount = 0;
-
-  const report = (customText) => {
-    const percent = Math.min(100, Math.round((completed / total) * 100));
-    const text =
-      customText ||
-      (completed < total
-        ? `Stahuji mapu do paměti: ${percent} %...`
-        : `Offline mapa uložena (${cachedCount} dlaždic, ${savedBundle.placesCount} míst)`);
-    if (typeof onProgress === 'function') {
-      onProgress({ completed, total, percent, cachedCount, text, savedBundle });
-    }
-  };
-
-  report(`Stahuji mapu do paměti: 0 %...`);
-
-  let cache = null;
-  try {
-    if (typeof caches !== 'undefined' && caches.open) {
-      cache = await caches.open(OFFLINE_TILE_CACHE_NAME);
-    }
-  } catch (_) {}
-
-  const concurrency = 6;
-  for (let i = 0; i < tileList.length; i += concurrency) {
-    const batch = tileList.slice(i, i + concurrency);
-    await Promise.all(
-      batch.map(async (tile) => {
-        try {
-          if (cache) {
-            const existing = await cache.match(tile.url);
-            if (existing) {
-              cachedCount++;
-              completed++;
-              return;
-            }
-          }
-          if (fetchImpl) {
-            const response = await fetchImpl(tile.url, { mode: 'cors', credentials: 'omit' });
-            if (response && (response.ok || response.type === 'opaque')) {
-              if (cache) {
-                await cache.put(tile.url, response.clone());
-              }
-              cachedCount++;
-            }
-          }
-        } catch (_) {
-        } finally {
-          completed = Math.min(total, completed + 1);
-        }
-      })
-    );
-    report();
-  }
-
-  try {
-    if (typeof navigator !== 'undefined' && navigator.serviceWorker?.controller) {
-      navigator.serviceWorker.controller.postMessage({
-        type: 'PRECACHE_TILES',
-        urls: tileList.slice(0, 30).map((t) => t.url),
-      });
-    }
-  } catch (_) {}
-
   const finalPercent = 100;
-  const finalText = `Offline mapa připravena (${cachedCount}/${total} dlaždic, ${savedBundle.placesCount} míst v paměti)`;
+  const finalText = `Offline data oblasti uložena (${savedBundle.placesCount} míst a trasa v paměti; hromadné stahování dlaždic OSM je vypnuto)`;
   if (typeof onProgress === 'function') {
     onProgress({
-      completed: total,
-      total,
+      completed: 0,
+      total: 0,
       percent: finalPercent,
-      cachedCount,
+      cachedCount: 0,
       text: finalText,
       savedBundle,
+      bulkTilesDisabled: true,
       done: true,
     });
   }
 
   return {
-    total,
-    cachedCount,
+    total: 0,
+    cachedCount: 0,
     placesCount: savedBundle.placesCount,
     text: finalText,
     savedBundle,
+    bulkTilesDisabled: true,
   };
 }
+

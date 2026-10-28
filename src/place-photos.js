@@ -249,17 +249,80 @@ export function getPlaceCacheKey(place) {
   return `coord:${lat},${lng}`;
 }
 
+export function formatPhotoSourceLabel(sourceOrObj) {
+  const source = typeof sourceOrObj === 'object' && sourceOrObj !== null
+    ? (sourceOrObj.source || (sourceOrObj.isRealPhoto ? 'wikipedia-tag' : 'svg-illustration'))
+    : sourceOrObj;
+  const customLicense = typeof sourceOrObj === 'object' && sourceOrObj !== null ? sourceOrObj.license : null;
+
+  if (source === 'wikimedia-commons') {
+    return {
+      sourceLabel: 'Wikimedia Commons',
+      licenseLabel: customLicense || 'CC BY-SA / volné dílo (neověřená shoda objektu)',
+    };
+  }
+  if (source === 'wikipedia-tag' || source === 'wikipedia-geosearch' || source === 'wikipedia') {
+    return {
+      sourceLabel: 'Wikipedie / Wikimedia Commons',
+      licenseLabel: customLicense || 'CC BY-SA / volné dílo (automaticky přiřazeno dle polohy/článku)',
+    };
+  }
+  if (source === 'osm' || source === 'osm-image') {
+    return {
+      sourceLabel: 'OpenStreetMap (tag image)',
+      licenseLabel: customLicense || '© přispěvatelé OpenStreetMap (ODbL)',
+    };
+  }
+  return {
+    sourceLabel: 'Vektorová ilustrace kategorie',
+    licenseLabel: 'Vlastní ilustrace Czekpoint',
+  };
+}
+
+export function isExternalPhotosEnabled(storage = typeof localStorage !== 'undefined' ? localStorage : null, explicitFlag = undefined) {
+  if (typeof explicitFlag === 'boolean') return explicitFlag;
+  if (!storage || typeof storage.getItem !== 'function') return true;
+  try {
+    const raw = storage.getItem('czekpoint.state.v2');
+    if (!raw) return true;
+    const parsed = JSON.parse(raw);
+    if (parsed?.appSettings && typeof parsed.appSettings.showExternalPhotos === 'boolean') {
+      return parsed.appSettings.showExternalPhotos;
+    }
+  } catch {}
+  return true;
+}
+
 /**
  * Synchronně vrátí fotku místa z cache nebo okamžitou barevnou SVG ilustraci s názvem místa.
+ * Respektuje přepínač `showExternalPhotos` (DÁVKA 2 Bod 2.2).
  */
-export function getPlacePhotoSync(place, storage = typeof localStorage !== 'undefined' ? localStorage : null) {
+export function getPlacePhotoSync(place, storage = typeof localStorage !== 'undefined' ? localStorage : null, options = {}) {
   const fallbackSvgUrl = generateCategoryPlaceSvgDataUrl(place);
+  const archetype = detectPlaceIllustrationArchetype(place);
+  const fallbackMeta = formatPhotoSourceLabel('svg-illustration');
   if (!place || typeof place !== 'object') {
     return {
       photoUrl: fallbackSvgUrl,
       isRealPhoto: false,
+      source: 'svg-illustration',
+      sourceLabel: fallbackMeta.sourceLabel,
+      licenseLabel: fallbackMeta.licenseLabel,
       fallbackSvgUrl,
       archetype: 'viewpoint',
+    };
+  }
+
+  const externalAllowed = isExternalPhotosEnabled(storage, options?.showExternalPhotos);
+  if (!externalAllowed) {
+    return {
+      photoUrl: fallbackSvgUrl,
+      isRealPhoto: false,
+      source: 'svg-illustration',
+      sourceLabel: fallbackMeta.sourceLabel,
+      licenseLabel: fallbackMeta.licenseLabel,
+      fallbackSvgUrl,
+      archetype,
     };
   }
 
@@ -267,21 +330,28 @@ export function getPlacePhotoSync(place, storage = typeof localStorage !== 'unde
   const key = getPlaceCacheKey(place);
   const cached = memoryCache.get(key);
   if (cached && cached.photoUrl && cached.isRealPhoto) {
+    const meta = formatPhotoSourceLabel(cached.source || 'wikipedia-geosearch');
     return {
       ...cached,
+      sourceLabel: cached.sourceLabel || meta.sourceLabel,
+      licenseLabel: cached.licenseLabel || meta.licenseLabel,
       fallbackSvgUrl,
+      archetype,
     };
   }
 
   // Zkontrolujeme přímý OSM tag image, pokud je platnou HTTPS URL
   const directImg = place.tags?.image || place.imageUrl || place.photoUrl;
   if (typeof directImg === 'string' && /^https:\/\//i.test(directImg) && !/\.svg$/i.test(directImg)) {
+    const meta = formatPhotoSourceLabel('osm-image');
     const entry = {
       photoUrl: directImg,
       isRealPhoto: true,
       source: 'osm-image',
+      sourceLabel: meta.sourceLabel,
+      licenseLabel: meta.licenseLabel,
       fallbackSvgUrl,
-      archetype: detectPlaceIllustrationArchetype(place),
+      archetype,
     };
     memoryCache.set(key, entry);
     return entry;
@@ -290,21 +360,33 @@ export function getPlacePhotoSync(place, storage = typeof localStorage !== 'unde
   return {
     photoUrl: fallbackSvgUrl,
     isRealPhoto: false,
+    source: 'svg-illustration',
+    sourceLabel: fallbackMeta.sourceLabel,
+    licenseLabel: fallbackMeta.licenseLabel,
     fallbackSvgUrl,
-    archetype: detectPlaceIllustrationArchetype(place),
+    archetype,
   };
 }
 
 /**
  * Asynchronně zjistí reálnou fotku místa z OSM tagů (`image`, `wikimedia_commons`, `wikipedia`)
  * nebo z Wikipedia GeoSearch / PageImages API (okruh 400 m) a výsledek uloží do localStorage cache.
- * Pokud reálná fotka na Wikipedii není, vrátí barevnou vektorovou ilustraci (SVG Data URL) s názvem místa.
+ * Pokud reálná fotka na Wikipedii není nebo uživatel vypnul externí fotky, vrátí barevnou vektorovou ilustraci (SVG Data URL).
  */
 export async function resolvePlacePhoto(place, options = {}) {
   const fallbackSvgUrl = generateCategoryPlaceSvgDataUrl(place);
   const archetype = detectPlaceIllustrationArchetype(place);
+  const fallbackMeta = formatPhotoSourceLabel('svg-illustration');
   if (!place || typeof place !== 'object') {
-    return { photoUrl: fallbackSvgUrl, isRealPhoto: false, fallbackSvgUrl, archetype };
+    return {
+      photoUrl: fallbackSvgUrl,
+      isRealPhoto: false,
+      source: 'svg-illustration',
+      sourceLabel: fallbackMeta.sourceLabel,
+      licenseLabel: fallbackMeta.licenseLabel,
+      fallbackSvgUrl,
+      archetype,
+    };
   }
 
   const storage = options.storage !== undefined
@@ -314,14 +396,29 @@ export async function resolvePlacePhoto(place, options = {}) {
     ? options.fetchImpl
     : (typeof fetch !== 'undefined' ? fetch : null);
 
+  if (!isExternalPhotosEnabled(storage, options.showExternalPhotos)) {
+    return {
+      photoUrl: fallbackSvgUrl,
+      isRealPhoto: false,
+      source: 'svg-illustration',
+      sourceLabel: fallbackMeta.sourceLabel,
+      licenseLabel: fallbackMeta.licenseLabel,
+      fallbackSvgUrl,
+      archetype,
+    };
+  }
+
   loadCacheFromStorage(storage);
   const key = getPlaceCacheKey(place);
 
   if (memoryCache.has(key)) {
     const cached = memoryCache.get(key);
+    const meta = formatPhotoSourceLabel(cached.isRealPhoto ? (cached.source || 'wikipedia-geosearch') : 'svg-illustration');
     return {
       ...cached,
       photoUrl: cached.isRealPhoto && cached.photoUrl ? cached.photoUrl : fallbackSvgUrl,
+      sourceLabel: cached.sourceLabel || meta.sourceLabel,
+      licenseLabel: cached.licenseLabel || meta.licenseLabel,
       fallbackSvgUrl,
       archetype,
     };
@@ -330,10 +427,13 @@ export async function resolvePlacePhoto(place, options = {}) {
   // 1. Přímý OSM tag `image`
   const directImage = place.tags?.image || place.imageUrl;
   if (typeof directImage === 'string' && /^https:\/\//i.test(directImage)) {
+    const meta = formatPhotoSourceLabel('osm');
     const result = {
       photoUrl: directImage,
       isRealPhoto: true,
       source: 'osm',
+      sourceLabel: meta.sourceLabel,
+      licenseLabel: meta.licenseLabel,
       fallbackSvgUrl,
       archetype,
     };
@@ -343,7 +443,15 @@ export async function resolvePlacePhoto(place, options = {}) {
   }
 
   if (!fetchImpl) {
-    return { photoUrl: fallbackSvgUrl, isRealPhoto: false, fallbackSvgUrl, archetype };
+    return {
+      photoUrl: fallbackSvgUrl,
+      isRealPhoto: false,
+      source: 'svg-illustration',
+      sourceLabel: fallbackMeta.sourceLabel,
+      licenseLabel: fallbackMeta.licenseLabel,
+      fallbackSvgUrl,
+      archetype,
+    };
   }
 
   if (inFlightRequests.has(key)) {
@@ -366,7 +474,16 @@ export async function resolvePlacePhoto(place, options = {}) {
           const pages = Object.values(data?.query?.pages || {});
           const thumb = pages.find(p => p?.thumbnail?.source)?.thumbnail?.source;
           if (thumb && !/\.svg$/i.test(thumb)) {
-            const found = { photoUrl: thumb, isRealPhoto: true, source: 'wikipedia-tag', fallbackSvgUrl, archetype };
+            const meta = formatPhotoSourceLabel('wikipedia-tag');
+            const found = {
+              photoUrl: thumb,
+              isRealPhoto: true,
+              source: 'wikipedia-tag',
+              sourceLabel: meta.sourceLabel,
+              licenseLabel: meta.licenseLabel,
+              fallbackSvgUrl,
+              archetype,
+            };
             memoryCache.set(key, found);
             saveCacheToStorage(storage);
             return found;
@@ -387,7 +504,16 @@ export async function resolvePlacePhoto(place, options = {}) {
           const pages = Object.values(data?.query?.pages || {});
           const thumb = pages[0]?.imageinfo?.[0]?.thumburl || pages[0]?.imageinfo?.[0]?.url;
           if (thumb && !/\.svg$/i.test(thumb)) {
-            const found = { photoUrl: thumb, isRealPhoto: true, source: 'wikimedia-commons', fallbackSvgUrl, archetype };
+            const meta = formatPhotoSourceLabel('wikimedia-commons');
+            const found = {
+              photoUrl: thumb,
+              isRealPhoto: true,
+              source: 'wikimedia-commons',
+              sourceLabel: meta.sourceLabel,
+              licenseLabel: meta.licenseLabel,
+              fallbackSvgUrl,
+              archetype,
+            };
             memoryCache.set(key, found);
             saveCacheToStorage(storage);
             return found;
@@ -421,10 +547,14 @@ export async function resolvePlacePhoto(place, options = {}) {
                 return bMatch - aMatch;
               });
               const chosen = withThumb[0];
+              const meta = formatPhotoSourceLabel('wikipedia-geosearch');
               const found = {
                 photoUrl: chosen.thumbnail.source,
                 isRealPhoto: true,
                 source: 'wikipedia-geosearch',
+                sourceLabel: meta.sourceLabel,
+                licenseLabel: meta.licenseLabel,
+                articleTitle: chosen.title || '',
                 fallbackSvgUrl,
                 archetype,
               };
@@ -443,6 +573,8 @@ export async function resolvePlacePhoto(place, options = {}) {
       photoUrl: fallbackSvgUrl,
       isRealPhoto: false,
       source: 'svg-illustration',
+      sourceLabel: fallbackMeta.sourceLabel,
+      licenseLabel: fallbackMeta.licenseLabel,
       fallbackSvgUrl,
       archetype,
     };
@@ -464,6 +596,8 @@ export async function resolvePlacePhoto(place, options = {}) {
  */
 export async function prefetchPlacePhotos(places = [], options = {}) {
   if (!Array.isArray(places) || places.length === 0) return;
+  const storage = options.storage !== undefined ? options.storage : (typeof localStorage !== 'undefined' ? localStorage : null);
+  if (!isExternalPhotosEnabled(storage, options.showExternalPhotos)) return;
   const subset = places.slice(0, options.maxCount || 16);
   let updated = false;
   await Promise.allSettled(
@@ -483,3 +617,4 @@ export async function prefetchPlacePhotos(places = [], options = {}) {
     options.onBatchUpdated();
   }
 }
+

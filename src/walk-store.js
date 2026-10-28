@@ -20,8 +20,119 @@ export const DEFAULT_APP_SETTINGS = Object.freeze({
   soundFx: true,          // 🔊 Zvukové efekty a fanfáry
   keepAwake: true,        // 📱 Držet rozsvícený displej
   autoSortStops: true,    // 🔄 Chytré řazení zastávek podle pěší trasy
+  showExternalPhotos: true, // 🖼️ Zobrazovat externí fotografie míst (Wikipedie)
+  mindfulnessPrompts: true, // 🍃 Jemné výzvy všímavosti během chůze
   gameMode: 'gamified',   // 'explorer' (Objevitel) | 'gamified' (Výprava s gamifikací) | 'casual' (Pohodová procházka)
 });
+
+export const PERSONAL_MEMORY_SYMBOLS = Object.freeze([
+  { id: 'tree', icon: '🌳', label: '🌳 Strom', shortTitle: 'Zajímavý strom' },
+  { id: 'view', icon: '🌄', label: '🌄 Výhled', shortTitle: 'Pěkný výhled' },
+  { id: 'calm', icon: '🍃', label: '🍃 Klidné místo', shortTitle: 'Klidné zákoutí' },
+  { id: 'water', icon: '💧', label: '💧 Voda / studánka', shortTitle: 'Voda nebo studánka' },
+  { id: 'nature', icon: '🐾', label: '🐾 Příroda', shortTitle: 'Setkání s přírodou' },
+  { id: 'detail', icon: '🔎', label: '🔎 Zajímavý detail', shortTitle: 'Zajímavý detail' },
+]);
+
+export const MINDFULNESS_PROMPTS = Object.freeze([
+  {
+    id: 'pleasant_stop',
+    icon: '🍃',
+    text: 'Všimni si místa, kde je příjemné se na chvíli zastavit a jen pozorovat okolí.',
+    safetyNote: 'Zastav se pouze na bezpečném a volně přístupném místě mimo vozovku.',
+  },
+  {
+    id: 'distant_horizon',
+    icon: '🌄',
+    text: 'Rozhlédni se do dálky — jaké linie stromů, střech nebo kopců dnes tvoří obzor?',
+    safetyNote: 'Rozhlížej se jen tehdy, když bezpečně stojíš mimo silnici.',
+  },
+  {
+    id: 'quiet_sound',
+    icon: '🌳',
+    text: 'Zaposlouchej se na deset vteřin: slyšíš spíš vítr v korunách, vodu, nebo ptáky?',
+    safetyNote: 'Nepřekračuj soukromé pozemky a nesahej na volně žijící přírodu.',
+  },
+  {
+    id: 'light_and_shadow',
+    icon: '🔎',
+    text: 'Všimni si, jak dnes světlo a stín kreslí tvary na cestě nebo mezi stromy.',
+    safetyNote: 'Při chůzi i přecházení vždy sleduj cestu před sebou, ne obrazovku.',
+  },
+]);
+
+export function sanitizeMemoryNoteText(rawNote) {
+  if (typeof rawNote !== 'string') return '';
+  return rawNote
+    .replace(/<[^>]*>/g, '')
+    .replace(/[\u0000-\u001F\u007F]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 240);
+}
+
+export function sanitizePersonalMemories(memories) {
+  if (!Array.isArray(memories)) return [];
+  const validSymbolMap = new Map(PERSONAL_MEMORY_SYMBOLS.map(s => [s.id, s]));
+  const clean = [];
+  const seenIds = new Set();
+
+  for (const item of memories.slice(0, 300)) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const symbolMeta = validSymbolMap.get(item.symbolId) || PERSONAL_MEMORY_SYMBOLS[0];
+    const lat = Number(item.lat);
+    const lng = Number(item.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 85 || Math.abs(lng) > 180) continue;
+    const id = typeof item.id === 'string' && /^[-a-zA-Z0-9:_]{1,80}$/.test(item.id)
+      ? item.id
+      : `mem_${Date.now()}_${clean.length}`;
+    if (seenIds.has(id)) continue;
+    seenIds.add(id);
+
+    clean.push({
+      id,
+      symbolId: symbolMeta.id,
+      symbolIcon: symbolMeta.icon,
+      symbolLabel: symbolMeta.label,
+      title: symbolMeta.shortTitle,
+      note: sanitizeMemoryNoteText(item.note || ''),
+      lat: Math.round(lat * 1e6) / 1e6,
+      lng: Math.round(lng * 1e6) / 1e6,
+      createdAt: typeof item.createdAt === 'string' && item.createdAt ? item.createdAt : new Date().toISOString(),
+      recordType: 'user_memory',
+      recordBadge: '✨ Vlastnoruční vzpomínka uživatele',
+      isUserMemory: true,
+    });
+  }
+  return clean;
+}
+
+export function createPersonalMemoryEntry(input = {}) {
+  const validSymbolMap = new Map(PERSONAL_MEMORY_SYMBOLS.map(s => [s.id, s]));
+  const symbolMeta = validSymbolMap.get(input.symbolId) || PERSONAL_MEMORY_SYMBOLS[0];
+  const lat = Number(input.lat);
+  const lng = Number(input.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 85 || Math.abs(lng) > 180) {
+    throw new Error('Pro uložení vzpomínky jsou potřeba platné souřadnice místa.');
+  }
+  const safeNote = sanitizeMemoryNoteText(input.note || '');
+  return {
+    id: typeof input.id === 'string' && /^[-a-zA-Z0-9:_]{1,80}$/.test(input.id)
+      ? input.id
+      : `mem_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    symbolId: symbolMeta.id,
+    symbolIcon: symbolMeta.icon,
+    symbolLabel: symbolMeta.label,
+    title: symbolMeta.shortTitle,
+    note: safeNote,
+    lat: Math.round(lat * 1e6) / 1e6,
+    lng: Math.round(lng * 1e6) / 1e6,
+    createdAt: typeof input.createdAt === 'string' && input.createdAt ? input.createdAt : new Date().toISOString(),
+    recordType: 'user_memory',
+    recordBadge: '✨ Vlastnoruční vzpomínka uživatele',
+    isUserMemory: true,
+  };
+}
 
 export const emptyState = () => ({
   schemaVersion: 2,
@@ -30,6 +141,7 @@ export const emptyState = () => ({
   cells: [],
   meters: 0,
   discoveries: [],
+  personalMemories: [],
   walkSegments: [],
   revealedFeatures: [],
   legacyScore: 0,
@@ -192,6 +304,7 @@ export function loadState() {
         cells: [...new Set(data.cells)],
         meters: Math.max(0, Number(data.meters) || 0),
         discoveries: [...new Set(data.discoveries)],
+        personalMemories: sanitizePersonalMemories(data.personalMemories),
         walkSegments: sanitizeWalkSegments(data.walkSegments),
         revealedFeatures: sanitizeRevealedFeatures(data.revealedFeatures),
         legacyScore: Math.max(0, Number(data.legacyScore) || 0),
@@ -363,6 +476,7 @@ export function saveState(state, options = {}) {
       cells: Array.isArray(state.cells) ? [...new Set(state.cells.filter(isValidCellId))] : [],
       meters: Math.max(0, Number(state.meters) || 0),
       discoveries: Array.isArray(state.discoveries) ? [...new Set(state.discoveries.filter(isValidDiscoveryId))] : [],
+      personalMemories: sanitizePersonalMemories(state.personalMemories),
       walkSegments: sanitizeWalkSegments(state.walkSegments),
       revealedFeatures: sanitizeRevealedFeatures(state.revealedFeatures),
       legacyScore: Math.max(0, Number(state.legacyScore) || 0),
@@ -449,6 +563,7 @@ export function exportStateJson(passedState) {
       cells: state.cells,
       meters: state.meters,
       discoveries: state.discoveries,
+      personalMemories: sanitizePersonalMemories(state.personalMemories),
       walkSegments: state.walkSegments || [],
       revealedFeatures: state.revealedFeatures || [],
       legacyScore: state.legacyScore,
@@ -467,6 +582,7 @@ export function exportStateJson(passedState) {
       confirmedStopIds: state.confirmedStopIds || [],
       savedTrips: state.savedTrips || [],
       voiceNavEnabled: state.voiceNavEnabled ?? false,
+      appSettings: state.appSettings || { ...DEFAULT_APP_SETTINGS },
     },
   };
   return JSON.stringify(exportPayload, null, 2);
@@ -597,6 +713,7 @@ export function importStateJson(jsonString) {
     cells: [...new Set(d.cells)],
     meters: Math.max(0, Number(d.meters) || 0),
     discoveries: [...new Set(d.discoveries)],
+    personalMemories: sanitizePersonalMemories(d.personalMemories),
     walkSegments: sanitizeWalkSegments(d.walkSegments),
     revealedFeatures: sanitizeRevealedFeatures(d.revealedFeatures),
     legacyScore: Math.max(0, Number(d.legacyScore) || 0),

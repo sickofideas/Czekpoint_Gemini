@@ -6,9 +6,52 @@ export const CELL_SIZE = 128; // Mercator metres; about 83 ground metres in Rož
 export const MAX_CELLS = 12000;
 export const MAX_GPS_ACCURACY_M = 40; // Maximální povolená nepřesnost GPS pro průzkum (40 m)
 export const FOG_REVEAL_RADIUS_M = 65; // Samostatný dosah vykreslovaného odkrytí v mlze (65 m)
-export const STOP_CONFIRM_RADIUS_M = 20; // Jednotný dosah pro automatické potvrzení zastávky (< 20 m)
+export const STOP_CONFIRM_RADIUS_M = 20; // Jednotný dosah pro potvrzení zastávky podle GPS (< 20 m, opakované vzorky)
+export const NEARBY_RECORD_RADIUS_M = 60; // Dosah pro zaznamenání průchodu v okolí dle GPS (<= 60 m, opakované vzorky; žádné umělé pásmo 21-45 m)
 export const MAX_WALK_SEGMENTS = 600;
 export const MAX_POINTS_PER_SEGMENT = 1500;
+
+export const VISIT_RECORD_TYPES = Object.freeze({
+  gps_stop: {
+    id: 'gps_stop',
+    badge: '📍 Potvrzeno podle GPS',
+    shortBadge: '📍 Potvrzeno podle GPS (zastávka)',
+    explanation: 'Opakované kvalitní měření GPS v dosahu zastávky. GPS měří přiblížení v terénu (nedokazuje vstup do objektu ani překročení břehu).',
+  },
+  gps_nearby: {
+    id: 'gps_nearby',
+    badge: '📍 Zaznamenáno poblíž (dle GPS)',
+    shortBadge: '📍 Zaznamenáno poblíž (dle GPS)',
+    explanation: 'Průchod v okolí zaznamenaný opakovanými vzorky GPS. GPS měří přiblížení v terénu (nedokazuje fyzický vstup).',
+  },
+  user_memory: {
+    id: 'user_memory',
+    badge: '✨ Vlastnoruční vzpomínka uživatele',
+    shortBadge: '✨ Vlastní poznámka uživatele',
+    explanation: 'Soukromý záznam uložený samotným uživatelem — nejde o GPS ověřenou památku.',
+  },
+});
+
+export function classifyVisitRecord(itemOrId, context = {}) {
+  if (itemOrId && typeof itemOrId === 'object' && (itemOrId.isUserMemory || itemOrId.recordType === 'user_memory')) {
+    return { ...VISIT_RECORD_TYPES.user_memory, recordType: 'user_memory' };
+  }
+  const id = typeof itemOrId === 'string' ? itemOrId : itemOrId?.id;
+  const confirmedSet = context.confirmedStopIds instanceof Set
+    ? context.confirmedStopIds
+    : new Set(Array.isArray(context.confirmedStopIds) ? context.confirmedStopIds : []);
+  const discoveriesSet = context.discoveries instanceof Set
+    ? context.discoveries
+    : new Set(Array.isArray(context.discoveries) ? context.discoveries : []);
+
+  if (id && confirmedSet.has(id)) {
+    return { ...VISIT_RECORD_TYPES.gps_stop, recordType: 'gps_stop' };
+  }
+  if (id && (discoveriesSet.has(id) || discoveriesSet.has(`catalog:${id}`))) {
+    return { ...VISIT_RECORD_TYPES.gps_nearby, recordType: 'gps_nearby' };
+  }
+  return null;
+}
 
 export const emptyWalk = () => ({ version: 1, cells: [], meters: 0, discoveries: [], walkSegments: [], revealedFeatures: [] });
 
@@ -262,6 +305,101 @@ export function trophies(p) {
 }
 
 /**
+ * Kompletní validace vzorku GPS podle 4 kritérií (DÁVKA 1 v1.4-part1, Bod 3.2):
+ * (a) platné číselné souřadnice lat/lng (a kladná konečná accuracy + timestamp),
+ * (b) časová následnost (timestamp není starší než předchozí přijatý vzorek),
+ * (c) přesnost accuracy <= 40 m (MAX_GPS_ACCURACY_M),
+ * (d) přiměřená rychlost posunu vůči času (odfiltruje nereálné GPS teleporty).
+ */
+export function validateGpsSample(fix, lastAcceptedFix = null, now = Date.now()) {
+  // (a) Platné číselné souřadnice lat/lng
+  if (
+    !fix ||
+    !['lat', 'lng', 'accuracy', 'timestamp'].every(k => Number.isFinite(fix[k])) ||
+    Math.abs(fix.lat) > 85 ||
+    Math.abs(fix.lng) > 180 ||
+    fix.accuracy < 0
+  ) {
+    return { valid: false, criterion: 'coords', failedCriterion: 'coords', reason: 'Neplatná GPS poloha.' };
+  }
+
+  // (b) Časová následnost (timestamp není starší než předchozí přijatý vzorek)
+  if (lastAcceptedFix && Number.isFinite(lastAcceptedFix.timestamp)) {
+    if (fix.timestamp < lastAcceptedFix.timestamp) {
+      return {
+        valid: false,
+        criterion: 'timestamp',
+        failedCriterion: 'timestamp',
+        nonMonotonic: true,
+        reason: 'Vzorek GPS má starší časové razítko než předchozí přijatý bod.',
+      };
+    }
+    if (fix.timestamp === lastAcceptedFix.timestamp) {
+      return {
+        valid: false,
+        criterion: 'timestamp',
+        failedCriterion: 'timestamp',
+        duplicateTimestamp: true,
+        reason: 'Čekám na novou polohu.',
+      };
+    }
+  }
+
+  // (c) Přesnost accuracy <= 40 m
+  if (fix.accuracy > MAX_GPS_ACCURACY_M) {
+    return {
+      valid: false,
+      criterion: 'accuracy',
+      failedCriterion: 'accuracy',
+      pausedByAccuracy: true,
+      accuracyM: Math.round(fix.accuracy),
+      maxAccuracyM: MAX_GPS_ACCURACY_M,
+      reason: `Průzkum pozastaven: nepřesnost GPS (±${Math.round(fix.accuracy)} m) překračuje povolený limit ${MAX_GPS_ACCURACY_M} m. (Dosah odkrývání v mlze je ${FOG_REVEAL_RADIUS_M} m.)`,
+    };
+  }
+
+  if (now - fix.timestamp > 15000 || fix.timestamp > now + 5000) {
+    return {
+      valid: false,
+      criterion: 'stale',
+      failedCriterion: 'stale',
+      staleFix: true,
+      reason: 'Čekám na čerstvou GPS polohu.',
+    };
+  }
+
+  // (d) Přiměřená rychlost posunu vůči času (odfiltruje nereálné GPS teleporty)
+  if (Number.isFinite(fix.speed) && fix.speed > 3.5) {
+    return {
+      valid: false,
+      criterion: 'speed',
+      failedCriterion: 'speed',
+      speedJump: true,
+      reason: 'Příliš vysoká rychlost. Počkej, až se budeš pohybovat pěšky.',
+    };
+  }
+
+  if (lastAcceptedFix && Number.isFinite(lastAcceptedFix.lat) && Number.isFinite(lastAcceptedFix.lng) && Number.isFinite(lastAcceptedFix.timestamp)) {
+    const dtSec = (fix.timestamp - lastAcceptedFix.timestamp) / 1000;
+    if (dtSec > 0 && dtSec <= 60) {
+      const distM = haversineMeters(lastAcceptedFix, fix) ?? 0;
+      const impliedSpeedMs = distM / dtSec;
+      if (impliedSpeedMs > 3.5) {
+        return {
+          valid: false,
+          criterion: 'speed',
+          failedCriterion: 'speed',
+          speedJump: true,
+          reason: 'Příliš rychlý pohyb nebo skok GPS. Tento úsek nepočítáme.',
+        };
+      }
+    }
+  }
+
+  return { valid: true, criterion: null, failedCriterion: null, reason: '' };
+}
+
+/**
  * GPS continuity handler for walk engine.
  * Separates lastValidFix from distanceAnchor to prevent false outages during slow walking.
  * Explicitly separates GPS accuracy limit (40 m) from fog reveal radius (65 m).
@@ -291,6 +429,11 @@ export function acceptFix(progress, anchor, fix, now = Date.now()) {
   if (!fix || !['lat', 'lng', 'accuracy', 'timestamp'].every(k => Number.isFinite(fix[k])) ||
       Math.abs(fix.lat) > 85 || Math.abs(fix.lng) > 180 || fix.accuracy < 0) {
     return reject('Neplatná GPS poloha.');
+  }
+
+  // Check temporal sequence before accepting
+  if (currentLastValid && Number.isFinite(currentLastValid.timestamp) && fix.timestamp < currentLastValid.timestamp) {
+    return reject('Vzorek GPS má starší časové razítko než předchozí přijatý bod.', { nonMonotonic: true });
   }
 
   if (fix.accuracy > MAX_GPS_ACCURACY_M) {

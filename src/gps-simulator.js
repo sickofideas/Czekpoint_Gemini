@@ -415,15 +415,23 @@ export class GpsSimulator {
 
   pause() {
     this.isPaused = true;
-    this.statusMessage = '⏸ Simulátor pozastaven.';
-    this.updateStatusText();
+    this.pausedModeBackup = this.mode;
+    if (this.mode === 'autopilot' || this.mode === 'direction' || this.mode === 'walkTo') {
+      this.mode = 'idle';
+    }
+    this.statusMessage = '⏸ Simulátor pozastaven (autopilot zastaven).';
+    this.updateStatusUi?.();
   }
 
   resume() {
     this.isPaused = false;
+    if (this.pausedModeBackup && this.mode === 'idle') {
+      this.mode = this.pausedModeBackup;
+    }
+    this.pausedModeBackup = null;
     this.lastWallTickMs = Date.now();
     this.statusMessage = '▶ Simulátor pokračuje.';
-    this.updateStatusText();
+    this.updateStatusUi?.();
   }
 
   triggerLoopTick(now = Date.now()) {

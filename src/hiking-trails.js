@@ -238,10 +238,13 @@ export const PILOT_HIKING_TRAILS = Object.freeze([
     },
     coordinates: [
       [49.60141, 13.86441], // Náměstí Rožmitál
-      [49.60373, 13.85891], // Podzámecký rybník
+      [49.60208, 13.86361], // Zámek Rožmitál
+      [49.60373, 13.85891], // Podzámecký rybník (břeh / hráz)
+      [49.60485, 13.85630], // Alej Johanky z Rožmitálu (břehová cesta)
+      [49.60640, 13.85227], // Cvokařské muzeum
       [49.60796, 13.84955], // Starý Rožmitál (kostel)
       [49.60340, 13.84710], // Rusland / pod lesem
-      [49.59610, 13.84250], // Lesní rybník Jez
+      [49.59658, 13.84340], // Lesní rybník Jez (hráz / břeh)
       [49.59258, 13.84093], // Voltuš
       [49.58860, 13.83780], // Voltušská vyhlídka
     ],
@@ -324,7 +327,7 @@ export const PILOT_HIKING_TRAILS = Object.freeze([
       [49.59780, 13.85480], // Bývalá kasárna Rožmitál
       [49.59380, 13.84750], // Vyhlídka U Drtiče – Bílá skála
       [49.59120, 13.84420], // Skalní vyhlídka pod Štěrbinou
-      [49.59610, 13.84250], // Lesní rybník Jez
+      [49.59658, 13.84340], // Lesní rybník Jez (hráz / břeh)
       [49.59780, 13.85480], // Návrat k výchozímu bodu
     ],
   },

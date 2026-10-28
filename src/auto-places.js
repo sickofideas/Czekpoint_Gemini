@@ -8,6 +8,16 @@ export const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 const lastTileRequestTime = new Map();
 
+let lastAutoPlacesStatus = {
+  failed: false,
+  message: '',
+  updatedAt: 0,
+};
+
+export function getLastAutoPlacesStatus() {
+  return { ...lastAutoPlacesStatus };
+}
+
 const OVERPASS_ENDPOINTS = [
   'https://overpass-api.de/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
@@ -64,7 +74,7 @@ export async function fetchPlacesFromWikipediaGeo(
     const timeoutId = timer ? setTimeout(() => timer.abort(), 6500) : null;
     try {
       const res = await fetchImpl(url, { signal: timer ? timer.signal : signal });
-      if (!res || !res.ok) return [];
+      if (!res || !res.ok) return null;
       const data = await res.json();
       const items = data?.query?.geosearch;
       const pagesById = data?.query?.pages || {};
@@ -98,7 +108,7 @@ export async function fetchPlacesFromWikipediaGeo(
       if (timeoutId) clearTimeout(timeoutId);
     }
   } catch {
-    return [];
+    return null;
   }
 }
 
@@ -399,11 +409,11 @@ async function fetchFromOverpassBbox(bbox, config = {}, signal = null, fetchImpl
       if (timeoutId) clearTimeout(timeoutId);
     }
   }
-  return [];
+  return null;
 }
 
 /**
- * ZADÁNÍ #11 (Bod 2.1): Zákaz vymýšlení smyšlených míst (Audit P0 Bod 01).
+ * ZADÁNÍ #11 (Bod 2.1) & DÁVKA 2 (Bod 2.2): Zákaz vymýšlení smyšlených míst.
  * ensureRichLocalCoverage pouze pasivně vrátí předaná ověřená data bez generování náhodných názvů.
  */
 export function ensureRichLocalCoverage(places) {
@@ -462,16 +472,23 @@ export async function loadAutoPlacesForArea(
   const gridKey = gridKeyForPosition(centerPos);
 
   // 2. Check localStorage cache
-  if (!forceRefresh) {
-    const cached = getCachedGridTile(gridKey, effectiveStorage);
-    if (cached && cached.length > 0) {
-      const combined = deduplicatePlaces([...builtIn, ...cached]);
-      return combined.sort((a, b) => scoreAndRankPlace(b) - scoreAndRankPlace(a));
-    }
+  const cachedTile = getCachedGridTile(gridKey, effectiveStorage);
+  if (!forceRefresh && cachedTile && cachedTile.length > 0) {
+    lastAutoPlacesStatus = { failed: false, message: '', updatedAt: Date.now() };
+    const combined = deduplicatePlaces([...builtIn, ...cachedTile]);
+    return combined.sort((a, b) => scoreAndRankPlace(b) - scoreAndRankPlace(a));
   }
 
   if (!fetchImpl) {
-    return builtIn.sort((a, b) => scoreAndRankPlace(b) - scoreAndRankPlace(a));
+    lastAutoPlacesStatus = {
+      failed: true,
+      message: 'Místa v okolí se nepodařilo načíst',
+      updatedAt: Date.now(),
+    };
+    const fallbackValid = deduplicatePlaces([...builtIn, ...(cachedTile || [])]).sort((a, b) => scoreAndRankPlace(b) - scoreAndRankPlace(a));
+    fallbackValid.loadFailed = true;
+    fallbackValid.statusMessage = 'Místa v okolí se nepodařilo načíst';
+    return fallbackValid;
   }
 
   // Per-tile rate limit (10s unless forceRefresh)
@@ -496,8 +513,29 @@ export async function loadAutoPlacesForArea(
       fetchPlacesFromWikipediaGeo(centerPos, Math.min(10000, radiusM), signal, fetchImpl),
     ]);
 
-    const overpassPlaces = overpassRes.status === 'fulfilled' && Array.isArray(overpassRes.value) ? overpassRes.value : [];
-    const wikiPlaces = wikiRes.status === 'fulfilled' && Array.isArray(wikiRes.value) ? wikiRes.value : [];
+    const overpassOk = overpassRes.status === 'fulfilled' && Array.isArray(overpassRes.value);
+    const wikiOk = wikiRes.status === 'fulfilled' && Array.isArray(wikiRes.value);
+    const overpassPlaces = overpassOk ? overpassRes.value : [];
+    const wikiPlaces = wikiOk ? wikiRes.value : [];
+
+    if (!overpassOk && !wikiOk) {
+      lastAutoPlacesStatus = {
+        failed: true,
+        message: 'Místa v okolí se nepodařilo načíst',
+        updatedAt: Date.now(),
+      };
+      const validExisting = deduplicatePlaces([...builtIn, ...(cachedTile || [])]).sort((a, b) => scoreAndRankPlace(b) - scoreAndRankPlace(a));
+      validExisting.loadFailed = true;
+      validExisting.statusMessage = 'Místa v okolí se nepodařilo načíst';
+      return validExisting;
+    }
+
+    lastAutoPlacesStatus = {
+      failed: false,
+      message: '',
+      updatedAt: Date.now(),
+    };
+
     const fetchedPlaces = deduplicatePlaces([...overpassPlaces, ...wikiPlaces]);
 
     if (fetchedPlaces.length > 0) {
@@ -507,6 +545,14 @@ export async function loadAutoPlacesForArea(
     const combined = deduplicatePlaces([...builtIn, ...fetchedPlaces]);
     return combined.sort((a, b) => scoreAndRankPlace(b) - scoreAndRankPlace(a));
   } catch {
-    return builtIn.sort((a, b) => scoreAndRankPlace(b) - scoreAndRankPlace(a));
+    lastAutoPlacesStatus = {
+      failed: true,
+      message: 'Místa v okolí se nepodařilo načíst',
+      updatedAt: Date.now(),
+    };
+    const validExisting = deduplicatePlaces([...builtIn, ...(cachedTile || [])]).sort((a, b) => scoreAndRankPlace(b) - scoreAndRankPlace(a));
+    validExisting.loadFailed = true;
+    validExisting.statusMessage = 'Místa v okolí se nepodařilo načíst';
+    return validExisting;
   }
 }

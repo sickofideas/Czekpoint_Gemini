@@ -20,11 +20,18 @@ import {
   appendTrail,
   pruneTrail,
   discoverNearby,
+  validateGpsSample,
+  NEARBY_RECORD_RADIUS_M,
+  classifyVisitRecord,
 } from './walk-engine.js';
 import {
   STATE_KEY,
   CORRUPTED_BACKUP_KEY,
   DEFAULT_APP_SETTINGS,
+  PERSONAL_MEMORY_SYMBOLS,
+  MINDFULNESS_PROMPTS,
+  sanitizeMemoryNoteText,
+  createPersonalMemoryEntry,
   loadState,
   saveState,
   previewImportState,
@@ -39,6 +46,7 @@ import {
   validateDecodedRoutePlan,
   optimizeRouteOrder,
   buildLocalRoutedGeometry,
+  fetchWalkingGeometry,
   computeRemainingFromSharedRoute,
   computeActiveTurnInstruction,
   buildTurnStepsFromCoordinates,
@@ -64,6 +72,7 @@ import {
   generateCategoryPlaceSvgDataUrl,
   getPlacePhotoSync,
   resolvePlacePhoto,
+  formatPhotoSourceLabel,
 } from './place-photos.js';
 import {
   sampleRouteCoordinates,
@@ -105,7 +114,7 @@ import {
   GpsSimulator,
 } from './gps-simulator.js';
 import { routes as PILOT_ROUTES } from './data.js';
-import { classifyCzechPlaceTitle, loadAutoPlacesForArea, deduplicatePlaces, ensureRichLocalCoverage } from './auto-places.js';
+import { classifyCzechPlaceTitle, loadAutoPlacesForArea, deduplicatePlaces, ensureRichLocalCoverage, getLastAutoPlacesStatus } from './auto-places.js';
 import {
   isCommerciallyUsableLicense,
   getFallbackBitmapUrl,
@@ -720,14 +729,11 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
     const doubled = [...ids, ...ids].join(',');
     assert.ok(doubled.includes('ne,se,sw,nw'), `Očekáváno hodinové pořadí ne,se,sw,nw, ale získáno: ${ids.join(',')}`);
 
-    // 3. Kontrola překryvu v OSRM: okruh s 1 nebo 2 zastávkami automaticky přidá boční průjezdní bod (~400 m vedle)
+    // 3. DÁVKA 2 (v1.4-part2): Zákaz vytváření fiktivních bočních objížděk mimo síť cest
     const singleStopLoop = [origin, pNE, origin];
     const detoured = ensureLoopDetourWaypoints(singleStopLoop);
-    assert.equal(detoured.length, 4, 'Okruh s 1 zastávkou musí automaticky dostat boční průjezdní bod pro návrat jinou cestou');
-    assert.equal((detoured[2] as any).isAuxiliaryVia, true);
-
-    const lateralPt = computeLateralLoopWaypoint(origin, pNE, [pNE]);
-    assert.ok(lateralPt && Number.isFinite(lateralPt.lat) && Number.isFinite(lateralPt.lng));
+    assert.equal(detoured.length, 3, 'Okruh nesmí vytvářet fiktivní boční průjezdní body mimo síť cest');
+    assert.equal(computeLateralLoopWaypoint(origin, pNE, [pNE]), null);
 
     // 4. Fáze 3: Vložení nové zastávky mezi nejvhodnější dva body na trase (minimální zajížďka)
     const existingStops = [pNE, pSE, pSW];
@@ -1152,12 +1158,11 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
     assert.equal(gapRecovery.recovered, true, 'Mezera > 12 s při normální chůzi musí být dopočítána');
     assert.ok(gapRecovery.points.length >= 5, 'Musí vzniknout interpolované body pro odkrytí mlhy a zastávek');
 
-    // 7. Ověření v1.2/v1.3 prvků v index.html a src/walk.js
+    // 7. Ověření v1.2/v1.3/v1.4-part1 prvků v index.html a src/walk.js
     const indexHtml = fs.readFileSync('index.html', 'utf-8');
-    assert.ok(indexHtml.includes('v1.2') || indexHtml.includes('v1.3'), 'index.html musí mít verzi v1.2 nebo v1.3');
+    assert.ok(indexHtml.includes('v1.2') || indexHtml.includes('v1.3') || indexHtml.includes('v1.4'), 'index.html musí mít platnou verzi');
     const walkJs = fs.readFileSync('src/walk.js', 'utf-8');
     assert.ok(walkJs.includes('map-lupa-search-input'), 'Vyhledávací lupa v mapě musí existovat');
-    assert.ok(walkJs.includes('btn-download-offline-map'), 'Tlačítko pro offline stažení oblasti musí existovat');
     assert.ok(walkJs.includes('btn-pocket-mode'), 'Tlačítko Kapesního režimu musí existovat');
     assert.ok(walkJs.includes('arrival-goal-modal'), 'Dialog po příchodu do cíle musí existovat');
   });
@@ -1260,10 +1265,214 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
     assert.ok(walkJs.includes('stateSig'), 'stateSig diffing brání zbytečnému re-renderování markerů');
     assert.ok(walkJs.includes('updateTurnNavPill(cleanFix)'), 'Navigace a rohy se musí aktualizovat na každý GPS fix');
   });
+
+  it('DÁVKA 1 (v1.4-part1): 4-kritériová validace GPS vzorků, zákaz hromadného stahování OSM dlaždic, indikátor v mapě, pauza simulátoru a purpurová trasa', async () => {
+    // 1. Kompletní 4-kritériová validace vzorků GPS (validateGpsSample):
+    //    (a) souřadnice, (b) časová následnost, (c) přesnost <= 40 m, (d) rychlost vůči času (teleport filtr)
+    const validate = validateGpsSample as any;
+    const badCoords = validate({ lat: NaN, lng: 13.8644, accuracy: 10, timestamp: 1000 }, null, 1000);
+    assert.equal(badCoords.valid, false);
+    assert.equal(badCoords.failedCriterion, 'coords');
+
+    const prevFix = { lat: 49.6014, lng: 13.8644, accuracy: 8, timestamp: 5000 };
+    const olderFix = validate({ lat: 49.6015, lng: 13.8644, accuracy: 8, timestamp: 4000 }, prevFix, 5500);
+    assert.equal(olderFix.valid, false);
+    assert.equal(olderFix.failedCriterion, 'timestamp');
+
+    const inaccurateFix = validate({ lat: 49.6015, lng: 13.8644, accuracy: 55, timestamp: 6000 }, prevFix, 6000);
+    assert.equal(inaccurateFix.valid, false);
+    assert.equal(inaccurateFix.failedCriterion, 'accuracy');
+
+    // Teleport o ~1,1 km za 2 sekundy (> 3,5 m/s)
+    const teleportFix = validate({ lat: 49.6114, lng: 13.8644, accuracy: 8, timestamp: 7000 }, prevFix, 7000);
+    assert.equal(teleportFix.valid, false);
+    assert.equal(teleportFix.failedCriterion, 'speed');
+
+    // Platný vzorek (posun ~11 m za 5 sekund = ~2,2 m/s, přesnost 8 m)
+    const validFix = validate({ lat: 49.6015, lng: 13.8644, accuracy: 8, timestamp: 10000 }, prevFix, 10000);
+    assert.equal(validFix.valid, true);
+    assert.equal(validFix.failedCriterion, null);
+
+    // 2. Zákaz hromadného předstahování dlaždic z tile.openstreetmap.org (OSM Tile Usage Policy)
+    const tiles = buildOfflineTileListForBounds({ south: 49.59, west: 13.85, north: 49.61, east: 13.87 });
+    assert.ok(tiles.every((t: any) => t.url === null && t.layer === 'passive-cache-only'), 'buildOfflineTileListForBounds nesmí generovat URL pro hromadné stahování z tile.openstreetmap.org');
+
+    const dlRes = await (downloadOfflineArea as any)({
+      bounds: { south: 49.59, west: 13.85, north: 49.61, east: 13.87 },
+      center: { lat: 49.6014, lng: 13.8644 },
+      places: [],
+    });
+    assert.equal((dlRes as any).bulkTilesDisabled, true);
+
+    // 3. Pauza simulátoru zastaví i autopilota a pokračování jej obnoví
+    const sim = new GpsSimulator({ initialPosition: { lat: 49.6014, lng: 13.8644 } });
+    sim.mode = 'autopilot';
+    sim.pause();
+    assert.equal(sim.isPaused, true);
+    assert.equal(sim.mode, 'idle', 'Při pauze musí simulátor zastavit autopilota');
+    sim.resume();
+    assert.equal(sim.isPaused, false);
+    assert.equal(sim.mode, 'autopilot', 'Při pokračování se obnoví předchozí režim simulátoru');
+    sim.destroy();
+
+    // 4. Ověření #map-busy-indicator, sjednocených názvů 3 stylů (bez KCD/KCD2) a purpurové trasy (#9333ea / #2e1065)
+    const walkJs = fs.readFileSync('src/walk.js', 'utf-8');
+    const walkCss = fs.readFileSync('assets/walk.css', 'utf-8');
+    const stylesCss = fs.readFileSync('assets/styles.css', 'utf-8');
+
+    assert.ok(walkJs.includes('id="map-busy-indicator"'), '#map-busy-indicator musí existovat v #walk-map-wrap');
+    assert.ok(walkJs.includes('beginMapTask(') && walkJs.includes('endMapTask('), 'Počítadlo aktivních úloh beginMapTask / endMapTask musí existovat');
+    assert.ok(walkJs.includes('#9333ea') && walkJs.includes('#2e1065'), 'Trasa musí být vykreslena purpurovou barvou #9333ea s tmavým lemem #2e1065');
+    assert.ok(walkJs.includes('🎯 Zpět ke mně'), 'Tlačítko návratu na polohu musí mít popisek 🎯 Zpět ke mně');
+    assert.ok(!walkJs.includes('(KCD2)'), 'Zkratka KCD2 musí být odstraněna z uživatelského rozhraní');
+    assert.ok(walkCss.includes('z-index: 1200'), '.map-busy-indicator musí mít z-index: 1200');
+    assert.ok(stylesCss.includes('transform: none !important'), 'Předci mapy (#main, .page-shell) nesmí mít přetrvávající transform kvůli fullscreenu');
+  });
+
+  it('DÁVKA 2 (v1.4-part2): Osobní atlas malých objevů, 3 nezaměnitelné záznamy podle GPS, zákaz smyšlených míst, kontrola externích fotek a stav trasy routed_foot / fallback_direct', async () => {
+    // 1. Osobní atlas malých objevů: 6 symbolů, bezpečná textová poznámka (bez XSS) a výzvy všímavosti
+    assert.equal(PERSONAL_MEMORY_SYMBOLS.length, 6);
+    const symbolIds = PERSONAL_MEMORY_SYMBOLS.map((s: any) => s.id);
+    assert.deepEqual(symbolIds, ['tree', 'view', 'calm', 'water', 'nature', 'detail']);
+
+    assert.ok(MINDFULNESS_PROMPTS.length >= 3);
+    for (const p of MINDFULNESS_PROMPTS as any[]) {
+      assert.equal(/silnic|přecház|soukrom|dotkni|utrhni/i.test(p.text), false, 'Výzva všímavosti nesmí vyžadovat nebezpečné chování');
+    }
+
+    const sanitizedNote = sanitizeMemoryNoteText('  Klidná lavička\u0000\n u dubu  ');
+    assert.equal(sanitizedNote, 'Klidná lavička u dubu');
+
+    const memEntry = createPersonalMemoryEntry({
+      symbolId: 'tree',
+      note: '<img src=x onerror=alert(1)>Staletý dub u cesty',
+      lat: 49.6018,
+      lng: 13.8639,
+    });
+    assert.equal(memEntry.recordType, 'user_memory');
+    assert.equal(memEntry.symbolIcon, '🌳');
+    assert.equal(memEntry.symbolLabel, '🌳 Strom');
+    assert.equal(memEntry.isUserMemory, true);
+    assert.match(memEntry.recordBadge, /Vlastnoruční vzpomínka uživatele/);
+
+    // 2. Pravdivé rozlišení 3 nezaměnitelných záznamů: gps_stop, gps_nearby, user_memory
+    assert.equal(NEARBY_RECORD_RADIUS_M, 60);
+    const clsMemory = classifyVisitRecord(memEntry);
+    assert.ok(clsMemory);
+    assert.equal(clsMemory.recordType, 'user_memory');
+    assert.match(clsMemory.badge, /Vlastnoruční vzpomínka uživatele/);
+    assert.equal(clsMemory.shortBadge, '✨ Vlastní poznámka uživatele');
+
+    const clsStop = classifyVisitRecord('zamek-rozmital', {
+      confirmedStopIds: new Set(['zamek-rozmital']),
+    });
+    assert.ok(clsStop);
+    assert.equal(clsStop.recordType, 'gps_stop');
+    assert.equal(clsStop.shortBadge, '📍 Potvrzeno podle GPS (zastávka)');
+    assert.match(clsStop.explanation, /GPS měří přiblížení v terénu/);
+
+    const clsNearby = classifyVisitRecord('podbrdske-muzeum', {
+      confirmedStopIds: new Set(),
+      discoveries: ['podbrdske-muzeum'],
+    });
+    assert.ok(clsNearby);
+    assert.equal(clsNearby.recordType, 'gps_nearby');
+    assert.equal(clsNearby.shortBadge, '📍 Zaznamenáno poblíž (dle GPS)');
+
+    // 3. Zákaz smyšlených míst (žádné buildLocalFallbackPlaces) a stav při nedostupnosti sítě
+    const autoPlacesSource = fs.readFileSync('src/auto-places.js', 'utf-8');
+    assert.equal(autoPlacesSource.includes('buildLocalFallbackPlaces'), false, 'buildLocalFallbackPlaces nesmí v auto-places.js vůbec existovat');
+
+    const remoteCenter = { lat: 50.2500, lng: 15.1000 }; // Mimo pilotní oblast Rožmitálu
+    const failingFetch = async () => ({ ok: false, status: 503, json: async () => ({}) });
+    const failedResult = await loadAutoPlacesForArea(
+      remoteCenter,
+      [],
+      {},
+      null,
+      failingFetch as any,
+      null,
+      { radiusM: 4000, forceRefresh: true }
+    );
+    assert.equal(failedResult.length, 0, 'Při výpadku služby mimo známá data nesmí vzniknout žádná vymyšlená místa');
+    const lastStatus = getLastAutoPlacesStatus();
+    assert.equal(lastStatus.failed, true);
+    assert.equal(lastStatus.message, 'Místa v okolí se nepodařilo načíst');
+
+    // 4. Kontrola externích fotografií míst (showExternalPhotos: false vrací čistou vektorovou ilustraci kategorie)
+    const placeWithPhoto = {
+      id: 'zamek-rozmital',
+      title: 'Zámek Rožmitál',
+      kind: 'culture',
+      category: 'castles',
+      photoUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/zamek.jpg',
+    };
+    const disabledSync = getPlacePhotoSync(placeWithPhoto, null, { showExternalPhotos: false });
+    assert.equal(disabledSync.isRealPhoto, false);
+    assert.ok(disabledSync.photoUrl.startsWith('data:image/svg+xml;charset=utf-8,'), 'Při vypnutých externích fotkách se musí použít vektorová ilustrace kategorie');
+
+    const disabledAsync = await resolvePlacePhoto(placeWithPhoto, { showExternalPhotos: false });
+    assert.equal(disabledAsync.isRealPhoto, false);
+    assert.ok(disabledAsync.photoUrl.startsWith('data:image/svg+xml;charset=utf-8,'));
+    const photoLabels = formatPhotoSourceLabel({ isRealPhoto: true, license: 'CC BY-SA 4.0' } as any);
+    assert.match(photoLabels.sourceLabel, /Wikipedie/);
+    assert.match(photoLabels.licenseLabel, /CC BY-SA 4\.0/);
+
+    // 5. Stav trasy routed_foot vs. fallback_direct, zákaz hlasové navigace na fallback přímce a zamknutý start
+    const origin = { id: 'start', title: 'Start', lat: 49.6014, lng: 13.8644 };
+    const stopA = { id: 'stop-a', title: 'Podbrdské muzeum', lat: 49.5993, lng: 13.8626 };
+
+    const analysisRouted = analyzePlannedRoute({
+      origin,
+      orderedStops: [stopA],
+      companionMode: 'solo',
+      returnToOrigin: true,
+      routedGeometry: { distanceM: 1200, isFallback: false, hasStructuredSurfaceData: false },
+    });
+    assert.equal(analysisRouted.routeStatus, 'routed_foot');
+    assert.equal(analysisRouted.routeStatusLabel, '🥾 Vypočteno pěším routerem (nezaručuje schůdnost ani bezpečný přístup)');
+    assert.equal(analysisRouted.roadTypeSummary, 'Údaje o typu cesty nejsou k dispozici');
+
+    const analysisFallback = analyzePlannedRoute({
+      origin,
+      orderedStops: [stopA],
+      companionMode: 'solo',
+      returnToOrigin: true,
+      routedGeometry: { distanceM: 600, isFallback: true },
+    });
+    assert.equal(analysisFallback.routeStatus, 'fallback_direct');
+    assert.equal(analysisFallback.routeStatusLabel, '⚠️ Orientační vzdušná spojnice');
+
+    // Při výpadku routeru mimo lokální síť cest vrátí fetchWalkingGeometry fallback_direct (isFallback: true)
+    const remoteWaypoints = [
+      { id: 'r1', title: 'Bod 1', lat: 50.1000, lng: 14.5000 },
+      { id: 'r2', title: 'Bod 2', lat: 50.1050, lng: 14.5100 },
+    ];
+    const fallbackRoute = await fetchWalkingGeometry(remoteWaypoints, failingFetch as any);
+    assert.equal(fallbackRoute.isFallback, true);
+    assert.equal(fallbackRoute.routeStatus, 'fallback_direct');
+    assert.equal(fallbackRoute.steps.length, 0, 'Vzdušná spojnice nesmí generovat odbočovací kroky');
+
+    const fallbackNav: any = computeActiveTurnInstruction(
+      fallbackRoute as any,
+      remoteWaypoints[0] as any,
+      [remoteWaypoints[1]] as any,
+      new Set() as any
+    );
+    assert.equal(fallbackNav.isFallbackDirect, true);
+    assert.equal(Boolean(fallbackNav.voiceText), false, 'Pro orientační vzdušnou spojnici se nesmí spouštět hlasová navigace odboček');
+    assert.match(fallbackNav.text, /Orientační vzdušná spojnice/);
+
+    // 6. Turistické trasy PILOT_HIKING_TRAILS neobsahují přímé spojnice přes rybník Podzámecký ([49.6038, 13.8552] -> [49.6052, 13.8576])
+    for (const trail of PILOT_HIKING_TRAILS as any[]) {
+      for (const seg of trail.segments || []) {
+        for (const [lat, lng] of seg) {
+          // Střed vodní plochy Podzámeckého rybníka je kolem [49.6043, 13.8568]
+          const distToPondCenter = haversineMeters({ lat, lng }, { lat: 49.6043, lng: 13.8568 });
+          assert.ok(distToPondCenter == null || distToPondCenter > 65, `Trasa ${trail.name} nesmí vést středem rybníka`);
+        }
+      }
+    }
+  });
 });
-
-
-
-
-
 

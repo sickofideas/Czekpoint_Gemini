@@ -110,13 +110,14 @@ function renderCard(route, passport = false) {
     ? `🥾 Trasa (${route.distanceKm != null ? `${number(route.distanceKm)} km` : 'okruh'})`
     : '📍 Samostatné místo';
   const hasStamp = stateObj.discoveries?.includes(route.id) || stateObj.discoveries?.includes(`catalog:${route.id}`);
-  const stampBadge = hasStamp ? '✓ GPS razítko v pasu' : '';
-  const cachedPhoto = getCachedPlacePhoto(route);
+  const stampBadge = hasStamp ? '📍 Potvrzeno podle GPS' : '';
+  const extPhotosOn = stateObj.appSettings?.showExternalPhotos !== false;
+  const cachedPhoto = extPhotosOn ? getCachedPlacePhoto(route) : null;
   const fallbackBitmap = illustrationUrl(route);
   const cardImgSrc = (cachedPhoto && cachedPhoto.photoUrl) ? cachedPhoto.photoUrl : fallbackBitmap;
   const photoLicenseTag = (cachedPhoto && cachedPhoto.photoUrl)
-    ? `📸 Ověřená fotka (${cachedPhoto.license || 'Wikimedia'})`
-    : (isRoute ? '🥾 Trasa / okruh' : '📍 Místo (zastávka)');
+    ? `📸 Fotka · Wikimedia Commons (${cachedPhoto.license || 'CC BY-SA'})`
+    : (isRoute ? '🥾 Trasa / okruh' : '🎨 Vektorová ilustrace kategorie');
 
   return `<article class="route-card" data-route-card="${e(route.id)}">
     <div class="card-image"><a href="${routeLink(route)}" data-catalog-link="true" tabindex="-1" aria-hidden="true"><img src="${e(cardImgSrc)}" alt="" width="600" height="340" loading="lazy" onerror="this.onerror=null;this.src='${e(fallbackBitmap)}';"></a>
@@ -221,17 +222,18 @@ async function renderDetail(id, renderId) {
   const hasStamp = stateObj.discoveries?.includes(id) || stateObj.discoveries?.includes(`catalog:${id}`);
 
   const stampBadgeHtml = hasStamp
-    ? '<span class="detail-trophy-badge" style="background:#eef5ce;border:1px solid #afbf68;color:#345032;">✓ Ověřené GPS razítko v pasu (+30 b. při prvním objevu)</span>'
+    ? '<span class="detail-trophy-badge" style="background:#eef5ce;border:1px solid #afbf68;color:#345032;">📍 Potvrzeno podle GPS (opakované vzorky v dosahu ≤ 20 m)</span>'
     : !isRoute && route.collectible !== false
-    ? '<span class="detail-trophy-badge none">📍 Samostatné místo · Potvrzení zastávky na trase pod 20 m</span>'
+    ? '<span class="detail-trophy-badge none">📍 Samostatné místo · Potvrzení podle GPS vyžaduje opakované vzorky pod 20 m</span>'
     : '<span class="detail-trophy-badge none">🥾 Vycházková trasa / okruh</span>';
 
-  const cachedPhoto = getCachedPlacePhoto(route);
+  const extPhotosOn = stateObj.appSettings?.showExternalPhotos !== false;
+  const cachedPhoto = extPhotosOn ? getCachedPlacePhoto(route) : null;
   const fallbackBitmap = illustrationUrl(route);
   const coverSrc = (cachedPhoto && cachedPhoto.photoUrl) ? cachedPhoto.photoUrl : fallbackBitmap;
   const coverLabel = (cachedPhoto && cachedPhoto.photoUrl)
-    ? `📸 Ověřená fotka · Wikimedia Commons (${cachedPhoto.license || 'CC BY-SA'})`
-    : (isRoute ? '🥾 Trasa / okruh' : '📍 Samostatné místo');
+    ? `📸 Fotka · Wikimedia Commons (${cachedPhoto.license || 'CC BY-SA'})`
+    : (isRoute ? '🥾 Trasa / okruh' : '🎨 Vektorová ilustrace kategorie');
 
   document.title = `${route.title} · Czekpoint`;
   main.innerHTML = `<a class="back-link" href="#/katalog" data-action="back-to-catalog">${icon('back')}Zpět do katalogu míst a tras</a>
@@ -304,14 +306,14 @@ async function renderDetail(id, renderId) {
       <div id="report-list" class="report-list"><p class="small-note" role="status">Hledáme existující záznamy…</p></div>
     </section>`;
 
-  if (!cachedPhoto) {
+  if (extPhotosOn && !cachedPhoto) {
     resolveVerifiedPlacePhoto(route).then(res => {
       if (renderId !== state.renderId) return;
-      if (res && res.hasVerifiedPhoto && res.photoUrl) {
+      if (res && res.hasVerifiedPhoto && res.photoUrl && loadState().appSettings?.showExternalPhotos !== false) {
         const imgEl = document.querySelector('#detail-cover-img');
         const lblEl = document.querySelector('#detail-cover-label');
         if (imgEl) imgEl.src = res.photoUrl;
-        if (lblEl) lblEl.textContent = `📸 Ověřená fotka · Wikimedia Commons (${res.license || 'CC BY-SA'})`;
+        if (lblEl) lblEl.textContent = `📸 Fotka · Wikimedia Commons (${res.license || 'CC BY-SA'})`;
       }
     }).catch(() => {});
   }
@@ -631,7 +633,7 @@ function renderAbout() {
       <p style="margin-top:6px;font-size:0.92rem"><strong>Ukázkoví poutníci v pasu:</strong> postavy poutníků v sekci „Ukázkoví poutníci v okolí“ jsou generované lokální ukázkové postavy pro atmosféru revíru, nikoli skuteční uživatelé připojení přes síť.</p>
     </section></div>
     <div class="about-foot">
-      <p class="small-note">Bez sledovacích reklam a bez analytických měřicích skriptů. Toto je verze v0.9.</p>
+      <p class="small-note">Bez sledovacích reklam a bez analytických měřicích skriptů. Toto je verze v1.4-part2.</p>
       <div class="data-actions">
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
           <button type="button" class="button small" data-action="export-state">${icon('arrow')}Exportovat průzkum (JSON)</button>
@@ -650,6 +652,8 @@ function renderSettingsPage() {
   const gameMode = cfg.gameMode || 'gamified';
 
   const SETTINGS_LIST = [
+    { key: 'showExternalPhotos', icon: '🖼️', label: '🖼️ Zobrazovat externí fotografie míst (Wikipedie)', desc: 'Zobrazovat externí fotografie z Wikipedie/Wikimedia Commons se zdrojem a licencí (při vypnutí jen čisté vektorové ilustrace).', val: cfg.showExternalPhotos !== false },
+    { key: 'mindfulnessPrompts', icon: '🍃', label: 'Volitelné výzvy všímavosti na cestě', desc: 'Jemné pozorovací tipy k zastavení v terénu (lze kdykoliv jedním klepnutím přeskočit nebo zde trvale vypnout).', val: cfg.mindfulnessPrompts !== false },
     { key: 'fogParchment', icon: '📜', label: 'Tajemný pergamen (odkrývání mlhy)', desc: 'Neznámá místa na mapě skrývá pergamen a odkrývají se tvou chůzí s měkkým rozsvěcením.', val: cfg.fogParchment },
     { key: 'kctTrails', icon: '🥾', label: 'Turistické značky KČT a naučné stezky', desc: 'Zobrazuje oficiální červené, modré, zelené a žluté pěší značky na mapě.', val: cfg.kctTrails },
     { key: 'contours', icon: '⛰️', label: 'Vrstevnice a terén (OpenTopoMap)', desc: 'Zapne vrstevnicový podklad s kopci a výškami.', val: cfg.contours },
@@ -680,21 +684,21 @@ function renderSettingsPage() {
         <div class="game-mode-grid" role="radiogroup" aria-label="Výběr herního stylu">
           <button type="button" class="game-mode-card ${gameMode === 'explorer' ? 'active' : ''}" data-setting-mode="explorer">
             <span class="gmc-icon">🧭</span>
-            <strong>1. Objevitel (Dobrodruh)</strong>
-            <p>Zahalená mapa pergamenem, ŽÁDNÁ narýsovaná čára trasy na zemi. Orientuješ se podle kompasu a objevuješ krajinu na vlastní pěst.</p>
+            <strong>🧭 Objevování</strong>
+            <p>Zahalená mapa pergamenem, žádná narýsovaná čára trasy na zemi. Orientuješ se podle kompasu a objevuješ krajinu na vlastní pěst.</p>
             <span class="gmc-badge">${gameMode === 'explorer' ? '✓ Aktivní styl' : 'Zvolit tento styl'}</span>
           </button>
 
           <button type="button" class="game-mode-card ${gameMode === 'gamified' ? 'active' : ''}" data-setting-mode="gamified">
-            <span class="gmc-icon">🥾</span>
-            <strong>2. Výprava s gamifikací</strong>
+            <span class="gmc-icon">📜</span>
+            <strong>📜 Výprava s pergamenem</strong>
             <p>Poloprůhledná pergamenová mapa s měkkým rozsvěcením, vypočtená pěší trasa po cestách, stopy pohorek, Avatar se šipkou a razítka.</p>
             <span class="gmc-badge">${gameMode === 'gamified' ? '✓ Aktivní styl' : 'Zvolit tento styl'}</span>
           </button>
 
           <button type="button" class="game-mode-card ${gameMode === 'casual' ? 'active' : ''}" data-setting-mode="casual">
             <span class="gmc-icon">🗺️</span>
-            <strong>3. Pohodová procházka</strong>
+            <strong>🗺️ Turistická mapa</strong>
             <p>Úplně čistá otevřená mapa bez jakékoliv mlhy, zřetelně vyznačená trasa i checkpointy. Vhodné pro děti i seniory.</p>
             <span class="gmc-badge">${gameMode === 'casual' ? '✓ Aktivní styl' : 'Zvolit tento styl'}</span>
           </button>
