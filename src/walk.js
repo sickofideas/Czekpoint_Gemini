@@ -129,6 +129,12 @@ import {
   renderWalkingStickHtml,
 } from './walking-stick.js';
 import {
+  recordWalkInLedger,
+  recordMemoryInLedger,
+  recordGpsPlaceInLedger,
+  evaluateMilestones,
+} from './achievements.js';
+import {
   getLocalRevirPilgrims,
   renderPilgrimsSection,
   recordSummitEntry,
@@ -4156,6 +4162,7 @@ export function mountWalk(root, routes, config, actions = {}) {
   function pauseSession(message) {
     active = false;
     starting = false;
+    document.body?.classList?.remove('nav-active');
     walkState = currentExpedition && currentExpedition.state !== 'ended' ? 'paused' : 'idle';
     if (gpsLocatingTaskId !== null) {
       endMapTask(gpsLocatingTaskId);
@@ -4376,6 +4383,15 @@ export function mountWalk(root, routes, config, actions = {}) {
       revealedFeatures: progress.revealedFeatures,
       personalMemories,
     };
+
+    // DÁVKA 4: Idempotentní zápis procházky do pointsLedger a vyhodnocení 8 milníků
+    if (!simSandboxActive && !demo) {
+      stateObj.pointsLedger = recordWalkInLedger(stateObj.pointsLedger, summary, summary.pointsEarned);
+      const milestoneRes = evaluateMilestones(stateObj);
+      stateObj.pointsLedger = milestoneRes.updatedLedger;
+    }
+    document.body?.classList?.remove('nav-active');
+
     lastSavedExpeditionId = summary.id;
     lastSavedSummary = summary;
     currentExpedition = null;
@@ -4627,6 +4643,7 @@ export function mountWalk(root, routes, config, actions = {}) {
       walkState = 'running';
       starting = false;
       active = true;
+      document.body?.classList?.add('nav-active');
       telemetry.lastTickMs = Date.now();
       if (!lockedExpeditionOrigin) {
         lockedExpeditionOrigin = plannedRoute.origin
@@ -4946,6 +4963,17 @@ export function mountWalk(root, routes, config, actions = {}) {
         playStampChord(stateObj.soundEnabled);
         progress = { ...progress, discoveries: stampedProgress.discoveries };
         stateObj = { ...stateObj, discoveries: progress.discoveries, confirmedStopIds: [...confirmedStopIds] };
+
+        // DÁVKA 4: Idempotentní zápis získaných GPS razítek do pointsLedger a vyhodnocení 8 milníků
+        if (!simSandboxActive && !demo) {
+          for (const newId of newStampIds) {
+            const foundPlace = allPlaces.find(p => p.id === newId);
+            stateObj.pointsLedger = recordGpsPlaceInLedger(stateObj.pointsLedger, newId, foundPlace?.title || '');
+          }
+          const milestoneRes = evaluateMilestones(stateObj);
+          stateObj.pointsLedger = milestoneRes.updatedLedger;
+        }
+
         status(`🏆 Získáno GPS razítko ověřeného místa! +${addedCount * 30} bodů.`);
       }
 
@@ -7948,6 +7976,14 @@ export function mountWalk(root, routes, config, actions = {}) {
     });
     personalMemories = [entry, ...personalMemories].slice(0, 200);
     stateObj.personalMemories = personalMemories;
+
+    // DÁVKA 4: Idempotentní zápis paměti do pointsLedger a vyhodnocení 8 milníků
+    if (!simSandboxActive && !demo) {
+      stateObj.pointsLedger = recordMemoryInLedger(stateObj.pointsLedger, entry);
+      const milestoneRes = evaluateMilestones(stateObj);
+      stateObj.pointsLedger = milestoneRes.updatedLedger;
+    }
+
     saveAppState();
     closeSaveMemoryModal();
     renderPersonalMemoriesUi();
@@ -8135,6 +8171,7 @@ export function mountWalk(root, routes, config, actions = {}) {
 
   return () => {
     disposed = true;
+    document.body?.classList?.remove('nav-active');
     clearAllMapTasks();
     keepAliveCtrl.stop();
     stopBackgroundTracking();

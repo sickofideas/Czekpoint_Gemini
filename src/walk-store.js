@@ -1,5 +1,6 @@
 import { parseWalk, score } from './walk-engine.js';
 import { validateProfile, isValidAvatarId } from './avatars.js';
+import { validateStickCustomization } from './walking-stick.js';
 
 export const STATE_KEY = 'czekpoint.state.v2';
 export const WALK_KEY = 'czekpoint.walk.v1';
@@ -169,6 +170,8 @@ export const emptyState = () => ({
   savedTrips: [],
   voiceNavEnabled: true,
   appSettings: { ...DEFAULT_APP_SETTINGS },
+  pointsLedger: {},
+  stickCustomization: { head: 'shepherd', wood: 'oak', viewMode: 'badges' },
 });
 
 export function sanitizeWalkSegments(segments) {
@@ -375,6 +378,10 @@ export function loadState() {
           ...DEFAULT_APP_SETTINGS,
           ...(data.appSettings && typeof data.appSettings === 'object' ? data.appSettings : {}),
         },
+        pointsLedger: (data.pointsLedger && typeof data.pointsLedger === 'object' && !Array.isArray(data.pointsLedger))
+          ? data.pointsLedger
+          : {},
+        stickCustomization: validateStickCustomization(data.stickCustomization),
         storageCorrupted: false,
         storageError: '',
       };
@@ -544,6 +551,10 @@ export function saveState(state, options = {}) {
         ...DEFAULT_APP_SETTINGS,
         ...(state.appSettings && typeof state.appSettings === 'object' ? state.appSettings : {}),
       },
+      pointsLedger: (state.pointsLedger && typeof state.pointsLedger === 'object' && !Array.isArray(state.pointsLedger))
+        ? state.pointsLedger
+        : {},
+      stickCustomization: validateStickCustomization(state.stickCustomization),
       revision: nextRevision,
     };
     delete nextState.storageCorrupted;
@@ -599,7 +610,7 @@ export function exportStateJson(passedState) {
   const exportPayload = {
     exportedAt: new Date().toISOString(),
     appName: 'czekpoint',
-    appVersion: '1.4-part3',
+    appVersion: '1.5.0',
     schemaVersion: 2,
     data: {
       profile: state.profile,
@@ -626,6 +637,8 @@ export function exportStateJson(passedState) {
       savedTrips: state.savedTrips || [],
       voiceNavEnabled: state.voiceNavEnabled ?? false,
       appSettings: state.appSettings || { ...DEFAULT_APP_SETTINGS },
+      pointsLedger: state.pointsLedger || {},
+      stickCustomization: validateStickCustomization(state.stickCustomization),
     },
   };
   return JSON.stringify(exportPayload, null, 2);
@@ -705,6 +718,10 @@ export function previewImportState(jsonString) {
     }
   }
 
+  if (d.pointsLedger != null && (typeof d.pointsLedger !== 'object' || Array.isArray(d.pointsLedger))) {
+    throw new Error('Záloha obsahuje neplatný deník bodů.');
+  }
+
   const profile = validateProfile(d.profile);
   const cellsCount = new Set(d.cells).size;
   const metersKm = (d.meters / 1000).toFixed(1).replace('.', ',');
@@ -712,6 +729,9 @@ export function previewImportState(jsonString) {
   const historyCount = Array.isArray(d.expeditionHistory) ? d.expeditionHistory.length : 0;
   const badgesCount = Array.isArray(d.stickBadges) ? d.stickBadges.length : 0;
   const personalMemoriesCount = Array.isArray(d.personalMemories) ? sanitizePersonalMemories(d.personalMemories).length : 0;
+  const pointsLedgerCount = d.pointsLedger && typeof d.pointsLedger === 'object' && !Array.isArray(d.pointsLedger)
+    ? Object.keys(d.pointsLedger).length
+    : 0;
 
   return {
     valid: true,
@@ -722,6 +742,7 @@ export function previewImportState(jsonString) {
     historyCount,
     badgesCount,
     personalMemoriesCount,
+    pointsLedgerCount,
     payload: d,
   };
 }
@@ -782,6 +803,10 @@ export function importStateJson(jsonString) {
       ...DEFAULT_APP_SETTINGS,
       ...(d.appSettings && typeof d.appSettings === 'object' ? d.appSettings : {}),
     },
+    pointsLedger: (d.pointsLedger && typeof d.pointsLedger === 'object' && !Array.isArray(d.pointsLedger))
+      ? d.pointsLedger
+      : {},
+    stickCustomization: validateStickCustomization(d.stickCustomization),
   };
 
   return saveState(newState, { allowOverwriteCorrupted: true });

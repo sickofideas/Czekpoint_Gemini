@@ -438,3 +438,269 @@ button:active,.button:active{transform:scale(.97)}
   margin: 18px 0;
 }
 
+/* ==========================================================================
+   DÁVKA 4 (v1.5.0): Turistická hůl, Avataři, 8 milníků a klidná atmosféra
+   ========================================================================== */
+
+/* 1. Jemná prostorová animace vybrané turistické hole v pasu */
+@keyframes stickGentleFloat {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+.stick-showcase {
+  text-align: center;
+  padding: 18px 0 10px;
+}
+
+.stick-float-wrap {
+  display: inline-block;
+  animation: stickGentleFloat 4.8s ease-in-out infinite;
+  filter: drop-shadow(0 14px 22px rgba(35, 23, 9, 0.22));
+}
+
+.stick-customizer-card {
+  background: #fffdf7;
+  border: 1.5px solid #dcd1ba;
+  border-radius: 16px;
+  padding: 14px 16px;
+  margin: 14px 0;
+}
+
+.stick-customizer-group .sc-label {
+  display: block;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #5c4b37;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+}
+
+.stick-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.stick-custom-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: 9999px;
+  border: 1.5px solid #d1c4a5;
+  background: #faf6ed;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #2e1c14;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.stick-custom-chip:hover {
+  border-color: #8d6e63;
+  background: #f3ece0;
+}
+
+.stick-custom-chip.is-active {
+  border-color: #3e2723;
+  background: #3e2723;
+  color: #ffffff;
+  box-shadow: 0 2px 6px rgba(46, 28, 20, 0.22);
+}
+
+.wood-color-dot {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1.2px solid rgba(0, 0, 0, 0.25);
+  box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.35);
+}
+
+/* 2. Výběr barev medailonu a lemu avatara */
+.avatar-color-picker-card {
+  background: #fffdf7;
+  border: 1.5px solid #dcd1ba;
+  border-radius: 16px;
+  padding: 14px 16px;
+}
+
+.color-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.color-swatch-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 9999px;
+  border: 1.5px solid #d1c4a5;
+  background: #faf6ed;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #24190c;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.color-swatch-chip:hover {
+  border-color: #5d4037;
+  background: #f2ebd9;
+}
+
+.color-swatch-chip.is-active {
+  border-color: #2e5339;
+  background: #2e5339;
+  color: #ffffff;
+  box-shadow: 0 2px 6px rgba(46, 83, 57, 0.25);
+}
+
+.color-dot {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1.2px solid rgba(0, 0, 0, 0.25);
+  box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.35);
+}
+
+/* 3. Mřížka 8 idempotentních milníků */
+.milestones-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.milestone-card {
+  display: flex;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 14px;
+  border: 1.5px solid #e0d7c2;
+  background: #ffffff;
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.milestone-card.is-unlocked {
+  border-color: #65a30d;
+  background: linear-gradient(135deg, #f7fee7 0%, #ecfccb 100%);
+  box-shadow: 0 2px 8px rgba(101, 163, 13, 0.15);
+}
+
+.milestone-card.is-locked {
+  opacity: 0.78;
+  background: #faf7f0;
+}
+
+.milestone-icon-wrap {
+  font-size: 2.1rem;
+  line-height: 1;
+  display: flex;
+  align-items: flex-start;
+  padding-top: 2px;
+}
+
+.milestone-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.milestone-top-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+}
+
+.milestone-title {
+  font-size: 0.94rem;
+  color: #1c1917;
+}
+
+.milestone-pts {
+  font-weight: 800;
+  color: #4d7c0f;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.milestone-desc {
+  font-size: 0.81rem;
+  color: #57534e;
+  margin: 4px 0 8px;
+  line-height: 1.35;
+}
+
+.milestone-badge {
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 6px;
+  display: inline-block;
+}
+
+.milestone-badge.unlocked {
+  background: #d9f99d;
+  color: #365314;
+}
+
+.milestone-badge.locked {
+  background: #e7e5e4;
+  color: #78716c;
+}
+
+/* 4. Klidná přírodní atmosféra mimo mapu (Záhlaví a Zápatí) */
+@keyframes headerLogoSway {
+  0%, 100% {
+    transform: rotate(0deg);
+  }
+  50% {
+    transform: rotate(3deg);
+  }
+}
+
+.site-header-logo-icon {
+  display: inline-block;
+  transform-origin: bottom center;
+  animation: headerLogoSway 7.5s ease-in-out infinite;
+}
+
+.footer-horizon-decor {
+  width: 100%;
+  max-width: 1100px;
+  margin: 24px auto 0;
+  padding: 0 16px;
+  overflow: hidden;
+}
+
+.footer-horizon-svg {
+  width: 100%;
+  height: 64px;
+  display: block;
+  opacity: 0.88;
+}
+
+/* 5. Striktní klid a přístupnost: vypnutí dekorativních animací */
+@media (prefers-reduced-motion: reduce) {
+  .stick-float-wrap,
+  .site-header-logo-icon {
+    animation: none !important;
+  }
+}
+
+body.nav-active .stick-float-wrap,
+body.nav-active .site-header-logo-icon {
+  animation: none !important;
+}
+
+

@@ -70,7 +70,27 @@ import {
 } from './expedition-engine.js';
 import {
   createStickBadge,
+  STICK_HEADS,
+  STICK_WOODS,
+  validateStickCustomization,
+  renderWalkingStickSvg,
 } from './walking-stick.js';
+import {
+  ALLOWED_AVATARS,
+  AVATAR_BACKGROUNDS,
+  AVATAR_RINGS,
+  hasAccessibleContrast,
+  migrateAvatarSelection,
+} from './avatars.js';
+import {
+  MILESTONE_DEFINITIONS,
+  recordLedgerEntry,
+  calculateLedgerTotalScore,
+  recordWalkInLedger,
+  recordMemoryInLedger,
+  recordGpsPlaceInLedger,
+  evaluateMilestones,
+} from './achievements.js';
 import {
   generateCategoryPlaceSvgDataUrl,
   getPlacePhotoSync,
@@ -1168,9 +1188,9 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
     assert.equal(gapRecovery.recovered, true, 'Mezera > 12 s při normální chůzi musí být dopočítána');
     assert.ok(gapRecovery.points.length >= 5, 'Musí vzniknout interpolované body pro odkrytí mlhy a zastávek');
 
-    // 7. Ověření v1.2/v1.3/v1.4-part1 prvků v index.html a src/walk.js
+    // 7. Ověření v1.2/v1.3/v1.4/v1.5 prvků v index.html a src/walk.js
     const indexHtml = fs.readFileSync('index.html', 'utf-8');
-    assert.ok(indexHtml.includes('v1.2') || indexHtml.includes('v1.3') || indexHtml.includes('v1.4'), 'index.html musí mít platnou verzi');
+    assert.ok(indexHtml.includes('v1.2') || indexHtml.includes('v1.3') || indexHtml.includes('v1.4') || indexHtml.includes('v1.5'), 'index.html musí mít platnou verzi');
     const walkJs = fs.readFileSync('src/walk.js', 'utf-8');
     assert.ok(walkJs.includes('map-lupa-search-input'), 'Vyhledávací lupa v mapě musí existovat');
     assert.ok(walkJs.includes('btn-pocket-mode'), 'Tlačítko Kapesního režimu musí existovat');
@@ -1597,6 +1617,187 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
     assert.ok(walkCss.includes('.postcard-animated-wrap'), 'Třída .postcard-animated-wrap musí být definována pro 3D náklon pohlednice');
     assert.ok(appJs.includes('Historie mých procházek a objevů'), 'Můj pas musí obsahovat sekci Historie mých procházek a objevů');
     assert.ok(appJs.includes('Záloha a přenos mého atlasu'), 'Můj pas musí obsahovat kartu Záloha a přenos mého atlasu');
+  });
+
+  it('DÁVKA 4 (v1.5.0): Prostorově stínovaná turistická hůl, avataři s barvami, idempotentní deník bodů a 8 ověřitelných milníků', () => {
+    // 1. Prostorově stínovaná turistická hůl: 4 hlavice, 4 odstíny dřeva a režim s odznaky / čistá hůl
+    assert.equal(STICK_HEADS.length, 4);
+    const headIds = STICK_HEADS.map((h: any) => h.id);
+    assert.deepEqual(headIds, ['shepherd', 'fork', 'crystal', 'falcon']);
+
+    assert.equal(STICK_WOODS.length, 4);
+    const woodIds = STICK_WOODS.map((w: any) => w.id);
+    assert.deepEqual(woodIds, ['oak', 'walnut', 'birch', 'larch']);
+
+    const validatedCustom = validateStickCustomization({
+      headId: 'falcon',
+      woodId: 'larch',
+      viewMode: 'clean',
+      invalidField: 'junk',
+    });
+    assert.equal(validatedCustom.headId, 'falcon');
+    assert.equal(validatedCustom.woodId, 'larch');
+    assert.equal(validatedCustom.viewMode, 'clean');
+
+    const defaultCustom = validateStickCustomization({} as any);
+    assert.equal(defaultCustom.headId, 'shepherd');
+    assert.equal(defaultCustom.woodId, 'oak');
+    assert.equal(defaultCustom.viewMode, 'badges');
+
+    const sampleBadges = [
+      createStickBadge({ expId: 'exp-1', distanceMeters: 1400, stampsCount: 2 }),
+    ];
+    const stickSvgBadges = renderWalkingStickSvg({ ...validatedCustom, viewMode: 'badges' }, sampleBadges as any);
+    assert.match(stickSvgBadges, /woodCylinderGrad/);
+    assert.match(stickSvgBadges, /leather-grip/);
+    assert.match(stickSvgBadges, /walking-stick-svg/);
+    assert.match(stickSvgBadges, /stick-pinned-badge/);
+
+    const stickSvgClean = renderWalkingStickSvg({ ...validatedCustom, viewMode: 'clean' }, sampleBadges as any);
+    assert.equal(stickSvgClean.includes('stick-pinned-badge'), false, 'Režim čistá hůl nesmí vykreslit přibité štítky');
+
+    // 2. Avataři a úprava barev medailonu a lemu s kontrolou kontrastu a bezpečnou migrací
+    assert.ok(ALLOWED_AVATARS.length >= 10);
+    assert.ok(AVATAR_BACKGROUNDS.length >= 4);
+    assert.ok(AVATAR_RINGS.length >= 4);
+
+    // Kontrola kontrastu (dostatečný vs. nedostatečný)
+    assert.equal(hasAccessibleContrast('#fffdf5', '#15803d'), true, 'Tmavě zelený lem na slonovinovém pozadí má dobrý kontrast');
+    assert.equal(hasAccessibleContrast('#284733', '#27383f'), false, 'Dva podobné tmavé tóny nemají dostatečný kontrast');
+
+    // Bezpečná migrace: stávající avatarId zůstává zachován a odemčen
+    const migrated = migrateAvatarSelection('rys', 'moss', 'brass');
+    assert.equal(migrated.avatarId, 'rys');
+    assert.equal(migrated.bgChoice, 'moss');
+    assert.equal(migrated.ringChoice, 'brass');
+
+    const migratedFallback = migrateAvatarSelection('unknown_alien', 'invalid_bg', 'invalid_ring');
+    assert.equal(migratedFallback.avatarId, 'liska');
+    assert.equal(migratedFallback.bgChoice, 'ivory');
+    assert.equal(migratedFallback.ringChoice, 'brass');
+
+    // 3. Idempotentní deník bodů (pointsLedger): deterministické klíče a zákaz duplicit
+    let ledger: any = {};
+    ledger = recordLedgerEntry(ledger, 'walk_exp-101', { points: 25, type: 'walk', label: 'Procházka' });
+    assert.equal(ledger['walk_exp-101'].points, 25);
+    assert.equal(calculateLedgerTotalScore(ledger), 25);
+
+    // Opakovaný zápis téže procházky nesmí připsat žádné body navíc
+    ledger = recordLedgerEntry(ledger, 'walk_exp-101', { points: 25, type: 'walk', label: 'Procházka' });
+    assert.equal(calculateLedgerTotalScore(ledger), 25, 'Dvojí záznam téže výpravy nesmí zdvojnásobit body v ledgeru');
+
+    // Záznam vzpomínky a místa
+    ledger = recordMemoryInLedger(ledger, { id: 'mem-1', title: 'Krásný dub' });
+    assert.equal(ledger['memory_mem-1'].points, 10);
+    assert.equal(calculateLedgerTotalScore(ledger), 35);
+
+    // Opakovaný záznam téže vzpomínky
+    ledger = recordMemoryInLedger(ledger, { id: 'mem-1', title: 'Krásný dub' });
+    assert.equal(calculateLedgerTotalScore(ledger), 35);
+
+    ledger = recordGpsPlaceInLedger(ledger, 'catalog:zamek-rozmital', 'Zámek Rožmitál');
+    assert.equal(ledger['gps_place_zamek-rozmital'].points, 30);
+    assert.equal(calculateLedgerTotalScore(ledger), 65);
+
+    // 4. Izolace simulátoru: simulované procházky se NIKDY nezapisují do ledgeru ani do statistik milníků
+    const simulatedExpedition = {
+      id: 'sim-exp-999',
+      isSimulated: true,
+      distanceMeters: 5500,
+      date: '2026-10-28T10:00:00Z',
+    };
+    ledger = recordWalkInLedger(ledger, simulatedExpedition as any, 50);
+    assert.equal(ledger['walk_sim-exp-999'], undefined, 'Simulovaná výprava se nesmí zapsat do ledgeru');
+    assert.equal(calculateLedgerTotalScore(ledger), 65);
+
+    // 5. 8 přehledných milníků ze skutečně ověřených vstupů v atlase
+    assert.equal(MILESTONE_DEFINITIONS.length, 8);
+    const milestoneIds = MILESTONE_DEFINITIONS.map((m: any) => m.id);
+    assert.deepEqual(milestoneIds, [
+      'first_walk',
+      'first_memory',
+      'first_nearby',
+      'mindful_5',
+      'distance_10km',
+      'distance_50km',
+      'places_10',
+      'fog_100',
+    ]);
+
+    // Prázdný stav -> žádný milník není odemčen
+    const emptyEval = evaluateMilestones({
+      walkProgress: emptyWalk(),
+      expeditionHistory: [],
+      personalMemories: [],
+      discoveries: [],
+      pointsLedger: {},
+    });
+    assert.equal(emptyEval.newlyUnlocked.length, 0);
+    assert.ok(emptyEval.milestones.every((m: any) => !m.unlocked));
+
+    // Skutečná procházka (1 200 m), 1 vzpomínka a 1 místo -> odemknou se první 3 milníky
+    const testStateWithRealActivity = {
+      ...loadState(),
+      cells: ['1234:5678', '1234:5679'],
+      meters: 1200,
+      expeditionHistory: [
+        { id: 'real-exp-1', distanceMeters: 1200, isSimulated: false },
+        { id: 'sim-exp-2', distanceMeters: 60000, isSimulated: true }, // Simulátor nesmí odemknout 50 km!
+      ],
+      personalMemories: [
+        { id: 'm1', title: 'Vzpomínka 1', symbolId: 'tree', lat: 49.601, lng: 13.864 },
+      ],
+      discoveries: ['zamek-rozmital'],
+      pointsLedger: {},
+    };
+
+    const firstEval = evaluateMilestones(testStateWithRealActivity as any);
+    assert.equal(firstEval.newlyUnlocked.length, 3, 'Odemknout se mají přesně 3 milníky: first_walk, first_memory, first_nearby');
+    const unlockedIds = firstEval.newlyUnlocked.map((m: any) => m.id);
+    assert.ok(unlockedIds.includes('first_walk'));
+    assert.ok(unlockedIds.includes('first_memory'));
+    assert.ok(unlockedIds.includes('first_nearby'));
+    assert.equal(unlockedIds.includes('distance_50km'), false, 'Simulovaná výprava nesmí odemknout milník 50 km!');
+
+    // Opakované vyhodnocení nesmí přidat milníky do newlyUnlocked ani duplikovat body
+    const repeatEval = evaluateMilestones({
+      ...testStateWithRealActivity,
+      pointsLedger: firstEval.updatedLedger,
+    } as any);
+    assert.equal(repeatEval.newlyUnlocked.length, 0, 'Opakované vyhodnocení nesmí znovu hlásit odemčení');
+    assert.equal(repeatEval.totalLedgerScore, firstEval.totalLedgerScore);
+
+    // 6. Záloha a obnova v1.5.0: exportStateJson a importStateJson bezpečně přenáší pointsLedger i stickCustomization
+    const fullStateSample = {
+      ...testStateWithRealActivity,
+      pointsLedger: firstEval.updatedLedger,
+      stickCustomization: validatedCustom,
+    };
+    const backupJson150 = exportStateJson(fullStateSample as any);
+    assert.match(backupJson150, /1\.5\.0/);
+    assert.match(backupJson150, /pointsLedger/);
+    assert.match(backupJson150, /stickCustomization/);
+
+    const preview150 = previewImportState(backupJson150);
+    assert.equal(preview150.valid, true);
+    assert.ok(preview150.pointsLedgerCount >= 3);
+
+    const imported150 = importStateJson(backupJson150);
+    assert.equal(imported150.stickCustomization?.headId, 'falcon');
+    assert.equal(imported150.stickCustomization?.woodId, 'larch');
+    assert.equal(imported150.stickCustomization?.viewMode, 'clean');
+    assert.ok(Object.keys(imported150.pointsLedger).length >= 3);
+
+    // 7. Klidná atmosféra mimo mapu: index.html a styles.css pravidla
+    const indexHtml = fs.readFileSync('index.html', 'utf-8');
+    const stylesCss = fs.readFileSync('assets/styles.css', 'utf-8');
+    assert.ok(indexHtml.includes('site-header-logo-icon'), 'Logo v záhlaví má třídu .site-header-logo-icon');
+    assert.ok(indexHtml.includes('footer-horizon-decor'), 'Zápatí má klidnou siluetu horizontu .footer-horizon-decor');
+    assert.ok(indexHtml.includes('v1.5.0'), 'Zápatí má označení verze Pilot · v1.5.0');
+    assert.ok(stylesCss.includes('stickGentleFloat'), 'CSS obsahuje klidnou prostorovou animaci @keyframes stickGentleFloat');
+    assert.ok(stylesCss.includes('headerLogoSway'), 'CSS obsahuje jemné vlnění loga @keyframes headerLogoSway');
+    assert.ok(stylesCss.includes('body.nav-active .stick-float-wrap'), 'Dekorativní animace se vypínají při aktivní navigaci (body.nav-active)');
+    assert.ok(stylesCss.includes('@media (prefers-reduced-motion: reduce)'), 'Dekorativní animace se striktně vypínají při prefers-reduced-motion');
   });
 });
 

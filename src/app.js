@@ -15,7 +15,7 @@ import {
   deleteExpeditionEntry,
   DEFAULT_APP_SETTINGS,
 } from './walk-store.js';
-import { ALLOWED_AVATARS, avatarUrl } from './avatars.js';
+import { ALLOWED_AVATARS, avatarUrl, AVATAR_BACKGROUNDS, AVATAR_RINGS, hasAccessibleContrast } from './avatars.js';
 import {
   generatePostcardDataUrl,
   generatePostcardBlob,
@@ -27,7 +27,8 @@ import {
 import { buildMiniMapPathSvg } from './postcards.js';
 import { explorerRank, chapterStatus, totalScore, trophies } from './walk-engine.js';
 import { CHAPTERS, COLLECTIONS, RELICS } from './data.js';
-import { renderWalkingStickHtml } from './walking-stick.js';
+import { STICK_HEADS, STICK_WOODS, validateStickCustomization, renderWalkingStickHtml } from './walking-stick.js';
+import { evaluateMilestones, MILESTONE_DEFINITIONS, calculateLedgerTotalScore } from './achievements.js';
 import { renderPilgrimsSection, renderSummitBook } from './pilgrims.js';
 import { playTick, playHammer, triggerHaptic, applyStaggerAnimation } from './fx.js';
 import { renderBrandLogoHtml, mountBrandLogo, mountAnimatedBrandLogo, mountAmbientBackground } from './brand-logo.js';
@@ -720,6 +721,11 @@ function renderPassport() {
 
   const stateObj = loadState();
   const currentAvatarId = stateObj.profile?.avatarId || 'liska';
+  const currentBgChoice = stateObj.profile?.bgChoice || 'ivory';
+  const currentRingChoice = stateObj.profile?.ringChoice || 'brass';
+  const currentBgMeta = AVATAR_BACKGROUNDS.find(b => b.id === currentBgChoice) || AVATAR_BACKGROUNDS[0];
+  const currentRingMeta = AVATAR_RINGS.find(r => r.id === currentRingChoice) || AVATAR_RINGS[0];
+  const contrastOk = hasAccessibleContrast(currentBgMeta.hex, currentRingMeta.hex);
   const totalPts = totalScore(stateObj);
   const rank = explorerRank(totalPts);
   const cStatus = chapterStatus(CHAPTERS, state.routes, stateObj.discoveries);
@@ -760,6 +766,39 @@ function renderPassport() {
             `;
           }).join('')}
         </div>
+
+        <!-- Přizpůsobení barev medailonu avatara (DÁVKA 4) -->
+        <div class="avatar-color-picker-card" style="margin-top:14px">
+          <div class="acp-group">
+            <span class="sc-label">Podklad medailonu avatara:</span>
+            <div class="color-chip-row" role="radiogroup" aria-label="Barva podkladu avatara">
+              ${AVATAR_BACKGROUNDS.map(bg => `
+                <button type="button" class="color-swatch-chip ${currentBgChoice === bg.id ? 'is-active' : ''}" data-avatar-bg="${e(bg.id)}" role="radio" aria-checked="${currentBgChoice === bg.id}">
+                  <span class="color-dot" style="background:${e(bg.hex)}"></span>
+                  <span>${e(bg.label)}</span>
+                </button>
+              `).join('')}
+            </div>
+          </div>
+
+          <div class="acp-group" style="margin-top:10px">
+            <span class="sc-label">Lem a kroužek medailonu:</span>
+            <div class="color-chip-row" role="radiogroup" aria-label="Barva lemu medailonu">
+              ${AVATAR_RINGS.map(ring => `
+                <button type="button" class="color-swatch-chip ${currentRingChoice === ring.id ? 'is-active' : ''}" data-avatar-ring="${e(ring.id)}" role="radio" aria-checked="${currentRingChoice === ring.id}">
+                  <span class="color-dot" style="background:${e(ring.hex)}"></span>
+                  <span>${e(ring.label)}</span>
+                </button>
+              `).join('')}
+            </div>
+          </div>
+
+          ${!contrastOk ? `
+            <div class="avatar-contrast-warning" role="status" style="margin-top:8px;font-size:12px;color:#a84218;display:flex;align-items:center;gap:6px">
+              ⚠️ <span>Vybraná kombinace má nižší kontrast na mapě. Doporučujeme vybrat kontrastnější barvu lemu nebo podkladu.</span>
+            </div>
+          ` : ''}
+        </div>
       </section>
 
       <section class="passport-section" id="passport-stick-section">
@@ -790,7 +829,39 @@ function renderPassport() {
   } else {
     // Tab 3: 🏆 Sbírka a kapitoly
     const earnedTrophies = trophies({ version: 1, cells: stateObj.cells, meters: stateObj.meters, discoveries: stateObj.discoveries });
+    const milestoneData = evaluateMilestones(stateObj);
+    const milestoneScore = milestoneData.totalLedgerScore;
     sectionContent = `
+      <section class="passport-section" id="passport-milestones-section">
+        <div class="section-heading">
+          <div>
+            <h2>🏅 8 ověřitelných milníků (štítků na hůl)</h2>
+            <p>Idempotentní deník bodů ze skutečných událostí v terénu (simulátor se nezapočítává). Body z deníku: <strong>${milestoneScore} b.</strong></p>
+          </div>
+        </div>
+        <div class="milestones-grid">
+          ${milestoneData.milestones.map(m => `
+            <div class="milestone-card ${m.unlocked ? 'is-unlocked' : 'is-locked'}">
+              <div class="milestone-icon-wrap">
+                <span class="milestone-icon">${m.icon}</span>
+              </div>
+              <div class="milestone-body">
+                <div class="milestone-top-line">
+                  <strong class="milestone-title">${e(m.title)}</strong>
+                  <span class="milestone-pts">+${m.points} b.</span>
+                </div>
+                <p class="milestone-desc">${e(m.description)}</p>
+                <div class="milestone-status">
+                  ${m.unlocked
+                    ? `<span class="milestone-badge unlocked">✓ Splněno (zapsáno v deníku)</span>`
+                    : `<span class="milestone-badge locked">◇ Čeká na splnění v terénu</span>`}
+                </div>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </section>
+
       <section class="passport-section">
         <div class="section-heading">
           <div>
@@ -1204,6 +1275,87 @@ document.addEventListener('click', async event => {
       playTick(s.soundEnabled);
       s = saveState(s);
       renderPassport();
+      return;
+    }
+
+    const stickHeadBtn = event.target.closest('[data-stick-head]');
+    if (stickHeadBtn) {
+      const head = stickHeadBtn.dataset.stickHead;
+      let s = loadState();
+      s.stickCustomization = {
+        ...validateStickCustomization(s.stickCustomization),
+        head,
+      };
+      playTick(s.soundEnabled);
+      saveState(s);
+      renderPassport();
+      const meta = STICK_HEADS.find(h => h.id === head);
+      toast(`Tvar hlavice hole změněn: ${meta ? meta.label : head}.`);
+      return;
+    }
+
+    const stickWoodBtn = event.target.closest('[data-stick-wood]');
+    if (stickWoodBtn) {
+      const wood = stickWoodBtn.dataset.stickWood;
+      let s = loadState();
+      s.stickCustomization = {
+        ...validateStickCustomization(s.stickCustomization),
+        wood,
+      };
+      playTick(s.soundEnabled);
+      saveState(s);
+      renderPassport();
+      const meta = STICK_WOODS.find(w => w.id === wood);
+      toast(`Odstín dřeva hole změněn: ${meta ? meta.label : wood}.`);
+      return;
+    }
+
+    const stickViewBtn = event.target.closest('[data-stick-view]');
+    if (stickViewBtn) {
+      const viewMode = stickViewBtn.dataset.stickView;
+      let s = loadState();
+      s.stickCustomization = {
+        ...validateStickCustomization(s.stickCustomization),
+        viewMode: viewMode === 'clean' ? 'clean' : 'badges',
+      };
+      playTick(s.soundEnabled);
+      saveState(s);
+      renderPassport();
+      toast(viewMode === 'clean' ? 'Zobrazení hole: Čisté dřevo bez odznaků.' : 'Zobrazení hole: Hůl s přibitými štítky.');
+      return;
+    }
+
+    const avatarBgBtn = event.target.closest('[data-avatar-bg]');
+    if (avatarBgBtn) {
+      const bgChoice = avatarBgBtn.dataset.avatarBg;
+      let s = loadState();
+      const bgMeta = AVATAR_BACKGROUNDS.find(b => b.id === bgChoice);
+      s.profile = {
+        ...s.profile,
+        bgChoice,
+        bgColor: bgMeta?.hex,
+      };
+      playTick(s.soundEnabled);
+      saveState(s);
+      renderPassport();
+      toast(`Podklad medailonu změněn: ${bgMeta ? bgMeta.label : bgChoice}.`);
+      return;
+    }
+
+    const avatarRingBtn = event.target.closest('[data-avatar-ring]');
+    if (avatarRingBtn) {
+      const ringChoice = avatarRingBtn.dataset.avatarRing;
+      let s = loadState();
+      const ringMeta = AVATAR_RINGS.find(r => r.id === ringChoice);
+      s.profile = {
+        ...s.profile,
+        ringChoice,
+        ringColor: ringMeta?.hex,
+      };
+      playTick(s.soundEnabled);
+      saveState(s);
+      renderPassport();
+      toast(`Lem medailonu změněn: ${ringMeta ? ringMeta.label : ringChoice}.`);
       return;
     }
   }

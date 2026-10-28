@@ -20,7 +20,7 @@
 <body>
   <a class="skip-link" href="#main">Přeskočit na obsah</a>
   <header class="site-header">
-    <a class="brand" href="#/" aria-label="Czekpoint, úvod"><span class="header-logo-slot"><img src="./assets/icon.svg" width="64" height="64" alt=""></span><span>czekpoint<span class="brand-dot">.</span></span></a>
+    <a class="brand" href="#/" aria-label="Czekpoint, úvod"><span class="header-logo-slot"><img src="./assets/icon.svg" class="site-header-logo-icon" width="64" height="64" alt=""></span><span>czekpoint<span class="brand-dot">.</span></span></a>
     <nav class="main-nav" aria-label="Hlavní navigace">
       <a href="#/" data-nav="walk">🗺️ Mapa a trasa</a>
       <a href="#/katalog" data-nav="catalog">📚 Katalog míst</a>
@@ -30,7 +30,22 @@
   </header>
   <div id="mode-banner" class="mode-banner" hidden></div>
   <main id="main" class="page-shell" tabindex="-1"><div class="loading-state" role="status"><span class="spinner"></span> Připravujeme výlety…</div></main>
-  <footer class="site-footer"><a class="brand small" href="#/"><img src="./assets/icon.svg" width="22" height="22" alt=""><span>czekpoint<span class="brand-dot">.</span></span></a><span>Malé výpravy. Lepší přehled.</span><a href="#/o-projektu">O datech a soukromí</a><span class="version">Pilot · v1.4-part3</span></footer>
+  <div class="footer-horizon-decor" aria-hidden="true">
+    <svg class="footer-horizon-svg" viewBox="0 0 1200 64" fill="none" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none">
+      <path d="M0,64 L0,48 Q180,28 360,42 T720,36 T1080,44 L1200,38 L1200,64 Z" fill="#1b3d2b" opacity="0.35"/>
+      <path d="M0,64 L0,54 Q240,40 480,50 T960,46 L1200,52 L1200,64 Z" fill="#142e20" opacity="0.6"/>
+      <polygon points="120,44 125,56 115,56" fill="#1b3d2b" opacity="0.5"/>
+      <polygon points="128,42 134,58 122,58" fill="#1b3d2b" opacity="0.5"/>
+      <polygon points="340,36 346,50 334,50" fill="#1b3d2b" opacity="0.55"/>
+      <polygon points="560,32 568,48 552,48" fill="#1b3d2b" opacity="0.55"/>
+      <polygon points="820,38 827,52 813,52" fill="#1b3d2b" opacity="0.5"/>
+      <polygon points="980,40 986,52 974,52" fill="#1b3d2b" opacity="0.5"/>
+      <circle cx="640" cy="30" r="3" fill="#142e20"/>
+      <path d="M638,33 L642,33 L644,45 L636,45 Z" fill="#142e20"/>
+      <line x1="645" y1="34" x2="648" y2="47" stroke="#142e20" stroke-width="1.2"/>
+    </svg>
+  </div>
+  <footer class="site-footer"><a class="brand small" href="#/"><img src="./assets/icon.svg" width="22" height="22" alt=""><span>czekpoint<span class="brand-dot">.</span></span></a><span>Malé výpravy. Lepší přehled.</span><a href="#/o-projektu">O datech a soukromí</a><span class="version">Pilot · v1.5.0</span></footer>
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
   <dialog id="report-dialog" class="report-dialog" aria-labelledby="report-title"></dialog>
   <dialog id="confirm-dialog" class="confirm-dialog" aria-labelledby="confirm-title"></dialog>
