@@ -1,4 +1,10 @@
 import {
+  config as defaultAppConfig,
+  toLngLat,
+  createGeoJsonCirclePolygon,
+  buildMapLibreStyle,
+} from '../config.js';
+import {
   emptyWalk,
   acceptFix,
   cellBounds,
@@ -258,8 +264,105 @@ export function renderPlayerAvatarMarkerHtml(arg1 = 'liska', arg2 = 0, arg3 = fa
   `;
 }
 
-export function mountWalk(root, routes, config, actions = {}) {
-  const L = window.L;
+export { toLngLat, createGeoJsonCirclePolygon, buildMapLibreStyle };
+
+/**
+ * Převede pole bodů trasy (`[lat, lng]` nebo `{ lat, lng }`) na GeoJSON FeatureCollection
+ * v pořadí `[lng, lat]` pro vykreslení v MapLibre GL JS.
+ */
+export function buildPlannedRouteGeoJson(coords = [], isFallback = false) {
+  if (!Array.isArray(coords) || coords.length < 2) {
+    return { type: 'FeatureCollection', features: [] };
+  }
+  const lngLats = coords.map(toLngLat).filter(Boolean);
+  if (lngLats.length < 2) {
+    return { type: 'FeatureCollection', features: [] };
+  }
+  return {
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        properties: {
+          isFallback: Boolean(isFallback),
+          lineColor: '#9333ea',
+          casingColor: '#2e1065',
+        },
+        geometry: {
+          type: 'LineString',
+          coordinates: lngLats,
+        },
+      },
+    ],
+  };
+}
+
+/**
+ * Převede prošlé úseky (`walkSegments`) na GeoJSON FeatureCollection v pořadí `[lng, lat]`.
+ */
+export function buildWalkSegmentsGeoJson(walkSegments = []) {
+  if (!Array.isArray(walkSegments) || walkSegments.length === 0) {
+    return { type: 'FeatureCollection', features: [] };
+  }
+  const features = [];
+  for (let i = 0; i < walkSegments.length; i++) {
+    const seg = walkSegments[i];
+    if (!Array.isArray(seg) || seg.length < 2) continue;
+    const lngLats = seg.map(toLngLat).filter(Boolean);
+    if (lngLats.length < 2) continue;
+    features.push({
+      type: 'Feature',
+      properties: { segmentIndex: i },
+      geometry: {
+        type: 'LineString',
+        coordinates: lngLats,
+      },
+    });
+  }
+  return {
+    type: 'FeatureCollection',
+    features,
+  };
+}
+
+/**
+ * Převede načtené turistické trasy KČT na GeoJSON FeatureCollection v pořadí `[lng, lat]`.
+ */
+export function buildHikingTrailsGeoJson(trails = []) {
+  if (!Array.isArray(trails) || trails.length === 0) {
+    return { type: 'FeatureCollection', features: [] };
+  }
+  const features = [];
+  for (const trail of trails) {
+    if (!trail || !Array.isArray(trail.coordinates) || trail.coordinates.length < 2) continue;
+    const lngLats = trail.coordinates.map(toLngLat).filter(Boolean);
+    if (lngLats.length < 2) continue;
+    const parsed = trail.parsedSymbol || parseOsmcSymbol(trail.osmcSymbol, trail.colour);
+    features.push({
+      type: 'Feature',
+      properties: {
+        id: trail.id || '',
+        name: trail.name || 'Turistická trasa',
+        color: parsed?.hex || '#d62828',
+        labelCz: parsed?.labelCz || '',
+        osmcSymbol: trail.osmcSymbol || '',
+        operator: trail.operator || 'KČT',
+        distance: trail.distance || '',
+      },
+      geometry: {
+        type: 'LineString',
+        coordinates: lngLats,
+      },
+    });
+  }
+  return {
+    type: 'FeatureCollection',
+    features,
+  };
+}
+
+export function mountWalk(root, routes, config = defaultAppConfig, actions = {}) {
+  const maplibregl = typeof window !== 'undefined' ? window.maplibregl : null;
   const { onAddVisit } = actions;
   let stateObj = loadState();
   let progress = {
@@ -304,13 +407,15 @@ export function mountWalk(root, routes, config, actions = {}) {
   let editDraft = null;
   let editModalOpen = false;
 
-  let map, fog, tileLayer, waymarkedHikingLayer, contourTileLayer = null, trailLayer, player, accuracyRing;
+  let map = null, fog = null, player = null, accuracyRing = null;
   let fogMaskCanvas = null;
   let fogInnerCanvas = null;
-  let plannedRouteLayer = L?.layerGroup();
-  let playerLeadLayer = L?.layerGroup();
+  let is3DMode = false;
+  let terrainFallbackTriggered = false;
+  let footprintMarkers = [];
+  let hikingBlazeMarkers = [];
+  let routeOverlayMarkers = [];
   let appSettings = { ...DEFAULT_APP_SETTINGS, ...(stateObj.appSettings || {}) };
-  let hikingTrailsLayer = L?.layerGroup();
   let showHikingTrails = appSettings.kctTrails !== false;
   let showContourLayer = Boolean(appSettings.contours);
   let loadedHikingTrails = [];
@@ -486,7 +591,7 @@ export function mountWalk(root, routes, config, actions = {}) {
     });
 
   root.innerHTML = `
-    <h1 tabindex="-1" class="visually-hidden">Mapa objevování a procházka · Czekpoint v1.4-part2</h1>
+    <h1 tabindex="-1" class="visually-hidden">Mapa objevování a procházka · Czekpoint v2.0-part1</h1>
 
     <!-- Horní přehledový panel trasy: zobrazí se AŽ ve chvíli, kdy má uživatel vybraný alespoň 1 bod v trase -->
     <section class="phase1-top-bar" id="phase1-top-bar" hidden aria-label="Souhrn trasy, plán zastávek a spuštění výpravy">
@@ -799,10 +904,21 @@ export function mountWalk(root, routes, config, actions = {}) {
         <span class="zen-fab-label" id="zen-follow-label">Sleduji polohu</span>
       </button>
 
-      <!-- DÁVKA 1 (Bod 2.3): Sjednocená ovládací tlačítka mapy (>= 44 × 44 px): ➕, ➖, 🔍, ⛶ -->
+      <!-- DÁVKA 1 v2.0-part1 (Bod 2): Sjednocená ovládací tlačítka mapy (>= 44 × 44 px) včetně přepínače 2D/3D terénu a Severu nahoře -->
       <div class="walk-map-toolbar map-right-toolbar" role="toolbar" aria-label="Ovládání mapy">
         <button type="button" class="map-right-btn" id="walk-zoom-in" title="Přiblížit mapu (+)" aria-label="Přiblížit mapu">➕</button>
         <button type="button" class="map-right-btn" id="walk-zoom-out" title="Oddálit mapu (−)" aria-label="Oddálit mapu">➖</button>
+        <button type="button" class="map-right-btn map-3d-toggle-btn" id="btn-toggle-3d" aria-pressed="false" title="Přepnout 2D a 3D zobrazení se skutečným terénem" aria-label="Přepnout 2D a 3D terén">
+          <span class="btn-3d-icon" id="btn-toggle-3d-icon" aria-hidden="true">🗺️</span>
+          <span class="btn-3d-label" id="btn-toggle-3d-label">2D</span>
+        </button>
+        <button type="button" class="map-right-btn map-north-btn" id="btn-north-up" title="Sever nahoře (srovnat natočení mapy)" aria-label="Sever nahoře">⬆️</button>
+        <div class="map-3d-camera-controls" id="map-3d-camera-controls" role="group" aria-label="Ovládání náklonu a otočení 3D kamery" hidden>
+          <button type="button" class="map-right-btn map-cam-btn" id="btn-cam-tilt-up" title="Zvýšit náklon 3D pohledu" aria-label="Naklonit kameru více k horizontu">▴</button>
+          <button type="button" class="map-right-btn map-cam-btn" id="btn-cam-tilt-down" title="Snížit náklon 3D pohledu" aria-label="Narovnat pohled shora">▾</button>
+          <button type="button" class="map-right-btn map-cam-btn" id="btn-cam-rotate-left" title="Otočit pohled doleva" aria-label="Otočit mapu doleva">↺</button>
+          <button type="button" class="map-right-btn map-cam-btn" id="btn-cam-rotate-right" title="Otočit pohled doprava" aria-label="Otočit mapu doprava">↻</button>
+        </div>
         <button type="button" class="map-right-btn" id="walk-search-toggle" title="Hledat místo na mapě (🔍)" aria-label="Hledat v mapě">🔍</button>
         <button type="button" class="map-right-btn" id="walk-zen-toggle" aria-pressed="false" title="Celá obrazovka" aria-label="Celá obrazovka">⛶</button>
         <button type="button" class="map-right-btn" id="walk-center" hidden title="Vycentrovat na mě" aria-label="Vycentrovat na mě">🎯</button>
@@ -1183,12 +1299,106 @@ export function mountWalk(root, routes, config, actions = {}) {
       $('walk-status').textContent = text;
     }
   };
-  const placesLayer = L?.layerGroup();
   const placeMarkersById = new Map();
   const prefetchedPhotoPlaceIds = new Set();
   const prefetchedVerifiedPlaceIds = new Set();
   let lastTrailRenderKey = '';
-  trailLayer = L?.layerGroup();
+
+  function getMapPixelSize() {
+    const mapEl = $('walk-map');
+    const w = mapEl?.clientWidth || map?.getCanvas?.()?.clientWidth || 390;
+    const h = mapEl?.clientHeight || map?.getCanvas?.()?.clientHeight || 600;
+    return { x: w, y: h };
+  }
+
+  function projectLatLngToContainerPoint(lat, lng) {
+    if (!map) return { x: 0, y: 0 };
+    if (typeof map.project === 'function') {
+      const pt = map.project([Number(lng), Number(lat)]);
+      return { x: Number(pt?.x) || 0, y: Number(pt?.y) || 0 };
+    }
+    return { x: 0, y: 0 };
+  }
+
+  function setMapView(lat, lng, zoom = null, animate = false) {
+    if (!map || !Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) return;
+    const targetZoom = zoom != null && Number.isFinite(Number(zoom))
+      ? Number(zoom)
+      : (typeof map.getZoom === 'function' ? map.getZoom() : 15.5);
+    const centerLngLat = [Number(lng), Number(lat)];
+    if (animate && typeof map.easeTo === 'function') {
+      map.easeTo({ center: centerLngLat, zoom: targetZoom, duration: 420 });
+    } else if (typeof map.jumpTo === 'function') {
+      map.jumpTo({ center: centerLngLat, zoom: targetZoom });
+    } else if (typeof map.setCenter === 'function') {
+      map.setCenter(centerLngLat);
+      if (typeof map.setZoom === 'function') map.setZoom(targetZoom);
+    }
+  }
+
+  function panMapTo(lat, lng, animate = false) {
+    if (!map || !Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) return;
+    const centerLngLat = [Number(lng), Number(lat)];
+    if (animate && typeof map.easeTo === 'function') {
+      map.easeTo({ center: centerLngLat, duration: 350 });
+    } else if (typeof map.jumpTo === 'function') {
+      map.jumpTo({ center: centerLngLat });
+    } else if (typeof map.panTo === 'function') {
+      map.panTo(centerLngLat, { duration: 0 });
+    }
+  }
+
+  function resizeMap() {
+    if (!map) return;
+    try {
+      if (typeof map.resize === 'function') {
+        map.resize();
+      }
+    } catch {}
+  }
+
+  function isPointInExpandedMapBounds(lat, lng, padRatio = 0.35) {
+    if (!map || typeof map.getBounds !== 'function') return false;
+    try {
+      const b = map.getBounds();
+      if (!b) return false;
+      const south = typeof b.getSouth === 'function' ? b.getSouth() : b._sw?.lat;
+      const north = typeof b.getNorth === 'function' ? b.getNorth() : b._ne?.lat;
+      const west = typeof b.getWest === 'function' ? b.getWest() : b._sw?.lng;
+      const east = typeof b.getEast === 'function' ? b.getEast() : b._ne?.lng;
+      if (![south, north, west, east].every(Number.isFinite)) return false;
+      const latPad = Math.max(0.005, (north - south) * padRatio);
+      const lngPad = Math.max(0.005, (east - west) * padRatio);
+      return (
+        lat >= south - latPad &&
+        lat <= north + latPad &&
+        lng >= west - lngPad &&
+        lng <= east + lngPad
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  function fitMapToLatLngPoints(points = [], padding = 40, maxZoom = 16) {
+    if (!map || typeof map.fitBounds !== 'function' || !Array.isArray(points)) return;
+    const lngLats = points.map(toLngLat).filter(Boolean);
+    if (lngLats.length < 2) return;
+    let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
+    for (const [lng, lat] of lngLats) {
+      if (lng < minLng) minLng = lng;
+      if (lng > maxLng) maxLng = lng;
+      if (lat < minLat) minLat = lat;
+      if (lat > maxLat) maxLat = lat;
+    }
+    if (!Number.isFinite(minLng) || !Number.isFinite(maxLng)) return;
+    try {
+      map.fitBounds(
+        [[minLng, minLat], [maxLng, maxLat]],
+        { padding, maxZoom, duration: 450 }
+      );
+    } catch {}
+  }
 
   function canPersistRealState(fix = null) {
     if (demo || simSandboxActive || fix?.simulated) return false;
@@ -1222,8 +1432,6 @@ export function mountWalk(root, routes, config, actions = {}) {
     const mapRect = $('walk-map')?.getBoundingClientRect?.();
     const sheetRect = $('walk-bottom-sheet')?.getBoundingClientRect?.();
     if (!mapRect || !sheetRect) return 80;
-    // Pokud spodní panel leží pod mapou nebo částečně překrývá spodní část obrazovky,
-    // posuneme viditelný střed o ~22 % výšky mapy nahoru, aby byl hráč pohodlně nad spodní lištou/panelem
     const overlap = Math.max(0, mapRect.bottom - sheetRect.top);
     return overlap > 0 ? Math.min(mapRect.height * 0.5, overlap + 32) : Math.round(mapRect.height * 0.16);
   }
@@ -1233,11 +1441,11 @@ export function mountWalk(root, routes, config, actions = {}) {
 
   function centerMapOnPlayer(pos = lastFix || telemetry.lastKnownPosition, animate = false) {
     if (!map || !pos || !Number.isFinite(pos.lat) || !Number.isFinite(pos.lng)) return;
-    const mapEl = $('walk-map');
-    const width = zenMode ? window.innerWidth : (mapEl?.clientWidth || map.getSize().x || 390);
-    const height = zenMode ? window.innerHeight : (mapEl?.clientHeight || map.getSize().y || 600);
+    const pxSize = getMapPixelSize();
+    const width = zenMode ? window.innerWidth : pxSize.x;
+    const height = zenMode ? window.innerHeight : pxSize.y;
     const bottomObsPx = zenMode ? 0 : getBottomSheetOverlapPx();
-    const currentZoom = map.getZoom() || 16.5;
+    const currentZoom = (typeof map.getZoom === 'function' ? map.getZoom() : null) || 15.5;
 
     const targetCenter = computeVisibleMapCenterForPlayer(
       pos,
@@ -1247,7 +1455,7 @@ export function mountWalk(root, routes, config, actions = {}) {
       currentZoom
     );
 
-    map.setView([targetCenter.lat, targetCenter.lng], currentZoom, { animate });
+    setMapView(targetCenter.lat, targetCenter.lng, currentZoom, animate);
   }
 
   function updateFollowUi() {
@@ -1370,13 +1578,13 @@ export function mountWalk(root, routes, config, actions = {}) {
     if (!player) return;
     if (typeof player.setOpacity === 'function') {
       player.setOpacity(visible ? 1 : 0);
-    } else if (typeof player.setStyle === 'function') {
-      player.setStyle({ opacity: visible ? 1 : 0, fillOpacity: visible ? 1 : 0 });
+    } else if (typeof player.getElement === 'function' && player.getElement()) {
+      player.getElement().style.opacity = visible ? '1' : '0';
     }
   }
 
   function updatePlayerAvatarIcon(isWalking = Boolean(active || demo)) {
-    if (!player || !L) return;
+    if (!player) return;
     const avatarId = stateObj.profile?.avatarId || 'liska';
     const bearingDeg = Number.isFinite(targetBearing) ? targetBearing : 0;
     const el = typeof player.getElement === 'function' ? player.getElement() : null;
@@ -1392,16 +1600,12 @@ export function mountWalk(root, routes, config, actions = {}) {
         }
         return;
       }
-    }
-    if (typeof player.setIcon === 'function') {
-      player.setIcon(
-        L.divIcon({
-          className: 'player-avatar-marker-anchor',
-          html: renderPlayerAvatarMarkerHtml({ avatarId, bearingDeg, isWalking, orbitalArrow: appSettings.orbitalArrow !== false }),
-          iconSize: [54, 54],
-          iconAnchor: [27, 27],
-        })
-      );
+      el.innerHTML = renderPlayerAvatarMarkerHtml({
+        avatarId,
+        bearingDeg,
+        isWalking,
+        orbitalArrow: appSettings.orbitalArrow !== false,
+      });
     }
   }
 
@@ -1415,7 +1619,7 @@ export function mountWalk(root, routes, config, actions = {}) {
       playerLerpRafId = null;
     }
 
-    const currentOpacity = typeof player.options?.opacity === 'number' ? player.options.opacity : 1;
+    const currentOpacity = typeof player.getOpacity === 'function' ? player.getOpacity() : 1;
     setPlayerMarkerVisible(true);
     updatePlayerAvatarIcon(true);
 
@@ -1450,7 +1654,7 @@ export function mountWalk(root, routes, config, actions = {}) {
       accuracyRing?.setLatLng([curLat, curLng]);
 
       if (follow) {
-        map.panTo([curLat, curLng], { animate: false });
+        panMapTo(curLat, curLng, false);
       }
 
       if (t < 1) {
@@ -1466,24 +1670,21 @@ export function mountWalk(root, routes, config, actions = {}) {
 
   function metersToPx(lat, meters) {
     if (!map) return 30;
-    const p1 = map.latLngToContainerPoint([lat, 0]);
-    const p2 = map.latLngToContainerPoint([lat + (meters / 111320), 0]);
-    return Math.max(8, Math.abs(p2.y - p1.y));
+    const p1 = projectLatLngToContainerPoint(lat, 13.8644);
+    const p2 = projectLatLngToContainerPoint(lat + (meters / 111320), 13.8644);
+    return Math.max(8, Math.hypot(p2.x - p1.x, p2.y - p1.y));
   }
 
   /**
-   * Vykreslí Mapu objevování (pergamen) se sjednoceným souvislým odkrytým územím (Bod 31)
-   * a odkrýváním přírodních objektů podle jejich skutečného tvaru (Bod 32):
-   * - Souvislý pás chůze (`progress.walkSegments`) s poloměrem `FOG_REVEAL_RADIUS_M` (65 m) a jedním jemným vnějším okrajem,
-   *   bez jakýchkoliv vnitřních předělů mezi buňkami nebo kruhy.
-   * - Uzavřený okruh kolem velké neprojité oblasti uprostřed tuto vnitřní oblast samovolně neodkryje.
+   * Vykreslí Mapu objevování (pergamen) nad instancí MapLibre GL JS pomocí map.project([lng, lat]):
+   * - Souvislý pás chůze (`progress.walkSegments`) s poloměrem `FOG_REVEAL_RADIUS_M` (65 m) a jedním jemným vnějším okrajem.
    * - Malé rybníky v `progress.revealedFeatures` se odkryjí v celém svém přirozeném polygonu břehu.
    * - Aktivní lesy a velké vodní plochy v `activeLocalReveals` odhalí pouze lokální výsek oříznutý polygonem objektu.
    */
   function drawFog() {
     if (!map || disposed || !fog) return;
     const canvas = fog;
-    const size = map.getSize();
+    const size = getMapPixelSize();
     if (size.x <= 0 || size.y <= 0) return;
     const ratio = Math.min(window.devicePixelRatio || 1, 2);
 
@@ -1494,7 +1695,6 @@ export function mountWalk(root, routes, config, actions = {}) {
       canvas.style.height = `${size.y}px`;
     }
 
-    L.DomUtil.setPosition(canvas, map.containerPointToLayerPoint([0, 0]));
     const ctx = canvas.getContext('2d');
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
     ctx.clearRect(0, 0, size.x, size.y);
@@ -1505,10 +1705,9 @@ export function mountWalk(root, routes, config, actions = {}) {
     }
     canvas.style.display = 'block';
 
-    const origin = map.getPixelOrigin ? map.getPixelOrigin() : { x: 0, y: 0 };
-    const layerTopLeft = map.containerPointToLayerPoint([0, 0]);
-    const ox = origin.x + layerTopLeft.x;
-    const oy = origin.y + layerTopLeft.y;
+    const anchorScreen = projectLatLngToContainerPoint(49.6018, 13.8644);
+    const ox = -anchorScreen.x;
+    const oy = -anchorScreen.y;
     const mod = (v, m) => ((v % m) + m) % m;
 
     if (fogMode === 'full') {
@@ -1594,28 +1793,27 @@ export function mountWalk(root, routes, config, actions = {}) {
       ictx.setTransform(ratio, 0, 0, ratio, 0, 0);
       ictx.clearRect(0, 0, size.x, size.y);
 
-      const refCenter = map.getCenter() || { lat: 49.6018, lng: 13.8644 };
+      const refCenter = (typeof map.getCenter === 'function' ? map.getCenter() : null) || { lat: 49.6018, lng: 13.8644 };
       const refLat = refCenter.lat || 49.6018;
       const curPos = lastFix || telemetry.lastKnownPosition || refCenter;
       const nearbyPoiCount = getAllAvailablePlaces().filter(p => (haversineMeters(curPos, p) ?? Infinity) <= 1500).length;
       const effectiveRevealRadiusM = nearbyPoiCount <= 2 ? 85 : FOG_REVEAL_RADIUS_M;
       const radPx = metersToPx(refLat, effectiveRevealRadiusM);
 
-      // Pomocná funkce pro vykreslení celé sjednocené geometrie do daného kontextu (pro vnější jemný okraj a vnitřní čistý střed)
       const drawUnifiedShapes = (targetCtx, expandPx = 0) => {
         targetCtx.lineCap = 'round';
         targetCtx.lineJoin = 'round';
         targetCtx.fillStyle = '#000000';
         targetCtx.strokeStyle = '#000000';
 
-        // 1. Souvislé pásy chůze (`walkSegments` — Bod 31)
+        // 1. Souvislé pásy chůze (`walkSegments`)
         const segments = Array.isArray(progress.walkSegments) ? progress.walkSegments : [];
         targetCtx.lineWidth = Math.max(8, (radPx + expandPx) * 2);
         for (const seg of segments) {
           if (!Array.isArray(seg) || seg.length === 0) continue;
           if (seg.length === 1) {
             const pt = Array.isArray(seg[0]) ? seg[0] : [seg[0].lat, seg[0].lng];
-            const cp = map.latLngToContainerPoint([pt[0], pt[1]]);
+            const cp = projectLatLngToContainerPoint(pt[0], pt[1]);
             targetCtx.beginPath();
             targetCtx.arc(cp.x, cp.y, Math.max(4, radPx + expandPx), 0, Math.PI * 2);
             targetCtx.fill();
@@ -1623,7 +1821,7 @@ export function mountWalk(root, routes, config, actions = {}) {
             targetCtx.beginPath();
             for (let i = 0; i < seg.length; i++) {
               const pt = Array.isArray(seg[i]) ? seg[i] : [seg[i].lat, seg[i].lng];
-              const cp = map.latLngToContainerPoint([pt[0], pt[1]]);
+              const cp = projectLatLngToContainerPoint(pt[0], pt[1]);
               if (i === 0) targetCtx.moveTo(cp.x, cp.y);
               else targetCtx.lineTo(cp.x, cp.y);
             }
@@ -1631,12 +1829,12 @@ export function mountWalk(root, routes, config, actions = {}) {
           }
         }
 
-        // 2. Uložené buňky průzkumu (`progress.cells`) — sjednocené do stejné souvislé masky bez vnitřních okrajů
+        // 2. Uložené buňky průzkumu (`progress.cells`)
         if (progress.cells.length > 0) {
           targetCtx.beginPath();
           for (const id of progress.cells) {
             const center = cellCenter(id);
-            const cp = map.latLngToContainerPoint([center.lat, center.lng]);
+            const cp = projectLatLngToContainerPoint(center.lat, center.lng);
             const cellRad = Math.max(4, radPx + expandPx);
             if (cp.x + cellRad < -30 || cp.x - cellRad > size.x + 30 || cp.y + cellRad < -30 || cp.y - cellRad > size.y + 30) {
               continue;
@@ -1647,7 +1845,7 @@ export function mountWalk(root, routes, config, actions = {}) {
           targetCtx.fill();
         }
 
-        // 3. Odhalené přírodní objekty podle jejich tvaru (`progress.revealedFeatures` — např. celé malé rybníky, Bod 32)
+        // 3. Odhalené přírodní objekty podle jejich tvaru (`progress.revealedFeatures`)
         const revealedIds = Array.isArray(progress.revealedFeatures) ? progress.revealedFeatures : [];
         for (const fid of revealedIds) {
           const feat = BUILTIN_NATURAL_FEATURES.find(f => f.id === fid);
@@ -1655,7 +1853,7 @@ export function mountWalk(root, routes, config, actions = {}) {
           targetCtx.beginPath();
           for (let i = 0; i < feat.polygon.length; i++) {
             const v = feat.polygon[i];
-            const cp = map.latLngToContainerPoint([v[0], v[1]]);
+            const cp = projectLatLngToContainerPoint(v[0], v[1]);
             if (i === 0) targetCtx.moveTo(cp.x, cp.y);
             else targetCtx.lineTo(cp.x, cp.y);
           }
@@ -1667,21 +1865,21 @@ export function mountWalk(root, routes, config, actions = {}) {
           }
         }
 
-        // 4. Lokální rozšířené odkrytí v lese nebo u velké vodní plochy oříznuté hranicí objektu (Bod 32)
+        // 4. Lokální rozšířené odkrytí v lese nebo u velké vodní plochy
         for (const locRev of activeLocalReveals) {
           if (!locRev || !Array.isArray(locRev.polygon) || locRev.polygon.length < 3 || !locRev.center) continue;
           targetCtx.save();
           targetCtx.beginPath();
           for (let i = 0; i < locRev.polygon.length; i++) {
             const v = locRev.polygon[i];
-            const cp = map.latLngToContainerPoint([v[0], v[1]]);
+            const cp = projectLatLngToContainerPoint(v[0], v[1]);
             if (i === 0) targetCtx.moveTo(cp.x, cp.y);
             else targetCtx.lineTo(cp.x, cp.y);
           }
           targetCtx.closePath();
           targetCtx.clip();
 
-          const centerPx = map.latLngToContainerPoint([locRev.center.lat, locRev.center.lng]);
+          const centerPx = projectLatLngToContainerPoint(locRev.center.lat, locRev.center.lng);
           const localRadPx = metersToPx(locRev.center.lat, locRev.radiusM || 130) + expandPx;
           targetCtx.beginPath();
           targetCtx.arc(centerPx.x, centerPx.y, Math.max(8, localRadPx), 0, Math.PI * 2);
@@ -1690,7 +1888,6 @@ export function mountWalk(root, routes, config, actions = {}) {
         }
       };
 
-      // ZADÁNÍ #08 (Bod 4): Měkké radiální odkrývání (radial gradient fade-in/out) bez ostrých vyříznutých kruhů
       const drawSoftRadialStamp = (targetCtx, x, y, radiusPx) => {
         const softRad = Math.max(8, radiusPx * 1.35);
         if (x + softRad < -40 || x - softRad > size.x + 40 || y + softRad < -40 || y - softRad > size.y + 40) {
@@ -1707,20 +1904,18 @@ export function mountWalk(root, routes, config, actions = {}) {
         targetCtx.fill();
       };
 
-      // Vykreslíme sjednocenou masku s jemným vnějším přechodem (bez jakýchkoliv vnitřních kruhů!)
       ictx.save();
       drawUnifiedShapes(ictx, -Math.min(10, radPx * 0.24));
       ictx.restore();
 
-      // Široký měkký přechod po obvodu celého sjednoceného tvaru + radial gradient fade-in/out
       mctx.save();
       for (const id of progress.cells) {
         const center = cellCenter(id);
-        const cp = map.latLngToContainerPoint([center.lat, center.lng]);
+        const cp = projectLatLngToContainerPoint(center.lat, center.lng);
         drawSoftRadialStamp(mctx, cp.x, cp.y, radPx);
       }
       if (lastFix && Number.isFinite(lastFix.lat) && Number.isFinite(lastFix.lng)) {
-        const cp = map.latLngToContainerPoint([lastFix.lat, lastFix.lng]);
+        const cp = projectLatLngToContainerPoint(lastFix.lat, lastFix.lng);
         drawSoftRadialStamp(mctx, cp.x, cp.y, radPx);
       }
       mctx.globalAlpha = 0.22;
@@ -1734,7 +1929,6 @@ export function mountWalk(root, routes, config, actions = {}) {
       mctx.drawImage(fogInnerCanvas, 0, 0);
       mctx.restore();
 
-      // Vyřízneme sjednocené odkryté území z mapy objevování
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.globalCompositeOperation = 'destination-out';
@@ -1748,21 +1942,37 @@ export function mountWalk(root, routes, config, actions = {}) {
     frame = requestAnimationFrame(() => { frame = null; drawFog(); });
   }
 
+  function clearFootprintMarkers() {
+    for (const m of footprintMarkers) {
+      try { m.remove(); } catch {}
+    }
+    footprintMarkers = [];
+  }
+
   /**
-   * Bod 30 & ZADÁNÍ #08 (Bod 3): Vykreslí střídavé levé a pravé otisky podrážky pohorky (.footprint-marker, 18×18 px)
-   * natočené ve směru chůze a postupně blednoucí podle stáří (opacity 0.85 -> 0.15).
+   * Vykreslí prošlou trasu (`walkSegments` jako GeoJSON vrstvu) a střídavé levé/pravé otisky podrážky pohorky
+   * (`.footprint-marker`, 18×18 px) ukotvené na střed (`anchor: 'center'`).
    */
   function renderTrail() {
-    if (!map || !trailLayer) return;
+    if (!map) return;
+
+    // 1. Aktualizujeme GeoJSON zdroj prošlých segmentů v MapLibre
+    try {
+      const walkedSrc = typeof map.getSource === 'function' ? map.getSource('walked-segments-source') : null;
+      if (walkedSrc && typeof walkedSrc.setData === 'function') {
+        walkedSrc.setData(buildWalkSegmentsGeoJson(progress.walkSegments));
+      }
+    } catch {}
+
     if (appSettings.footprints === false) {
-      trailLayer.clearLayers();
+      clearFootprintMarkers();
       lastTrailRenderKey = 'disabled';
       if ($('trail-info')) {
         $('trail-info').textContent = 'Stopy pohorek jsou vypnuté v nastavení.';
       }
       return;
     }
-    const zoom = Math.round((map.getZoom() || 16.5) * 2) / 2;
+    const zoom = Math.round(((typeof map.getZoom === 'function' ? map.getZoom() : 15.5) || 15.5) * 2) / 2;
     const footprints = computeFootprintPlacements(progress.walkSegments, zoom);
     const totalCount = footprints.length;
 
@@ -1775,23 +1985,25 @@ export function mountWalk(root, routes, config, actions = {}) {
     if (trailKey === lastTrailRenderKey) return;
     lastTrailRenderKey = trailKey;
 
-    trailLayer.clearLayers();
+    clearFootprintMarkers();
+    if (!maplibregl) return;
+
     for (let i = 0; i < totalCount; i++) {
       const fp = footprints[i];
       const ageRatio = totalCount <= 1 ? 1 : i / (totalCount - 1);
       const fadeOpacity = Number.isFinite(fp.opacity)
         ? fp.opacity
         : Number((0.22 + 0.63 * ageRatio).toFixed(2));
-      L.marker([fp.lat, fp.lng], {
-        pane: 'markerPane',
-        interactive: false,
-        icon: L.divIcon({
-          className: 'footprint-marker-anchor',
-          html: renderBootFootprintSvg(fp.side, fp.bearingDeg, fadeOpacity),
-          iconSize: [18, 18],
-          iconAnchor: [9, 9],
-        }),
-      }).addTo(trailLayer);
+      const el = document.createElement('div');
+      el.className = 'footprint-marker-anchor';
+      el.style.width = '18px';
+      el.style.height = '18px';
+      el.style.pointerEvents = 'none';
+      el.innerHTML = renderBootFootprintSvg(fp.side, fp.bearingDeg, fadeOpacity);
+      const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
+        .setLngLat([fp.lng, fp.lat])
+        .addTo(map);
+      footprintMarkers.push(marker);
     }
   }
 
@@ -1849,12 +2061,19 @@ export function mountWalk(root, routes, config, actions = {}) {
     return isStopVisitedInSession(p);
   }
 
+  function clearHikingBlazeMarkers() {
+    for (const m of hikingBlazeMarkers) {
+      try { m.remove(); } catch {}
+    }
+    hikingBlazeMarkers = [];
+  }
+
   /**
-   * Vykreslí vrstvu značených turistických tras z OpenStreetMap (Bod 24).
+   * Vykreslí vrstvu značených turistických tras z OpenStreetMap jako GeoJSON v MapLibre GL JS (Bod 24).
    * Zachovává barvu značení ze zdroje (osmc:symbol) a vizuálně ji odlišuje od plánované výpravy.
    */
   async function loadAndRenderHikingTrails() {
-    if (!map || !hikingTrailsLayer) return;
+    if (!map) return;
     try {
       loadedHikingTrails = await getHikingTrails({
         overpassUrl: config?.overpassUrl,
@@ -1869,66 +2088,52 @@ export function mountWalk(root, routes, config, actions = {}) {
   }
 
   function renderHikingTrailsOnMap() {
-    if (!map || !hikingTrailsLayer) return;
-    hikingTrailsLayer.clearLayers();
-    if (!showHikingTrails) return;
-    if (waymarkedHikingLayer && map.hasLayer(waymarkedHikingLayer)) {
-      return;
-    }
+    if (!map) return;
+    clearHikingBlazeMarkers();
+
+    try {
+      const src = typeof map.getSource === 'function' ? map.getSource('hiking-trails-source') : null;
+      if (src && typeof src.setData === 'function') {
+        src.setData(buildHikingTrailsGeoJson(showHikingTrails ? loadedHikingTrails : []));
+      }
+    } catch {}
+
+    if (!showHikingTrails || !maplibregl) return;
 
     for (const trail of loadedHikingTrails) {
       if (!Array.isArray(trail.coordinates) || trail.coordinates.length < 2) continue;
       const parsed = trail.parsedSymbol || parseOsmcSymbol(trail.osmcSymbol, trail.colour);
       const badgeSvg = renderOsmcBadgeSvg(trail.osmcSymbol, trail.colour, { size: 16 });
-
-      L.polyline(trail.coordinates, {
-        pane: 'hiking-trails-pane',
-        color: '#ffffff',
-        weight: 6,
-        opacity: 0.85,
-        lineCap: 'round',
-        lineJoin: 'round',
-        interactive: false,
-      }).addTo(hikingTrailsLayer);
-
-      const line = L.polyline(trail.coordinates, {
-        pane: 'hiking-trails-pane',
-        color: parsed.hex,
-        weight: 3.2,
-        opacity: 0.92,
-        lineCap: 'round',
-        lineJoin: 'round',
-      }).addTo(hikingTrailsLayer);
-
-      const popupHtml = `
-        <div class="hiking-trail-popup">
-          <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
-            ${badgeSvg}
-            <strong>${e(trail.name)}</strong>
-          </div>
-          <div style="font-size:11px;color:#3d4a3a">
-            <span>Značení v datech: <strong>${e(parsed.labelCz)}</strong> (${e(trail.osmcSymbol || 'neuvedeno')})</span><br>
-            <span>Správce / síť: ${e(trail.operator || 'KČT')} · ${e(trail.distance || '')}</span><br>
-            <small>Zdroj: ${e(trail.sourceLabel || '© přispěvatelé OpenStreetMap (ODbL)')}</small>
-          </div>
-        </div>
-      `;
-      line.bindPopup(popupHtml);
-
       const midIdx = Math.floor(trail.coordinates.length / 2);
       const midPt = trail.coordinates[midIdx];
-      if (midPt) {
-        L.marker(midPt, {
-          pane: 'hiking-trails-pane',
-          icon: L.divIcon({
-            className: 'czekpoint-trail-blaze-anchor',
-            html: `<span class="czekpoint-trail-blaze" title="${e(trail.name)} (${e(parsed.labelCz)})">${badgeSvg}</span>`,
-            iconSize: [22, 22],
-            iconAnchor: [11, 11],
-          }),
-        })
-          .bindPopup(popupHtml)
-          .addTo(hikingTrailsLayer);
+      if (midPt && Number.isFinite(Number(midPt[0])) && Number.isFinite(Number(midPt[1]))) {
+        const el = document.createElement('div');
+        el.className = 'czekpoint-trail-blaze-anchor';
+        el.style.width = '22px';
+        el.style.height = '22px';
+        el.innerHTML = `<span class="czekpoint-trail-blaze" title="${e(trail.name)} (${e(parsed.labelCz)})">${badgeSvg}</span>`;
+
+        const popupHtml = `
+          <div class="hiking-trail-popup">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+              ${badgeSvg}
+              <strong>${e(trail.name)}</strong>
+            </div>
+            <div style="font-size:11px;color:#3d4a3a">
+              <span>Značení v datech: <strong>${e(parsed.labelCz)}</strong> (${e(trail.osmcSymbol || 'neuvedeno')})</span><br>
+              <span>Správce / síť: ${e(trail.operator || 'KČT')} · ${e(trail.distance || '')}</span><br>
+              <small>Zdroj: ${e(trail.sourceLabel || '© přispěvatelé OpenStreetMap (ODbL)')}</small>
+            </div>
+          </div>
+        `;
+
+        const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
+          .setLngLat([Number(midPt[1]), Number(midPt[0])]);
+        if (typeof maplibregl.Popup === 'function') {
+          marker.setPopup(new maplibregl.Popup({ offset: 12 }).setHTML(popupHtml));
+        }
+        marker.addTo(map);
+        hikingBlazeMarkers.push(marker);
       }
     }
   }
@@ -2538,12 +2743,16 @@ export function mountWalk(root, routes, config, actions = {}) {
    * Směr ukazuje zlatá orbitální šipka (.avatar-direction-pointer) kolem Avatara.
    */
   function updatePlayerLead(pos) {
-    if (playerLeadLayer) {
-      playerLeadLayer.clearLayers();
-    }
     if (!pos || !Number.isFinite(pos.lat) || !Number.isFinite(pos.lng)) return;
     renderCompass(pos);
     updatePlayerAvatarIcon(Boolean(active || demo));
+  }
+
+  function clearRouteOverlayMarkers() {
+    for (const m of routeOverlayMarkers) {
+      try { m.remove(); } catch {}
+    }
+    routeOverlayMarkers = [];
   }
 
   function getRouteOriginPoint() {
@@ -2577,9 +2786,8 @@ export function mountWalk(root, routes, config, actions = {}) {
   }
 
   /**
-   * Vykreslí společnou naplánovanou pěší trasu na mapě a předá ji simulátoru i výpočtu zbývající vzdálenosti (Body 5, 6, 26, 27, 28 & DÁVKA 2 Bod 3.1–3.2).
-   * - Start okruhu (`lockedExpeditionOrigin`) je při zahájení zamknutý a pohyb hráče jej nikdy nepřepisuje.
-   * - Postup po trase se počítá projekcí na existující geometrii (`lastRoutedGeometry`); nový dotaz na router se volá jen při změně zastávek nebo potvrzeném vybočení z trasy (`offRoute === true`).
+   * Vykreslí společnou naplánovanou pěší trasu na mapě MapLibre GL JS jako GeoJSON vrstvu
+   * a předá ji simulátoru i výpočtu zbývající vzdálenosti.
    */
   async function renderPlannedRouteOnMap(force = false, opts = {}) {
     if (!map) return;
@@ -2590,8 +2798,6 @@ export function mountWalk(root, routes, config, actions = {}) {
     const isOffRouteRecalc = Boolean(opts?.offRoute && (active || demo || simSandboxActive) && lastFix && Number.isFinite(lastFix.lat));
     const isLoop = plannedRoute.routeType === 'loop' && plannedPlaces.length >= 1;
 
-    // DÁVKA 2 (Bod 3.2): Zamknutý start okruhu a nepřepočítávání na každém kroku!
-    // Waypointy ukotvíme k zamknutému startu `currentOrigin` (nebo k `lastFix` pouze při potvrzeném vybočení z trasy > 45 m).
     const allWaypoints = isOffRouteRecalc
       ? (unvisitedPlaces.length > 0
           ? [lastFix, ...unvisitedPlaces, ...(isLoop ? [currentOrigin] : [])]
@@ -2612,8 +2818,6 @@ export function mountWalk(root, routes, config, actions = {}) {
       try {
         geomResult = await getCachedWalkingGeometry(allWaypoints, geomKey);
         if (token !== plannedRouteRenderToken || disposed) return;
-        // DÁVKA 2 (Bod 3.1): Při výpadku routeru zachováme isFallback: true (fallback_direct) —
-        // nepřepisujeme výpadek sítě fiktivním lokálním routerem!
         if (!geomResult || !geomResult.coordinates || geomResult.coordinates.length < 2) {
           geomResult = buildLocalRoutedGeometry(allWaypoints, { isFallback: true });
         }
@@ -2647,79 +2851,68 @@ export function mountWalk(root, routes, config, actions = {}) {
       renderPhase1AndPhase4Ui(lastFix || plannedRoute.origin);
     }
 
-    plannedRouteLayer.clearLayers();
+    clearRouteOverlayMarkers();
     plannedRouteCoords = coords;
 
-    // 1. Kružnice okruhu hledání
+    // 1. Kružnice okruhu hledání jako GeoJSON polygon v MapLibre
     const radiusM = (plannedRoute.radiusKm || 10) * 1000;
-    radiusCircle = L.circle([currentOrigin.lat, currentOrigin.lng], {
-      radius: radiusM,
-      color: '#3c6e47',
-      weight: 1.2,
-      dashArray: '5, 6',
-      fillColor: '#8da949',
-      fillOpacity: 0.03,
-      interactive: false,
-    }).addTo(plannedRouteLayer);
+    radiusCircle = { center: currentOrigin, radiusM };
+    try {
+      const radSrc = typeof map.getSource === 'function' ? map.getSource('radius-circle-source') : null;
+      if (radSrc && typeof radSrc.setData === 'function') {
+        radSrc.setData(createGeoJsonCirclePolygon(currentOrigin, radiusM));
+      }
+    } catch {}
+
+    // 2. Plánovaná trasa výpravy jako GeoJSON v MapLibre
+    try {
+      const routeSrc = typeof map.getSource === 'function' ? map.getSource('planned-route-source') : null;
+      if (routeSrc && typeof routeSrc.setData === 'function') {
+        const showLine = appSettings.gameMode !== 'explorer' && Array.isArray(coords) && coords.length >= 2;
+        routeSrc.setData(buildPlannedRouteGeoJson(showLine ? coords : [], isFallbackGeom));
+      }
+    } catch {}
 
     updatePlayerLead(lastFix);
-    if (!coords) return;
+    if (!coords || !maplibregl) return;
 
-    // 2. Plánovaná trasa výpravy (DÁVKA 1 Bod 3.3 & DÁVKA 2 Bod 3.1: čárkovaná ⚠️ Orientační vzdušná spojnice při isFallbackGeom):
     if (appSettings.gameMode !== 'explorer') {
-      L.polyline(coords, {
-        pane: 'quest-route-pane',
-        color: '#2e1065',
-        weight: 8,
-        opacity: 0.9,
-        lineCap: 'round',
-        lineJoin: 'round',
-      }).addTo(plannedRouteLayer);
-
-      L.polyline(coords, {
-        pane: 'quest-route-pane',
-        color: '#9333ea',
-        weight: 4.5,
-        dashArray: isFallbackGeom ? '6, 9' : null,
-        opacity: 0.98,
-        lineCap: 'round',
-        lineJoin: 'round',
-      }).addTo(plannedRouteLayer);
-
-      // ZADÁNÍ #11 (Bod 4.1): Zvýraznění detekovaných rohů ulic a odboček jako navigačních bodů podél trasy
+      // 3. Zvýraznění detekovaných rohů ulic a odboček podél trasy (anchor: 'center')
       if (lastRoutedGeometry && Array.isArray(lastRoutedGeometry.steps)) {
         for (const step of lastRoutedGeometry.steps) {
           if (step.maneuverType === 'turn' && Number.isFinite(step.lat) && Number.isFinite(step.lng)) {
-            L.marker([step.lat, step.lng], {
-              pane: 'quest-route-pane',
-              interactive: false,
-              icon: L.divIcon({
-                className: 'route-corner-dot-marker',
-                html: `<span class="route-corner-dot" title="${e(step.actionLabel || 'Roh')}"></span>`,
-                iconSize: [8, 8],
-                iconAnchor: [4, 4],
-              }),
-            }).addTo(plannedRouteLayer);
+            const dotEl = document.createElement('div');
+            dotEl.className = 'route-corner-dot-marker';
+            dotEl.style.width = '8px';
+            dotEl.style.height = '8px';
+            dotEl.style.pointerEvents = 'none';
+            dotEl.innerHTML = `<span class="route-corner-dot" title="${e(step.actionLabel || 'Roh')}"></span>`;
+            const m = new maplibregl.Marker({ element: dotEl, anchor: 'center' })
+              .setLngLat([step.lng, step.lat])
+              .addTo(map);
+            routeOverlayMarkers.push(m);
           }
         }
       }
 
-      // 4. Směrové šipky podél plánované trasy
+      // 4. Směrové šipky podél plánované trasy (anchor: 'center')
       for (let i = 0; i < coords.length - 1; i += Math.max(1, Math.floor(coords.length / 8))) {
         const p1 = coords[i];
         const p2 = coords[i + 1];
         if (!p1 || !p2) continue;
         const angle = (Math.atan2(p2[1] - p1[1], p2[0] - p1[0]) * 180 / Math.PI + 360) % 360;
-        L.marker([(p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2], {
-          pane: 'quest-route-pane',
-          interactive: false,
-          icon: L.divIcon({
-            className: 'route-dir-marker',
-            html: `<span class="route-dir-arrow" style="transform:rotate(${angle}deg)">➤</span>`,
-            iconSize: [16, 16],
-            iconAnchor: [8, 8],
-          }),
-        }).addTo(plannedRouteLayer);
+        const midLat = (p1[0] + p2[0]) / 2;
+        const midLng = (p1[1] + p2[1]) / 2;
+        const arrEl = document.createElement('div');
+        arrEl.className = 'route-dir-marker';
+        arrEl.style.width = '16px';
+        arrEl.style.height = '16px';
+        arrEl.style.pointerEvents = 'none';
+        arrEl.innerHTML = `<span class="route-dir-arrow" style="transform:rotate(${angle}deg)">➤</span>`;
+        const m = new maplibregl.Marker({ element: arrEl, anchor: 'center' })
+          .setLngLat([midLng, midLat])
+          .addTo(map);
+        routeOverlayMarkers.push(m);
       }
     }
   }
@@ -2946,16 +3139,9 @@ export function mountWalk(root, routes, config, actions = {}) {
     const plannedPlaces = getPlannedPlaces();
     const plannedPlaceIds = new Set(plannedRoute.selectedPlaceIds || []);
 
-    // 1. Zjistíme viditelné hranice mapy (s mírným paddingem, aby značky nevyskakovaly těsně u okraje)
-    const mapBounds = map ? map.getBounds().pad(0.35) : null;
-
-    // 2. Mapové značky (placesLayer):
-    //    Zobrazíme všechny body, které:
-    //    a) leží ve viditelném výřezu mapy, NEBO
-    //    b) jsou v naplánované trase (aby byly vždy vidět se svým číslem zastávky), NEBO
-    //    c) jsou do 8 km od uživatele (pokud je poloha známá).
-    //    DŮLEŽITÉ: Mapové značky se NIKDY nefiltrují natvrdo rádiusem od startu,
-    //    aby uživatel mohl posouvat mapu po celé ČR a vybírat si vzdálenější body!
+    // 1. Mapové značky:
+    //    Zobrazíme všechny body, které leží ve viditelném výřezu mapy, jsou v naplánované trase,
+    //    nebo jsou do 8 km od uživatele (pokud je poloha známá).
     const mapPlaces = all.filter(p => {
       if (plannedPlaceIds.has(p.id)) return true;
       if (
@@ -2965,14 +3151,13 @@ export function mountWalk(root, routes, config, actions = {}) {
       ) {
         return false;
       }
-      if (mapBounds && mapBounds.contains([p.lat, p.lng])) return true;
+      if (map && isPointInExpandedMapBounds(p.lat, p.lng, 0.35)) return true;
       if (normalized && (haversineMeters(normalized, p) ?? Infinity) < 8000) return true;
       return false;
     });
 
-    // 3. Seznam míst pod mapou (#walk-places):
-    //    ZADÁNÍ #10 (Bod 4.1): Strikně seřazený vzestupně podle vzdálenosti (distanceM od nejbližšího po nejvzdálenější)
-    //    vůči aktuálnímu bodu startu / pozici hráče, s fotkou/ilustrací (88x72 px) a velkou vzdáleností.
+    // 2. Seznam míst pod mapou (#walk-places):
+    //    Striktně seřazený vzestupně podle vzdálenosti (distanceM od nejbližšího po nejvzdálenější)
     const refOrigin = normalized || plannedRoute.origin || viewCenter;
     const sidebarList = all
       .map(p => {
@@ -2993,7 +3178,7 @@ export function mountWalk(root, routes, config, actions = {}) {
         ) {
           return false;
         }
-        if (mapBounds && mapBounds.contains([p.lat, p.lng])) return true;
+        if (map && isPointInExpandedMapBounds(p.lat, p.lng, 0.35)) return true;
         if (p.distanceM <= 30000) return true;
         return false;
       })
@@ -3057,7 +3242,7 @@ export function mountWalk(root, routes, config, actions = {}) {
       }).join('') || '<p class="small-note">V této části mapy zatím nejsou žádná místa. Posuň mapu nebo chvíli počkej na automatické načtení.</p>';
     }
 
-    if (!map || !placesLayer) return;
+    if (!map || !maplibregl) return;
 
     const nextUnvisitedStop = plannedPlaces.find(p => !isStopVisited(p));
     const activeMapPlaceIds = new Set();
@@ -3085,12 +3270,12 @@ export function mountWalk(root, routes, config, actions = {}) {
     }
     for (const [existingId, entry] of placeMarkersById.entries()) {
       if (!activeMapPlaceIds.has(existingId)) {
-        placesLayer.removeLayer(entry.marker);
+        try { entry.marker.remove(); } catch {}
         placeMarkersById.delete(existingId);
       }
     }
 
-    // Vykreslíme vlastní soukromé vzpomínky uživatele na mapě (zřetelně odlišené od GPS památek)
+    // Vykreslíme vlastní soukromé vzpomínky uživatele na mapě (anchor: 'center')
     for (const mItem of memoryMapItems) {
       const m = mItem.memoryObj;
       const symIcon = m.symbolIcon || '✨';
@@ -3103,30 +3288,29 @@ export function mountWalk(root, routes, config, actions = {}) {
       const existing = placeMarkersById.get(mItem.id);
       if (existing) {
         existing.place = mItem;
-        if (existing.stateSig !== stateSig) {
-          existing.marker.setIcon(
-            L.divIcon({
-              className: 'czekpoint-marker-anchor user-memory-anchor',
-              html: iconHtml,
-              iconSize: [38, 38],
-              iconAnchor: [19, 19],
-            })
-          );
+        if (existing.lat !== mItem.lat || existing.lng !== mItem.lng) {
+          existing.marker.setLngLat([mItem.lng, mItem.lat]);
+          existing.lat = mItem.lat;
+          existing.lng = mItem.lng;
+        }
+        if (existing.stateSig !== stateSig && existing.element) {
+          existing.element.innerHTML = iconHtml;
           existing.stateSig = stateSig;
           existing.iconStateKey = stateSig;
         }
       } else {
-        const marker = L.marker([mItem.lat, mItem.lng], {
-          icon: L.divIcon({
-            className: 'czekpoint-marker-anchor user-memory-anchor',
-            html: iconHtml,
-            iconSize: [38, 38],
-            iconAnchor: [19, 19],
-          }),
-          title: `✨ Vlastnoruční vzpomínka: ${m.symbolTitle}`,
-        }).addTo(placesLayer);
+        const el = document.createElement('div');
+        el.className = 'czekpoint-marker-anchor user-memory-anchor';
+        el.style.width = '38px';
+        el.style.height = '38px';
+        el.title = `✨ Vlastnoruční vzpomínka: ${m.symbolTitle}`;
+        el.innerHTML = iconHtml;
+        const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
+          .setLngLat([mItem.lng, mItem.lat])
+          .addTo(map);
         const entry = {
           marker,
+          element: el,
           place: mItem,
           lat: mItem.lat,
           lng: mItem.lng,
@@ -3134,13 +3318,14 @@ export function mountWalk(root, routes, config, actions = {}) {
           iconStateKey: stateSig,
         };
         placeMarkersById.set(mItem.id, entry);
-        marker.on('click', () => {
+        el.addEventListener('click', (ev) => {
+          ev.stopPropagation();
           openPlaceDetail(entry.place || mItem);
         });
       }
     }
 
-    // Aktualizujeme nebo vytvoříme markery bez blikání (in-place diffing)
+    // Aktualizujeme nebo vytvoříme markery bez blikání (in-place diffing, anchor: 'center')
     for (const p of mapPlaces) {
       const visited = isStopVisitedInSession(p);
       const isRouteStart = p.pointKind === 'route-start';
@@ -3195,37 +3380,30 @@ export function mountWalk(root, routes, config, actions = {}) {
       if (existing) {
         existing.place = p;
         if (existing.lat !== p.lat || existing.lng !== p.lng) {
-          existing.marker.setLatLng([p.lat, p.lng]);
+          existing.marker.setLngLat([p.lng, p.lat]);
           existing.lat = p.lat;
           existing.lng = p.lng;
         }
-        if (existing.stateSig !== stateSig) {
-          existing.marker.setIcon(
-            L.divIcon({
-              className: 'czekpoint-marker-anchor',
-              html: iconHtml,
-              iconSize: [42, 42],
-              iconAnchor: [21, 21],
-              popupAnchor: [0, -14],
-            })
-          );
+        if (existing.stateSig !== stateSig && existing.element) {
+          existing.element.innerHTML = iconHtml;
           existing.stateSig = stateSig;
           existing.iconStateKey = stateSig;
         }
       } else {
-        const marker = L.marker([p.lat, p.lng], {
-          icon: L.divIcon({
-            className: 'czekpoint-marker-anchor',
-            html: iconHtml,
-            iconSize: [42, 42],
-            iconAnchor: [21, 21],
-            popupAnchor: [0, -14],
-          }),
-          title: p.title,
-        }).addTo(placesLayer);
+        const el = document.createElement('div');
+        el.className = 'czekpoint-marker-anchor';
+        el.style.width = '42px';
+        el.style.height = '42px';
+        el.title = p.title || '';
+        el.innerHTML = iconHtml;
+
+        const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
+          .setLngLat([p.lng, p.lat])
+          .addTo(map);
 
         const entry = {
           marker,
+          element: el,
           place: p,
           lat: p.lat,
           lng: p.lng,
@@ -3234,7 +3412,8 @@ export function mountWalk(root, routes, config, actions = {}) {
         };
         placeMarkersById.set(p.id, entry);
 
-        marker.on('click', () => {
+        el.addEventListener('click', (ev) => {
+          ev.stopPropagation();
           const currentPlace = entry.place || p;
           if (pickingCustomEndOnMap) {
             pickingCustomEndOnMap = false;
@@ -3592,7 +3771,7 @@ export function mountWalk(root, routes, config, actions = {}) {
       if (map) {
         follow = false;
         updateFollowUi();
-        map.setView([nextStop.lat, nextStop.lng], Math.max(map.getZoom(), 16));
+        setMapView(nextStop.lat, nextStop.lng, Math.max(map.getZoom?.() || 16, 16), true);
       }
     });
   }
@@ -5220,77 +5399,436 @@ export function mountWalk(root, routes, config, actions = {}) {
     }
   });
 
-  // Inicializace mapy Leaflet s bližším výchozím přiblížením (16.5) a jedním párem tlačítek ➕/➖ v pravém sloupci
-  if (L) {
-    const center = progress.cells.length ? cellCenter(progress.cells.at(-1)) : { lat: 49.6014, lng: 13.8644 };
-    map = L.map($('walk-map'), { zoomControl: false, minZoom: 3, maxZoom: 19, maxBounds: [[-85, -180], [85, 180]], maxBoundsViscosity: 1 }).setView([center.lat, center.lng], 16.5);
-    tileLayer = L.tileLayer(config.mapTileUrl, {
-      maxZoom: 19,
-      maxNativeZoom: 19,
-      noWrap: true,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> (ODbL)',
-    }).addTo(map);
-    tileLayer.on('tileerror', () => {
-      if ($('tile-status')) $('tile-status').textContent = 'Mapový podklad se nenačetl. Průzkum funguje dál.';
-    });
-
-    const pane = map.createPane('walk-fog');
-    pane.style.zIndex = '450';
-    pane.style.pointerEvents = 'none';
-    fog = L.DomUtil.create('canvas', 'walk-fog', pane);
-    fog.setAttribute('aria-hidden', 'true');
-
-    const hikingPane = map.createPane('hiking-trails-pane');
-    hikingPane.style.zIndex = '430';
-    hikingPane.style.pointerEvents = 'none';
-
-    const routePane = map.createPane('quest-route-pane');
-    routePane.style.zIndex = '520';
-    routePane.style.pointerEvents = 'none';
-
-    // ZADÁNÍ #08 (Bod 4): Oficiální vrstva turistických tras KČT (Waymarked Trails Hiking)
-    waymarkedHikingLayer = L.tileLayer('https://tile.waymarkedtrails.org/hiking/{z}/{x}/{y}.png', {
-      maxZoom: 18,
-      opacity: 0.92,
-      pane: 'hiking-trails-pane',
-      attribution: '&copy; <a href="https://hiking.waymarkedtrails.org">Waymarked Trails</a>',
-    });
-    let waymarkedFallbackTriggered = false;
-    waymarkedHikingLayer.on('tileerror', () => {
-      if (waymarkedFallbackTriggered || !map) return;
-      waymarkedFallbackTriggered = true;
-      if (waymarkedHikingLayer && map.hasLayer(waymarkedHikingLayer)) {
-        map.removeLayer(waymarkedHikingLayer);
+  // Inicializace jediné mapy MapLibre GL JS (verze 4.7.1) — ve výchozím stavu 2D (pitch: 0, bearing: 0)
+  function ensureCustomMapSourcesAndLayers() {
+    if (!map || typeof map.getSource !== 'function') return;
+    try {
+      if (!map.getSource('radius-circle-source')) {
+        map.addSource('radius-circle-source', {
+          type: 'geojson',
+          data: { type: 'FeatureCollection', features: [] },
+        });
       }
-    });
-    if (showHikingTrails) {
-      waymarkedHikingLayer.addTo(map);
+      if (!map.getLayer('radius-circle-fill')) {
+        map.addLayer({
+          id: 'radius-circle-fill',
+          type: 'fill',
+          source: 'radius-circle-source',
+          paint: {
+            'fill-color': '#2f6f4e',
+            'fill-opacity': 0.04,
+          },
+        });
+      }
+      if (!map.getLayer('radius-circle-line')) {
+        map.addLayer({
+          id: 'radius-circle-line',
+          type: 'line',
+          source: 'radius-circle-source',
+          paint: {
+            'line-color': '#2f6f4e',
+            'line-width': 1.5,
+            'line-opacity': 0.35,
+            'line-dasharray': [4, 4],
+          },
+        });
+      }
+
+      if (!map.getSource('hiking-trails-source')) {
+        map.addSource('hiking-trails-source', {
+          type: 'geojson',
+          data: { type: 'FeatureCollection', features: [] },
+        });
+      }
+      if (!map.getLayer('hiking-trails-casing')) {
+        map.addLayer({
+          id: 'hiking-trails-casing',
+          type: 'line',
+          source: 'hiking-trails-source',
+          layout: {
+            'line-cap': 'round',
+            'line-join': 'round',
+          },
+          paint: {
+            'line-color': '#ffffff',
+            'line-width': 7,
+            'line-opacity': 0.85,
+          },
+        });
+      }
+      if (!map.getLayer('hiking-trails-line')) {
+        map.addLayer({
+          id: 'hiking-trails-line',
+          type: 'line',
+          source: 'hiking-trails-source',
+          layout: {
+            'line-cap': 'round',
+            'line-join': 'round',
+          },
+          paint: {
+            'line-color': ['coalesce', ['get', 'hex'], '#d92b2b'],
+            'line-width': 4,
+            'line-opacity': 0.92,
+            'line-dasharray': [2.5, 1.5],
+          },
+        });
+      }
+
+      if (!map.getSource('walked-segments-source')) {
+        map.addSource('walked-segments-source', {
+          type: 'geojson',
+          data: { type: 'FeatureCollection', features: [] },
+        });
+      }
+      if (!map.getLayer('walked-segments-casing')) {
+        map.addLayer({
+          id: 'walked-segments-casing',
+          type: 'line',
+          source: 'walked-segments-source',
+          layout: {
+            'line-cap': 'round',
+            'line-join': 'round',
+          },
+          paint: {
+            'line-color': '#ffffff',
+            'line-width': 7,
+            'line-opacity': 0.65,
+          },
+        });
+      }
+      if (!map.getLayer('walked-segments-line')) {
+        map.addLayer({
+          id: 'walked-segments-line',
+          type: 'line',
+          source: 'walked-segments-source',
+          layout: {
+            'line-cap': 'round',
+            'line-join': 'round',
+          },
+          paint: {
+            'line-color': '#1f6f43',
+            'line-width': 4.5,
+            'line-opacity': 0.92,
+          },
+        });
+      }
+
+      if (!map.getSource('planned-route-source')) {
+        map.addSource('planned-route-source', {
+          type: 'geojson',
+          data: { type: 'FeatureCollection', features: [] },
+        });
+      }
+      if (!map.getLayer('planned-route-casing')) {
+        map.addLayer({
+          id: 'planned-route-casing',
+          type: 'line',
+          source: 'planned-route-source',
+          layout: {
+            'line-cap': 'round',
+            'line-join': 'round',
+          },
+          paint: {
+            'line-color': ['coalesce', ['get', 'casingColor'], '#2e1065'],
+            'line-width': ['coalesce', ['get', 'casingWidth'], 8],
+            'line-opacity': ['coalesce', ['get', 'casingOpacity'], 0.9],
+          },
+        });
+      }
+      if (!map.getLayer('planned-route-line')) {
+        map.addLayer({
+          id: 'planned-route-line',
+          type: 'line',
+          source: 'planned-route-source',
+          filter: ['!=', ['get', 'isFallback'], true],
+          layout: {
+            'line-cap': 'round',
+            'line-join': 'round',
+          },
+          paint: {
+            'line-color': ['coalesce', ['get', 'lineColor'], '#9333ea'],
+            'line-width': ['coalesce', ['get', 'lineWidth'], 4.5],
+            'line-opacity': ['coalesce', ['get', 'lineOpacity'], 0.96],
+          },
+        });
+      }
+      if (!map.getLayer('planned-route-fallback-line')) {
+        map.addLayer({
+          id: 'planned-route-fallback-line',
+          type: 'line',
+          source: 'planned-route-source',
+          filter: ['==', ['get', 'isFallback'], true],
+          layout: {
+            'line-cap': 'round',
+            'line-join': 'round',
+          },
+          paint: {
+            'line-color': ['coalesce', ['get', 'lineColor'], '#9333ea'],
+            'line-width': ['coalesce', ['get', 'lineWidth'], 4],
+            'line-opacity': ['coalesce', ['get', 'lineOpacity'], 0.88],
+            'line-dasharray': [2, 2],
+          },
+        });
+      }
+
+      if (!map.getSource('accuracy-ring-source')) {
+        map.addSource('accuracy-ring-source', {
+          type: 'geojson',
+          data: { type: 'FeatureCollection', features: [] },
+        });
+      }
+      if (!map.getLayer('accuracy-ring-fill')) {
+        map.addLayer({
+          id: 'accuracy-ring-fill',
+          type: 'fill',
+          source: 'accuracy-ring-source',
+          paint: {
+            'fill-color': '#218bea',
+            'fill-opacity': 0.12,
+          },
+        });
+      }
+      if (!map.getLayer('accuracy-ring-line')) {
+        map.addLayer({
+          id: 'accuracy-ring-line',
+          type: 'line',
+          source: 'accuracy-ring-source',
+          paint: {
+            'line-color': '#218bea',
+            'line-width': 1.5,
+            'line-opacity': 0.75,
+          },
+        });
+      }
+    } catch {}
+  }
+
+  function update3DUiState() {
+    const toggleBtn = $('btn-toggle-3d');
+    if (toggleBtn) {
+      toggleBtn.setAttribute('aria-pressed', String(is3DMode));
+      toggleBtn.classList.toggle('active', is3DMode);
+      toggleBtn.innerHTML = is3DMode
+        ? `<span class="btn-3d-icon" aria-hidden="true">🏔️</span><span class="btn-3d-label">3D</span>`
+        : `<span class="btn-3d-icon" aria-hidden="true">🗺️</span><span class="btn-3d-label">2D</span>`;
+      toggleBtn.title = is3DMode
+        ? 'Přepnout zpět na plochou 2D mapu shora'
+        : 'Přepnout na 3D zobrazení terénu a kopců';
+    }
+    const camControls = $('map-3d-camera-controls');
+    if (camControls) {
+      camControls.hidden = !is3DMode;
+    }
+    $('walk-map-wrap')?.classList.toggle('is-3d-mode', is3DMode);
+  }
+
+  function setMap3DMode(enable3D, opts = {}) {
+    if (!map) return;
+    const next3D = Boolean(enable3D);
+    if (next3D) {
+      try {
+        if (!map.getSource('terrain-dem')) {
+          const demUrl = config.maptilerApiKey
+            ? `https://api.maptiler.com/tiles/terrain-rgb-v2/{z}/{x}/{y}.webp?key=${encodeURIComponent(config.maptilerApiKey)}`
+            : (config.terrainDemUrl || 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png');
+          const demEnc = config.maptilerApiKey ? 'mapbox' : (config.terrainEncoding || 'terrarium');
+          map.addSource('terrain-dem', {
+            type: 'raster-dem',
+            tiles: [demUrl],
+            tileSize: 256,
+            maxzoom: 15,
+            encoding: demEnc,
+          });
+        }
+        map.setTerrain({
+          source: 'terrain-dem',
+          exaggeration: Number(config.terrainExaggeration) || 1.25,
+        });
+        is3DMode = true;
+        update3DUiState();
+        map.easeTo({
+          pitch: 55,
+          duration: opts.instant ? 0 : 700,
+        });
+        if (!opts.silent) {
+          status('🏔️ Zapnuto 3D zobrazení terénu (náklon 55°). Tlačítkem 2D/3D se kdykoliv vrátíš k plochému pohledu shora.');
+        }
+      } catch {
+        is3DMode = false;
+        try { map.setTerrain(null); } catch {}
+        try { map.easeTo({ pitch: 0, duration: 300 }); } catch {}
+        update3DUiState();
+        status('3D terén není momentálně dostupný, pokračuji ve 2D zobrazení.');
+      }
+    } else {
+      is3DMode = false;
+      try { map.setTerrain(null); } catch {}
+      update3DUiState();
+      try {
+        map.easeTo({
+          pitch: 0,
+          duration: opts.instant ? 0 : 600,
+        });
+      } catch {}
+      if (!opts.silent) {
+        status(opts.fallbackMessage || '🗺️ Přepnuto na přehledné 2D zobrazení mapy shora.');
+      }
+    }
+    scheduleFog();
+  }
+
+  if (maplibregl) {
+    const center = progress.cells.length ? cellCenter(progress.cells.at(-1)) : { lat: 49.6014, lng: 13.8644 };
+
+    fog = document.createElement('canvas');
+    fog.className = 'walk-fog';
+    fog.setAttribute('aria-hidden', 'true');
+    const mapEl = $('walk-map');
+    if (mapEl && mapEl.parentNode) {
+      mapEl.parentNode.insertBefore(fog, mapEl.nextSibling);
     }
 
-    hikingTrailsLayer.addTo(map);
-    placesLayer.addTo(map);
-    trailLayer.addTo(map);
-    plannedRouteLayer.addTo(map);
-    playerLeadLayer.addTo(map);
+    map = new maplibregl.Map({
+      container: $('walk-map'),
+      style: buildMapLibreStyle(config, { showContourLayer, showHikingTrails }),
+      center: [center.lng, center.lat],
+      zoom: 16.5,
+      pitch: 0,
+      bearing: 0,
+      minZoom: 3,
+      maxZoom: 19,
+      maxPitch: 75,
+      attributionControl: false,
+    });
 
-    accuracyRing = L.circle([center.lat, center.lng], { radius: 0, color: '#218bea', weight: 1.5, fillOpacity: 0.12, pane: 'markerPane' }).addTo(map);
-    // ZADÁNÍ #08 (Bod 2): Živý animovaný Avatar hráče na mapě (L.marker + L.divIcon 54×54 px, zIndexOffset: 1000)
-    player = L.marker([center.lat, center.lng], {
-      pane: 'markerPane',
-      zIndexOffset: 1000,
-      opacity: 0,
-      interactive: false,
-      icon: L.divIcon({
-        className: 'player-avatar-marker-anchor',
-        html: renderPlayerAvatarMarkerHtml({
-          avatarId: stateObj.profile?.avatarId || 'liska',
-          bearingDeg: targetBearing || 0,
-          isWalking: false,
-        }),
-        iconSize: [54, 54],
-        iconAnchor: [27, 27],
-      }),
-    }).addTo(map);
+    let accCenter = { lat: center.lat, lng: center.lng };
+    let accRadiusM = 0;
+    accuracyRing = {
+      setLatLng([lat, lng]) {
+        if (Number.isFinite(Number(lat)) && Number.isFinite(Number(lng))) {
+          accCenter = { lat: Number(lat), lng: Number(lng) };
+          this.sync();
+        }
+      },
+      setRadius(r) {
+        accRadiusM = Math.max(0, Number(r) || 0);
+        this.sync();
+      },
+      sync() {
+        if (!map || typeof map.getSource !== 'function') return;
+        ensureCustomMapSourcesAndLayers();
+        try {
+          const src = map.getSource('accuracy-ring-source');
+          if (!src) return;
+          if (accRadiusM <= 0.5) {
+            src.setData({ type: 'FeatureCollection', features: [] });
+          } else {
+            const feat = createGeoJsonCirclePolygon(accCenter, accRadiusM, 48);
+            src.setData({
+              type: 'FeatureCollection',
+              features: feat ? [feat] : [],
+            });
+          }
+        } catch {}
+      },
+    };
+
+    const playerEl = document.createElement('div');
+    playerEl.className = 'player-avatar-marker-anchor';
+    playerEl.style.width = '54px';
+    playerEl.style.height = '54px';
+    playerEl.style.pointerEvents = 'none';
+    playerEl.style.opacity = '0';
+    playerEl.style.zIndex = '45';
+    playerEl.innerHTML = renderPlayerAvatarMarkerHtml({
+      avatarId: stateObj.profile?.avatarId || 'liska',
+      bearingDeg: targetBearing || 0,
+      isWalking: false,
+    });
+    let playerPos = { lat: center.lat, lng: center.lng };
+    let playerOpacity = 0;
+    const rawPlayerMarker = new maplibregl.Marker({ element: playerEl, anchor: 'center' })
+      .setLngLat([center.lng, center.lat])
+      .addTo(map);
+    player = {
+      marker: rawPlayerMarker,
+      setLatLng([lat, lng]) {
+        if (Number.isFinite(Number(lat)) && Number.isFinite(Number(lng))) {
+          playerPos = { lat: Number(lat), lng: Number(lng) };
+          rawPlayerMarker.setLngLat([playerPos.lng, playerPos.lat]);
+        }
+      },
+      getLatLng() {
+        return { lat: playerPos.lat, lng: playerPos.lng };
+      },
+      getElement() {
+        return playerEl;
+      },
+      setOpacity(val) {
+        playerOpacity = Number(val) || 0;
+        playerEl.style.opacity = String(playerOpacity);
+      },
+      getOpacity() {
+        return playerOpacity;
+      },
+      remove() {
+        try { rawPlayerMarker.remove(); } catch {}
+      },
+    };
+
+    const onStyleOrMapLoad = () => {
+      if (disposed || !map) return;
+      ensureCustomMapSourcesAndLayers();
+      if (is3DMode) {
+        try {
+          map.setTerrain({
+            source: 'terrain-dem',
+            exaggeration: Number(config.terrainExaggeration) || 1.25,
+          });
+        } catch {}
+      }
+      plannedRouteRenderKey = null;
+      renderPlannedRouteOnMap(true);
+      renderHikingTrailsOnMap();
+      renderTrail();
+      renderPlaces({ skipListRebuild: true });
+      accuracyRing.sync();
+      scheduleFog();
+    };
+
+    map.on('style.load', onStyleOrMapLoad);
+    map.on('load', onStyleOrMapLoad);
+    ensureCustomMapSourcesAndLayers();
+
+    let contourFallbackTriggered = false;
+    map.on('error', (ev) => {
+      if (disposed || !map) return;
+      const srcId = ev?.sourceId || ev?.source?.id || '';
+      if (srcId === 'terrain-dem' && is3DMode && !terrainFallbackTriggered) {
+        terrainFallbackTriggered = true;
+        setMap3DMode(false, {
+          fallbackMessage: '3D terén není momentálně dostupný, pokračuji ve 2D zobrazení.',
+        });
+        return;
+      }
+      if (srcId === 'opentopo-raster' && showContourLayer && !contourFallbackTriggered) {
+        contourFallbackTriggered = true;
+        try {
+          if (map.getLayer('opentopo-layer')) {
+            map.setLayoutProperty('opentopo-layer', 'visibility', 'none');
+          }
+        } catch {}
+        status('Podklad vrstevnic (OpenTopoMap) není dostupný — zachován standardní mapový podklad OSM.');
+      } else if (srcId === 'waymarked-hiking') {
+        try {
+          if (map.getLayer('waymarked-hiking-layer')) {
+            map.setLayoutProperty('waymarked-hiking-layer', 'visibility', 'none');
+          }
+        } catch {}
+      } else if (srcId === 'osm-raster') {
+        if ($('tile-status')) $('tile-status').textContent = 'Mapový podklad se nenačetl. Průzkum funguje dál.';
+      }
+    });
 
     function scheduleMapPanAutoFetch() {
       if (!map) return;
@@ -5321,7 +5859,11 @@ export function mountWalk(root, routes, config, actions = {}) {
       }, 700);
     }
 
-    map.on('move zoom viewreset resize', scheduleFog);
+    map.on('move', scheduleFog);
+    map.on('zoom', scheduleFog);
+    map.on('pitch', scheduleFog);
+    map.on('rotate', scheduleFog);
+    map.on('resize', scheduleFog);
     map.on('zoomstart', () => {
       userZoomLocked = true;
       lastUserZoomAt = Date.now();
@@ -5343,12 +5885,15 @@ export function mountWalk(root, routes, config, actions = {}) {
     });
 
     map.on('click', ev => {
+      const clickPt = ev?.lngLat || ev?.latlng;
       if ($('place-detail-sheet') && !$('place-detail-sheet').hidden) {
         closePlaceDetail();
       }
       if ($('map-lupa-search-results') && !$('map-lupa-search-results').hidden) {
         $('map-lupa-search-results').hidden = true;
       }
+      if (!clickPt || !Number.isFinite(clickPt.lat) || !Number.isFinite(clickPt.lng)) return;
+
       if (pickingCustomEndOnMap) {
         pickingCustomEndOnMap = false;
         phase1EndMode = 'custom';
@@ -5356,9 +5901,9 @@ export function mountWalk(root, routes, config, actions = {}) {
         const customEndId = 'custom-end-stop';
         const customEndStop = {
           id: customEndId,
-          title: `Cíl v mapě [${ev.latlng.lat.toFixed(4)}, ${ev.latlng.lng.toFixed(4)}]`,
-          lat: ev.latlng.lat,
-          lng: ev.latlng.lng,
+          title: `Cíl v mapě [${clickPt.lat.toFixed(4)}, ${clickPt.lng.toFixed(4)}]`,
+          lat: clickPt.lat,
+          lng: clickPt.lng,
           kind: 'view',
           category: 'views',
         };
@@ -5384,9 +5929,9 @@ export function mountWalk(root, routes, config, actions = {}) {
         userExplicitlyPickedOrigin = true;
         const customOrigin = {
           id: 'custom-map',
-          label: `Bod v mapě [${ev.latlng.lat.toFixed(3)}, ${ev.latlng.lng.toFixed(3)}]`,
-          lat: ev.latlng.lat,
-          lng: ev.latlng.lng,
+          label: `Bod v mapě [${clickPt.lat.toFixed(3)}, ${clickPt.lng.toFixed(3)}]`,
+          lat: clickPt.lat,
+          lng: clickPt.lng,
           custom: true,
         };
         if (editModalOpen && editDraft) {
@@ -5472,7 +6017,7 @@ export function mountWalk(root, routes, config, actions = {}) {
         <p style="margin:8px 0 0">Zobrazení interaktivní mapy a mapových vrstev není v tuto chvíli dostupné. Plánování zastávek, seznam míst a záznam GPS procházky zůstávají funkční.</p>
       </div>
     `;
-    ['walk-center', 'walk-fog-toggle', 'walk-trails-toggle', 'walk-zen-toggle', 'draft-btn-origin-map', 'walk-fake-gps-toggle'].forEach(btnId => {
+    ['walk-center', 'walk-fog-toggle', 'walk-trails-toggle', 'walk-zen-toggle', 'btn-toggle-3d', 'btn-north-up', 'draft-btn-origin-map', 'walk-fake-gps-toggle'].forEach(btnId => {
       const btn = $(btnId);
       if (btn) {
         btn.disabled = true;
@@ -5480,6 +6025,56 @@ export function mountWalk(root, routes, config, actions = {}) {
       }
     });
   }
+
+  // DÁVKA 1 (v2.0-part1, Bod 2): Přepínač 2D / 3D, Sever nahoře a přístupná 3D tlačítka náklonu/otočení kamery
+  $('btn-toggle-3d')?.addEventListener('click', () => {
+    terrainFallbackTriggered = false;
+    setMap3DMode(!is3DMode);
+    playTick(stateObj.soundEnabled);
+  });
+
+  $('btn-north-up')?.addEventListener('click', () => {
+    if (!map) return;
+    try {
+      map.easeTo({ bearing: 0, duration: 450 });
+      status('⬆️ Mapa srovnána severem nahoru.');
+    } catch {}
+    playTick(stateObj.soundEnabled);
+  });
+
+  $('btn-cam-tilt-up')?.addEventListener('click', () => {
+    if (!map) return;
+    try {
+      const nextPitch = Math.min(70, (map.getPitch?.() || 0) + 12);
+      map.easeTo({ pitch: nextPitch, duration: 300 });
+    } catch {}
+    playTick(stateObj.soundEnabled);
+  });
+
+  $('btn-cam-tilt-down')?.addEventListener('click', () => {
+    if (!map) return;
+    try {
+      const nextPitch = Math.max(0, (map.getPitch?.() || 0) - 12);
+      map.easeTo({ pitch: nextPitch, duration: 300 });
+    } catch {}
+    playTick(stateObj.soundEnabled);
+  });
+
+  $('btn-cam-rotate-left')?.addEventListener('click', () => {
+    if (!map) return;
+    try {
+      map.easeTo({ bearing: (map.getBearing?.() || 0) - 25, duration: 300 });
+    } catch {}
+    playTick(stateObj.soundEnabled);
+  });
+
+  $('btn-cam-rotate-right')?.addEventListener('click', () => {
+    if (!map) return;
+    try {
+      map.easeTo({ bearing: (map.getBearing?.() || 0) + 25, duration: 300 });
+    } catch {}
+    playTick(stateObj.soundEnabled);
+  });
 
   // Ovládání rozbalovacího přehledu turistických údajů a počasí (Body 28 & 29)
   $('btn-toggle-tourist-stats')?.addEventListener('click', () => {
@@ -5836,7 +6431,7 @@ export function mountWalk(root, routes, config, actions = {}) {
 
   const handleViewportChange = () => {
     if (!map || disposed) return;
-    map.invalidateSize();
+    resizeMap();
     if (follow && (lastFix || telemetry.lastKnownPosition)) {
       centerMapOnPlayer(lastFix || telemetry.lastKnownPosition, false);
     }
@@ -5870,12 +6465,12 @@ export function mountWalk(root, routes, config, actions = {}) {
     }
     updateFollowUi();
     if (map) {
-      map.invalidateSize();
+      resizeMap();
       const pos = lastFix || telemetry.lastKnownPosition || getRouteOriginPoint();
       if (pos) centerMapOnPlayer(pos, false);
       setTimeout(() => {
         if (!disposed && map) {
-          map.invalidateSize();
+          resizeMap();
           if (follow && (lastFix || telemetry.lastKnownPosition)) {
             centerMapOnPlayer(lastFix || telemetry.lastKnownPosition, false);
           }
@@ -5883,7 +6478,7 @@ export function mountWalk(root, routes, config, actions = {}) {
       }, 60);
       setTimeout(() => {
         if (!disposed && map) {
-          map.invalidateSize();
+          resizeMap();
           if (follow && (lastFix || telemetry.lastKnownPosition)) {
             centerMapOnPlayer(lastFix || telemetry.lastKnownPosition, false);
           }
@@ -6005,8 +6600,8 @@ export function mountWalk(root, routes, config, actions = {}) {
         follow = false;
         updateFollowUi();
         setTimeout(() => {
-          map.invalidateSize();
-          map.fitBounds(L.latLngBounds(pts), { padding: [40, 40], maxZoom: 16 });
+          resizeMap();
+          fitMapToLatLngPoints(pts, 40, 16);
         }, 80);
       }
     }
@@ -6191,7 +6786,7 @@ export function mountWalk(root, routes, config, actions = {}) {
       if (map) {
         follow = false;
         updateFollowUi();
-        map.setView([matchedPreset.lat, matchedPreset.lng], 13);
+        setMapView(matchedPreset.lat, matchedPreset.lng, 13, true);
       }
       refreshWeatherStrip(matchedPreset);
       applyPhase1QuickSelection(true);
@@ -6216,7 +6811,7 @@ export function mountWalk(root, routes, config, actions = {}) {
       if (map) {
         follow = false;
         updateFollowUi();
-        map.setView([targetOrigin.lat, targetOrigin.lng], 13);
+        setMapView(targetOrigin.lat, targetOrigin.lng, 13, true);
       }
       refreshWeatherStrip(targetOrigin);
       await refreshAutoPlaces(targetOrigin, { autoPlan: true, forceRefresh: true });
@@ -6556,7 +7151,7 @@ export function mountWalk(root, routes, config, actions = {}) {
       if (map) {
         follow = false;
         updateFollowUi();
-        map.setView([item.lat, item.lng], 14);
+        setMapView(item.lat, item.lng, 14, true);
       }
       refreshWeatherStrip(plannedRoute.origin);
       refreshAutoPlaces(plannedRoute.origin, { autoPlan: false, forceRefresh: true });
@@ -6585,7 +7180,7 @@ export function mountWalk(root, routes, config, actions = {}) {
       if (map) {
         follow = false;
         updateFollowUi();
-        map.setView([item.lat, item.lng], Math.max(map.getZoom(), 14));
+        setMapView(item.lat, item.lng, Math.max(map.getZoom?.() || 14, 14), true);
       }
       recalculateRemainingRoute(`+ Místo „${item.title}“ přidáno do trasy.`);
       playStampChord(stateObj.soundEnabled);
@@ -6719,7 +7314,7 @@ export function mountWalk(root, routes, config, actions = {}) {
         if (map) {
           follow = false;
           updateFollowUi();
-          map.setView([place.lat, place.lng], Math.max(map.getZoom(), 15), { animate: true });
+          setMapView(place.lat, place.lng, Math.max(map.getZoom?.() || 15, 15), true);
         }
         renderSelectedPlaceDetail(place);
         playTick(stateObj.soundEnabled);
@@ -6732,7 +7327,7 @@ export function mountWalk(root, routes, config, actions = {}) {
       if (map && orig) {
         follow = false;
         updateFollowUi();
-        map.setView([orig.lat, orig.lng], Math.max(map.getZoom(), 14), { animate: true });
+        setMapView(orig.lat, orig.lng, Math.max(map.getZoom?.() || 14, 14), true);
         playTick(stateObj.soundEnabled);
       }
     }
@@ -6904,12 +7499,12 @@ export function mountWalk(root, routes, config, actions = {}) {
       btn.textContent = showHikingTrails ? '🥾 Turistické značky KČT: ZAP' : '🥾 Turistické značky KČT: VYP';
     }
     if ($('wiz-chk-trails')) $('wiz-chk-trails').checked = showHikingTrails;
-    if (map && waymarkedHikingLayer) {
-      if (showHikingTrails && !map.hasLayer(waymarkedHikingLayer)) {
-        waymarkedHikingLayer.addTo(map);
-      } else if (!showHikingTrails && map.hasLayer(waymarkedHikingLayer)) {
-        map.removeLayer(waymarkedHikingLayer);
-      }
+    if (map) {
+      try {
+        if (map.getLayer('waymarked-hiking-layer')) {
+          map.setLayoutProperty('waymarked-hiking-layer', 'visibility', showHikingTrails ? 'visible' : 'none');
+        }
+      } catch {}
     }
     renderHikingTrailsOnMap();
   }
@@ -6930,31 +7525,12 @@ export function mountWalk(root, routes, config, actions = {}) {
       btn.textContent = showContourLayer ? '⛰️ Vrstevnice: ZAP' : '⛰️ Vrstevnice: VYP';
     }
     if ($('wiz-chk-contours')) $('wiz-chk-contours').checked = showContourLayer;
-    if (!map || !L) return;
-
-    if (showContourLayer) {
-      if (!contourTileLayer) {
-        let fallbackTriggered = false;
-        contourTileLayer = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
-          maxZoom: 17,
-          opacity: 0.85,
-          attribution: 'Map data: &copy; OpenStreetMap, SRTM | Map style: &copy; OpenTopoMap (CC-BY-SA)',
-        });
-        contourTileLayer.on('tileerror', () => {
-          if (fallbackTriggered || !map) return;
-          fallbackTriggered = true;
-          if (contourTileLayer && map.hasLayer(contourTileLayer)) {
-            map.removeLayer(contourTileLayer);
-          }
-          status('Podklad vrstevnic (OpenTopoMap) není dostupný — zachován standardní mapový podklad OSM.');
-        });
+    if (!map) return;
+    try {
+      if (map.getLayer('opentopo-layer')) {
+        map.setLayoutProperty('opentopo-layer', 'visibility', showContourLayer ? 'visible' : 'none');
       }
-      if (!map.hasLayer(contourTileLayer)) {
-        contourTileLayer.addTo(map);
-      }
-    } else if (contourTileLayer && map.hasLayer(contourTileLayer)) {
-      map.removeLayer(contourTileLayer);
-    }
+    } catch {}
   }
 
   $('walk-contours-toggle')?.addEventListener('click', () => {
@@ -7170,7 +7746,7 @@ export function mountWalk(root, routes, config, actions = {}) {
         if (map) {
           follow = false;
           updateFollowUi();
-          map.setView([preset.lat, preset.lng], 14);
+          setMapView(preset.lat, preset.lng, 14, true);
         }
         renderTripWizardUi();
         recalculateRemainingRoute(`Start výpravy přesunut na: ${preset.label}.`);
@@ -7216,7 +7792,7 @@ export function mountWalk(root, routes, config, actions = {}) {
         if (map) {
           follow = false;
           updateFollowUi();
-          map.setView([lat, lng], 14);
+          setMapView(lat, lng, 14, true);
         }
         renderTripWizardUi();
         recalculateRemainingRoute(`Start výpravy přesunut na: ${label}.`);
@@ -7270,7 +7846,7 @@ export function mountWalk(root, routes, config, actions = {}) {
         if (map && found.origin) {
           follow = false;
           updateFollowUi();
-          map.setView([found.origin.lat, found.origin.lng], 14);
+          setMapView(found.origin.lat, found.origin.lng, 14, true);
         }
         renderTripWizardUi();
         recalculateRemainingRoute(`📂 Načten uložený výlet: ${found.title}.`);
@@ -7455,7 +8031,7 @@ export function mountWalk(root, routes, config, actions = {}) {
     if (!p) return;
     follow = false;
     updateFollowUi();
-    map.panTo([p.lat, p.lng]);
+    panMapTo(p.lat, p.lng, true);
     playTick(stateObj.soundEnabled);
   });
 
@@ -7480,7 +8056,7 @@ export function mountWalk(root, routes, config, actions = {}) {
     if (!map) return;
     userZoomLocked = true;
     lastUserZoomAt = Date.now();
-    map.zoomIn(1);
+    map.zoomIn({ duration: 250 });
     playTick(stateObj.soundEnabled);
   });
 
@@ -7488,7 +8064,7 @@ export function mountWalk(root, routes, config, actions = {}) {
     if (!map) return;
     userZoomLocked = true;
     lastUserZoomAt = Date.now();
-    map.zoomOut(1);
+    map.zoomOut({ duration: 250 });
     playTick(stateObj.soundEnabled);
   });
 
@@ -7534,7 +8110,7 @@ export function mountWalk(root, routes, config, actions = {}) {
         setPlayerMarkerVisible(false);
         accuracyRing.setRadius(0);
         const c = progress.cells.length ? cellCenter(progress.cells.at(-1)) : { lat: 49.6014, lng: 13.8644 };
-        map.setView([c.lat, c.lng], map.getZoom());
+        setMapView(c.lat, c.lng, map.getZoom?.() || 15.5, false);
       }
     }
   });
@@ -7722,7 +8298,7 @@ export function mountWalk(root, routes, config, actions = {}) {
         if (map) {
           follow = false;
           updateFollowUi();
-          map.setView([targetPlace.lat, targetPlace.lng], Math.max(map.getZoom(), 14));
+          setMapView(targetPlace.lat, targetPlace.lng, Math.max(map.getZoom?.() || 14, 14), true);
         }
         openPlaceDetail(targetPlace);
         playTick(stateObj.soundEnabled);
@@ -7760,7 +8336,7 @@ export function mountWalk(root, routes, config, actions = {}) {
         }
         follow = false;
         updateFollowUi();
-        map.fitBounds(L.latLngBounds(trail.coordinates), { padding: [36, 36], maxZoom: 15 });
+        fitMapToLatLngPoints(trail.coordinates, 36, 15);
         status(`Zobrazena turistická trasa: ${trail.name}.`);
         playTick(stateObj.soundEnabled);
       }
@@ -7915,7 +8491,7 @@ export function mountWalk(root, routes, config, actions = {}) {
           if (map) {
             follow = false;
             updateFollowUi();
-            map.setView([Number(mem.lat), Number(mem.lng)], Math.max(map.getZoom(), 16));
+            setMapView(Number(mem.lat), Number(mem.lng), Math.max(map.getZoom?.() || 16, 16), true);
           }
           playTick(stateObj.soundEnabled);
         });
@@ -8112,7 +8688,7 @@ export function mountWalk(root, routes, config, actions = {}) {
       restartGpsWatch();
       holdWake();
       if (map) {
-        map.invalidateSize();
+        resizeMap();
         if (lastFix) {
           smoothMovePlayerTo(lastFix.lat, lastFix.lng, 350);
           if (follow) centerMapOnPlayer(lastFix, false);
@@ -8192,9 +8768,17 @@ export function mountWalk(root, routes, config, actions = {}) {
     window.removeEventListener('pagehide', pagehide);
     window.removeEventListener('storage', storageChanged);
     if (frame) cancelAnimationFrame(frame);
-    placesLayer?.clearLayers();
+    clearFootprintMarkers();
+    clearHikingBlazeMarkers();
+    clearRouteOverlayMarkers();
+    for (const entry of placeMarkersById.values()) {
+      try { entry.marker.remove(); } catch {}
+    }
     placeMarkersById.clear();
+    try { player?.remove?.(); } catch {}
+    try { fog?.remove?.(); } catch {}
     fakeGpsSim?.destroy();
-    map?.remove();
+    try { map?.remove?.(); } catch {}
+    map = null;
   };
 }

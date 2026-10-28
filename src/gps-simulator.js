@@ -508,8 +508,9 @@ export class GpsSimulator {
   }
 
   handleMapClick(ev) {
-    if (!this.isOpen || !ev?.latlng) return;
-    const clicked = { lat: ev.latlng.lat, lng: ev.latlng.lng };
+    const pt = ev?.lngLat || ev?.latlng;
+    if (!this.isOpen || !pt || !Number.isFinite(Number(pt.lat)) || !Number.isFinite(Number(pt.lng))) return;
+    const clicked = { lat: Number(pt.lat), lng: Number(pt.lng) };
 
     if (this.clickMode === 'teleport') {
       this.teleportTo(clicked);
@@ -927,28 +928,80 @@ export class GpsSimulator {
   }
 
   drawDottedPolyline(points = []) {
-    if (!this.map || typeof window.L === 'undefined') return;
-    const L = window.L;
-    this.clearDottedLine();
-    const latlngs = points
-      .map(p => (Array.isArray(p) ? p : [p?.lat, p?.lng]))
+    if (!this.map) return;
+    const lngLats = points
+      .map(p => (Array.isArray(p) ? [Number(p[1]), Number(p[0])] : [Number(p?.lng), Number(p?.lat)]))
       .filter(p => Number.isFinite(p[0]) && Number.isFinite(p[1]));
-    if (latlngs.length < 2) return;
-    this.targetPolyline = L.polyline(latlngs, {
-      color: '#f27a24',
-      weight: 3.5,
-      dashArray: '6, 8',
-      opacity: 0.85,
-      lineCap: 'round',
-      lineJoin: 'round',
-    }).addTo(this.map);
+    if (lngLats.length < 2) {
+      this.clearDottedLine();
+      return;
+    }
+
+    const geojson = {
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          properties: {},
+          geometry: {
+            type: 'LineString',
+            coordinates: lngLats,
+          },
+        },
+      ],
+    };
+
+    try {
+      if (typeof this.map.getSource === 'function') {
+        const src = this.map.getSource('sim-dotted-line-source');
+        if (src && typeof src.setData === 'function') {
+          src.setData(geojson);
+          this.targetPolyline = 'sim-dotted-line-source';
+          return;
+        }
+        if (typeof this.map.isStyleLoaded === 'function' && !this.map.isStyleLoaded()) {
+          return;
+        }
+        this.map.addSource('sim-dotted-line-source', {
+          type: 'geojson',
+          data: geojson,
+        });
+        if (!this.map.getLayer('sim-dotted-line-layer')) {
+          this.map.addLayer({
+            id: 'sim-dotted-line-layer',
+            type: 'line',
+            source: 'sim-dotted-line-source',
+            layout: {
+              'line-cap': 'round',
+              'line-join': 'round',
+            },
+            paint: {
+              'line-color': '#f27a24',
+              'line-width': 3.5,
+              'line-opacity': 0.85,
+              'line-dasharray': [2, 2],
+            },
+          });
+        }
+        this.targetPolyline = 'sim-dotted-line-source';
+      }
+    } catch {}
   }
 
   clearDottedLine() {
-    if (this.targetPolyline) {
-      this.targetPolyline.remove();
+    if (!this.map) {
       this.targetPolyline = null;
+      return;
     }
+    try {
+      if (typeof this.map.getSource === 'function') {
+        const src = this.map.getSource('sim-dotted-line-source');
+        if (src && typeof src.setData === 'function') {
+          src.setData({ type: 'FeatureCollection', features: [] });
+        }
+      }
+    } catch {}
+    this.targetPolyline = null;
   }
 
   render() {

@@ -129,7 +129,14 @@ import {
 import {
   renderBootFootprintSvg,
   renderPlayerAvatarMarkerHtml,
+  toLngLat,
+  createGeoJsonCirclePolygon,
+  buildMapLibreStyle,
+  buildPlannedRouteGeoJson,
+  buildWalkSegmentsGeoJson,
+  buildHikingTrailsGeoJson,
 } from './walk.js';
+import { config as appConfig } from '../config.js';
 import {
   SILENT_WAV_BASE64,
   startBackgroundTracking,
@@ -1190,7 +1197,7 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
 
     // 7. Ověření v1.2/v1.3/v1.4/v1.5 prvků v index.html a src/walk.js
     const indexHtml = fs.readFileSync('index.html', 'utf-8');
-    assert.ok(indexHtml.includes('v1.2') || indexHtml.includes('v1.3') || indexHtml.includes('v1.4') || indexHtml.includes('v1.5'), 'index.html musí mít platnou verzi');
+    assert.ok(indexHtml.includes('v1.2') || indexHtml.includes('v1.3') || indexHtml.includes('v1.4') || indexHtml.includes('v1.5') || indexHtml.includes('v2.0'), 'index.html musí mít platnou verzi');
     const walkJs = fs.readFileSync('src/walk.js', 'utf-8');
     assert.ok(walkJs.includes('map-lupa-search-input'), 'Vyhledávací lupa v mapě musí existovat');
     assert.ok(walkJs.includes('btn-pocket-mode'), 'Tlačítko Kapesního režimu musí existovat');
@@ -1793,11 +1800,89 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
     const stylesCss = fs.readFileSync('assets/styles.css', 'utf-8');
     assert.ok(indexHtml.includes('site-header-logo-icon'), 'Logo v záhlaví má třídu .site-header-logo-icon');
     assert.ok(indexHtml.includes('footer-horizon-decor'), 'Zápatí má klidnou siluetu horizontu .footer-horizon-decor');
-    assert.ok(indexHtml.includes('v1.5.0'), 'Zápatí má označení verze Pilot · v1.5.0');
+    assert.ok(indexHtml.includes('v1.5.0') || indexHtml.includes('v2.0'), 'Zápatí má označení verze Pilot · v1.5.0 nebo v2.0');
     assert.ok(stylesCss.includes('stickGentleFloat'), 'CSS obsahuje klidnou prostorovou animaci @keyframes stickGentleFloat');
     assert.ok(stylesCss.includes('headerLogoSway'), 'CSS obsahuje jemné vlnění loga @keyframes headerLogoSway');
     assert.ok(stylesCss.includes('body.nav-active .stick-float-wrap'), 'Dekorativní animace se vypínají při aktivní navigaci (body.nav-active)');
     assert.ok(stylesCss.includes('@media (prefers-reduced-motion: reduce)'), 'Dekorativní animace se striktně vypínají při prefers-reduced-motion');
+  });
+
+  it('DÁVKA 1 (v2.0-part1): MapLibre GL JS, 2D/3D terén DEM, GeoJSON převod [lng, lat], simulátor bez Leafletu a záloha walk-leaflet-backup.js', () => {
+    // 1. Důsledný převod souřadnic [lng, lat] vs. { lat, lng }
+    assert.deepEqual(toLngLat({ lat: 49.6014, lng: 13.8644 }), [13.8644, 49.6014]);
+    assert.deepEqual(toLngLat([49.6014, 13.8644]), [13.8644, 49.6014]);
+    assert.equal(toLngLat(null), null);
+    assert.equal(toLngLat({ lat: NaN, lng: 13.8644 }), null);
+
+    // 2. GeoJSON kružnice okruhu a přesnosti GPS (uzavřený polygon v metrech)
+    const circle = createGeoJsonCirclePolygon({ lat: 49.6014, lng: 13.8644 }, 150, 32);
+    assert.equal(circle.type, 'FeatureCollection');
+    assert.equal(circle.features.length, 1);
+    const ring = circle.features[0].geometry.coordinates[0];
+    assert.equal(ring.length, 33, '32 kroků + 1 uzavírací bod = 33 bodů');
+    assert.deepEqual(ring[0], ring[ring.length - 1], 'První a poslední bod polygonu kružnice se musí přesně shodovat');
+    assert.ok(ring[0][0] > 13.86 && ring[0][1] > 49.60, 'Kružnice má platné souřadnice [lng, lat]');
+
+    // 3. MapLibre GL styl v8 s rastrovými vrstvami a raster-dem terénem
+    const style2d = buildMapLibreStyle(appConfig, { showContourLayer: false, showHikingTrails: true });
+    assert.equal(style2d.version, 8);
+    assert.ok(style2d.sources['osm-raster'], 'Zdroj OSM musí existovat');
+    assert.ok(style2d.sources['waymarked-hiking'], 'Zdroj Waymarked Trails musí existovat');
+    assert.ok(style2d.sources['terrain-dem'], 'Výškový zdroj DEM pro 3D terén musí existovat ve stylu');
+    assert.equal(style2d.sources['terrain-dem'].type, 'raster-dem');
+    assert.equal(style2d.sources['terrain-dem'].encoding, 'terrarium');
+    assert.ok(style2d.layers.some((l: any) => l.id === 'osm-raster-layer'));
+
+    // 4. GeoJSON vrstvy pro plánovanou trasu (purpurová #9333ea s lemem #2e1065) a segmenty chůze
+    const routeCoords = [
+      { lat: 49.6014, lng: 13.8644 },
+      { lat: 49.6025, lng: 13.8655 },
+      { lat: 49.6040, lng: 13.8670 },
+    ];
+    const routeGeoJson = buildPlannedRouteGeoJson(routeCoords as any, false);
+    assert.equal(routeGeoJson.type, 'FeatureCollection');
+    assert.equal(routeGeoJson.features.length, 1);
+    assert.equal(routeGeoJson.features[0].geometry.type, 'LineString');
+    assert.deepEqual(routeGeoJson.features[0].geometry.coordinates[0], [13.8644, 49.6014], 'Pořadí v GeoJSON musí být striktně [lng, lat]');
+    assert.equal(routeGeoJson.features[0].properties.lineColor, '#9333ea');
+    assert.equal(routeGeoJson.features[0].properties.casingColor, '#2e1065');
+
+    const walkSegments = [
+      [{ lat: 49.6014, lng: 13.8644 }, { lat: 49.6018, lng: 13.8648 }],
+      [{ lat: 49.6022, lng: 13.8652 }, { lat: 49.6026, lng: 13.8658 }],
+    ];
+    const walkedGeoJson = buildWalkSegmentsGeoJson(walkSegments as any);
+    assert.equal(walkedGeoJson.features.length, 2);
+    assert.deepEqual(walkedGeoJson.features[0].geometry.coordinates[0], [13.8644, 49.6014]);
+
+    const trailsGeoJson = buildHikingTrailsGeoJson(PILOT_HIKING_TRAILS as any);
+    assert.ok(trailsGeoJson.features.length >= 1);
+    assert.equal(trailsGeoJson.features[0].geometry.type, 'LineString');
+
+    // 5. Ověření souborů a zálohy v repozitáři
+    assert.ok(fs.existsSync('src/walk-leaflet-backup.js'), 'Záložní kopie src/walk-leaflet-backup.js musí existovat');
+    assert.ok(fs.existsSync('assets/vendor/maplibre-gl/maplibre-gl.js'), 'Lokální balíček maplibre-gl.js musí existovat');
+    assert.ok(fs.existsSync('assets/vendor/maplibre-gl/maplibre-gl.css'), 'Lokální styl maplibre-gl.css musí existovat');
+
+    const indexHtml = fs.readFileSync('index.html', 'utf-8');
+    assert.ok(indexHtml.includes('assets/vendor/maplibre-gl/maplibre-gl.js'), 'index.html načítá maplibre-gl.js');
+    assert.ok(indexHtml.includes('assets/vendor/maplibre-gl/maplibre-gl.css'), 'index.html načítá maplibre-gl.css');
+    assert.ok(!indexHtml.includes('leaflet.js'), 'index.html nesmí načítat Leaflet v běžící aplikaci');
+
+    const walkJs = fs.readFileSync('src/walk.js', 'utf-8');
+    assert.ok(walkJs.includes('new maplibregl.Map'), 'src/walk.js vytváří instanci MapLibre');
+    assert.ok(walkJs.includes('id="btn-toggle-3d"'), 'Tlačítko přepínače 3D #btn-toggle-3d musí existovat');
+    assert.ok(walkJs.includes('id="btn-north-up"'), 'Tlačítko #btn-north-up musí existovat');
+    assert.ok(walkJs.includes('id="map-3d-camera-controls"'), 'Ovládací prvky 3D kamery musí existovat');
+    assert.ok(walkJs.includes('3D terén není momentálně dostupný, pokračuji ve 2D zobrazení.'), 'Při chybě DEM se zobrazí pravdivá zpráva a provede 2D fallback');
+
+    const simJs = fs.readFileSync('src/gps-simulator.js', 'utf-8');
+    assert.ok(!simJs.includes('L.polyline'), 'Simulátor GPS nesmí volat L.polyline');
+    assert.ok(simJs.includes('sim-dotted-line-source'), 'Simulátor kreslí čárkovanou stopu přes GeoJSON zdroj sim-dotted-line-source');
+
+    const walkCss = fs.readFileSync('assets/walk.css', 'utf-8');
+    assert.ok(walkCss.includes('.map-3d-toggle-btn'), 'walk.css obsahuje styl pro .map-3d-toggle-btn');
+    assert.ok(walkCss.includes('min-height: 44px'), 'Tlačítka mapy mají minimální dotykovou výšku 44px');
   });
 });
 
