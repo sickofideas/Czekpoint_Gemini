@@ -80,8 +80,9 @@ export function sanitizePersonalMemories(memories) {
   for (const item of memories.slice(0, 300)) {
     if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
     const symbolMeta = validSymbolMap.get(item.symbolId) || PERSONAL_MEMORY_SYMBOLS[0];
-    const lat = Number(item.lat);
-    const lng = Number(item.lng);
+    const hasCoords = item.lat != null && item.lng != null;
+    const lat = hasCoords ? Number(item.lat) : 49.6014;
+    const lng = hasCoords ? Number(item.lng) : 13.8644;
     if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 85 || Math.abs(lng) > 180) continue;
     const id = typeof item.id === 'string' && /^[-a-zA-Z0-9:_]{1,80}$/.test(item.id)
       ? item.id
@@ -89,12 +90,13 @@ export function sanitizePersonalMemories(memories) {
     if (seenIds.has(id)) continue;
     seenIds.add(id);
 
+    const customTitle = sanitizeMemoryNoteText(item.title || '');
     clean.push({
       id,
       symbolId: symbolMeta.id,
       symbolIcon: symbolMeta.icon,
       symbolLabel: symbolMeta.label,
-      title: symbolMeta.shortTitle,
+      title: customTitle || symbolMeta.shortTitle,
       note: sanitizeMemoryNoteText(item.note || ''),
       lat: Math.round(lat * 1e6) / 1e6,
       lng: Math.round(lng * 1e6) / 1e6,
@@ -249,6 +251,47 @@ export function isValidExpeditionEntry(entry) {
   if (entry.newStampsCount != null && (!Number.isFinite(entry.newStampsCount) || entry.newStampsCount < 0)) return false;
   if (entry.pointsEarned != null && (!Number.isFinite(entry.pointsEarned) || entry.pointsEarned < 0)) return false;
   return true;
+}
+
+/**
+ * DÁVKA 3 (Bod 1.3): Bezpečné uložení dokončené procházky do expeditionHistory
+ * se zabráněním dvojího uložení téže výpravy (podle id).
+ */
+export function upsertExpeditionHistory(history = [], summaryEntry) {
+  const safeList = Array.isArray(history) ? history.filter(isValidExpeditionEntry) : [];
+  if (!isValidExpeditionEntry(summaryEntry)) return safeList.slice(0, MAX_EXPEDITION_HISTORY);
+  const filtered = safeList.filter(item => item.id !== summaryEntry.id);
+  return [summaryEntry, ...filtered].slice(0, MAX_EXPEDITION_HISTORY);
+}
+
+/**
+ * DÁVKA 3 (Bod 2.1): Přepnutí viditelnosti (👁️ Skrýt / Zobrazit) záznamu v historii procházek.
+ */
+export function toggleHideExpeditionEntry(state, expId) {
+  if (!state || typeof state !== 'object') return state;
+  const list = Array.isArray(state.expeditionHistory) ? state.expeditionHistory : [];
+  const nextHistory = list.map(item => {
+    if (item && item.id === expId) {
+      return { ...item, hidden: !Boolean(item.hidden) };
+    }
+    return item;
+  });
+  return {
+    ...state,
+    expeditionHistory: nextHistory,
+  };
+}
+
+/**
+ * DÁVKA 3 (Bod 2.1): Smazání (🗑️ Smazat) nechceného záznamu procházky z historie.
+ */
+export function deleteExpeditionEntry(state, expId) {
+  if (!state || typeof state !== 'object') return state;
+  const list = Array.isArray(state.expeditionHistory) ? state.expeditionHistory : [];
+  return {
+    ...state,
+    expeditionHistory: list.filter(item => item && item.id !== expId),
+  };
 }
 
 export function isValidStickBadge(badge) {
@@ -556,7 +599,7 @@ export function exportStateJson(passedState) {
   const exportPayload = {
     exportedAt: new Date().toISOString(),
     appName: 'czekpoint',
-    appVersion: '1.0.0',
+    appVersion: '1.4-part3',
     schemaVersion: 2,
     data: {
       profile: state.profile,
@@ -668,6 +711,7 @@ export function previewImportState(jsonString) {
   const stampsCount = new Set(d.discoveries).size;
   const historyCount = Array.isArray(d.expeditionHistory) ? d.expeditionHistory.length : 0;
   const badgesCount = Array.isArray(d.stickBadges) ? d.stickBadges.length : 0;
+  const personalMemoriesCount = Array.isArray(d.personalMemories) ? sanitizePersonalMemories(d.personalMemories).length : 0;
 
   return {
     valid: true,
@@ -677,6 +721,7 @@ export function previewImportState(jsonString) {
     stampsCount,
     historyCount,
     badgesCount,
+    personalMemoriesCount,
     payload: d,
   };
 }

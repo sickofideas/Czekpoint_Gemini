@@ -409,51 +409,83 @@ export function renderPostcard(canvas, rawMetadata) {
   ctx.fillText(`ID výpravy: ${meta.expeditionId.slice(0, 20)}`, 340, stampY + 46);
 }
 
-import { renderPostcardSvg, renderPostcardSvgDataUrl } from './postcards.js';
-export { renderPostcardSvg, renderPostcardSvgDataUrl };
+import {
+  renderPostcardSvg,
+  renderPostcardSvgDataUrl,
+  POSTCARD_THEMES,
+  trimTrackForHomePrivacy,
+  estimateStepsFromMeters,
+  formatActiveDuration,
+  formatElevationSummary,
+  normalizeWalkSegments,
+} from './postcards.js';
+
+export {
+  renderPostcardSvg,
+  renderPostcardSvgDataUrl,
+  POSTCARD_THEMES,
+  trimTrackForHomePrivacy,
+  estimateStepsFromMeters,
+  formatActiveDuration,
+  formatElevationSummary,
+  normalizeWalkSegments,
+};
 
 /**
- * Generates Data URL from postcard metadata (uses photo collage SVG if visitedPlacesWithPhotos is provided).
+ * Generates Data URL from postcard metadata (uses rich SVG postcard with 3 themes,
+ * visited places collage, personal memories, mini-map, and home privacy trimming).
  */
-export function generatePostcardDataUrl(metadata) {
-  if (metadata && Array.isArray(metadata.visitedPlacesWithPhotos) && metadata.visitedPlacesWithPhotos.length > 0) {
-    return renderPostcardSvgDataUrl(metadata);
-  }
-  if (typeof document === 'undefined') {
-    return renderPostcardSvgDataUrl(metadata || {});
-  }
-  const canvas = document.createElement('canvas');
-  const safeMeta = { ...(metadata || {}) };
-  delete safeMeta.photo;
-  delete safeMeta.photoUrl;
-  delete safeMeta.photoBlob;
-  delete safeMeta.image;
-  delete safeMeta.svg;
-  delete safeMeta.html;
-  renderPostcard(canvas, safeMeta);
-  return canvas.toDataURL('image/png');
+export function generatePostcardDataUrl(metadata = {}, options = {}) {
+  return renderPostcardSvgDataUrl(metadata || {}, options || {});
 }
 
 /**
- * Generates PNG Blob from postcard metadata.
+ * Generates PNG Blob from postcard metadata (renders the SVG postcard onto a Canvas
+ * or returns an SVG/PNG blob if image rasterization is unavailable).
  */
-export function generatePostcardBlob(metadata) {
+export function generatePostcardBlob(metadata = {}, options = {}) {
   return new Promise((resolve, reject) => {
     if (typeof document === 'undefined') {
       return reject(new Error('Canvas is only available in browser environment.'));
     }
-    const canvas = document.createElement('canvas');
-    const safeMeta = { ...(metadata || {}) };
-    delete safeMeta.photo;
-    delete safeMeta.photoUrl;
-    delete safeMeta.photoBlob;
-    delete safeMeta.image;
-    delete safeMeta.svg;
-    delete safeMeta.html;
-    renderPostcard(canvas, safeMeta);
-    canvas.toBlob(blob => {
-      if (blob) resolve(blob);
-      else reject(new Error('Pohlednici se nepodařilo vygenerovat.'));
-    }, 'image/png');
+    const svgDataUrl = renderPostcardSvgDataUrl(metadata || {}, options || {});
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = POSTCARD_WIDTH;
+        canvas.height = POSTCARD_HEIGHT;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, POSTCARD_WIDTH, POSTCARD_HEIGHT);
+        }
+        canvas.toBlob(blob => {
+          if (blob) resolve(blob);
+          else reject(new Error('Pohlednici se nepodařilo vygenerovat.'));
+        }, 'image/png');
+      } catch (err) {
+        reject(err);
+      }
+    };
+    img.onerror = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        const safeMeta = { ...(metadata || {}) };
+        delete safeMeta.photo;
+        delete safeMeta.photoUrl;
+        delete safeMeta.photoBlob;
+        delete safeMeta.image;
+        delete safeMeta.svg;
+        delete safeMeta.html;
+        renderPostcard(canvas, safeMeta);
+        canvas.toBlob(blob => {
+          if (blob) resolve(blob);
+          else reject(new Error('Pohlednici se nepodařilo vygenerovat.'));
+        }, 'image/png');
+      } catch (err) {
+        reject(err);
+      }
+    };
+    img.src = svgDataUrl;
   });
 }

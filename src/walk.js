@@ -42,6 +42,7 @@ import {
   MINDFULNESS_PROMPTS,
   sanitizeMemoryNoteText,
   createPersonalMemoryEntry,
+  upsertExpeditionHistory,
 } from './walk-store.js';
 import {
   createExpedition,
@@ -54,7 +55,14 @@ import {
   DEFAULT_GOALS,
 } from './expedition-engine.js';
 import { renderPostcard, generatePostcardBlob, generatePostcardDataUrl } from './postcard.js';
-import { renderPostcardSvgDataUrl } from './postcards.js';
+import {
+  renderPostcardSvgDataUrl,
+  POSTCARD_THEMES,
+  estimateStepsFromMeters,
+  formatActiveDuration,
+  formatElevationSummary,
+  normalizeWalkSegments,
+} from './postcards.js';
 import { fetchNearby } from './nearby.js';
 import { loadAutoPlacesForArea, getLastAutoPlacesStatus } from './auto-places.js';
 import {
@@ -3879,81 +3887,242 @@ export function mountWalk(root, routes, config, actions = {}) {
     updateMapActionBar();
   }
 
+  let lastSavedExpeditionId = null;
+  let lastSavedSummary = null;
+
   function showPostcardModal(summary) {
     const container = $('session-summary-container');
-    if (!container) return;
-    const summaryTaskId = beginMapTask('⏳ Připravuji souhrn procházky…');
-    let dataUrl = '';
-    try {
-      dataUrl = generatePostcardDataUrl(summary);
-    } finally {
-      endMapTask(summaryTaskId);
-    }
+    if (!container || !summary) return;
+
+    let currentTheme = summary.postcardTheme || summary.gameMode || appSettings.gameMode || 'gamified';
+    let privacyTrimEnabled = summary.privacyTrimmed !== undefined ? Boolean(summary.privacyTrimmed) : true;
+
+    const buildPreviewDataUrl = () => {
+      const summaryTaskId = beginMapTask('⏳ Připravuji souhrn procházky…');
+      try {
+        return generatePostcardDataUrl(summary, {
+          theme: currentTheme,
+          privacyTrim: privacyTrimEnabled,
+        });
+      } finally {
+        endMapTask(summaryTaskId);
+      }
+    };
+
+    let dataUrl = buildPreviewDataUrl();
+
+    const distStr = summary.distanceMeters >= 1000
+      ? (summary.distanceMeters / 1000).toFixed(1).replace('.', ',') + ' km'
+      : Math.round(summary.distanceMeters || 0) + ' m';
+    const activeTimeStr = formatActiveDuration(summary.activeDurationMs ?? summary.durationMs ?? 60000);
+    const estSteps = summary.estimatedSteps != null
+      ? Math.max(0, Math.round(Number(summary.estimatedSteps)))
+      : estimateStepsFromMeters(summary.distanceMeters || 0);
+    const elevStr = formatElevationSummary(summary);
+    const memList = Array.isArray(summary.personalMemories) ? summary.personalMemories : [];
+    const confirmedList = Array.isArray(summary.confirmedPlaces) ? summary.confirmedPlaces : [];
+    const nearbyList = Array.isArray(summary.nearbyPlaces) ? summary.nearbyPlaces : [];
 
     container.innerHTML = `
-      <div class="session-modal" id="postcard-modal" role="dialog" aria-modal="true" aria-label="Pohlednice z výpravy">
-        <div class="session-modal-card" style="max-width:520px;text-align:center;position:relative">
-          <button type="button" class="button small ghost" id="btn-close-postcard-x" aria-label="Zavřít pohlednici" style="position:absolute;top:10px;right:10px;padding:4px 10px;min-height:36px;font-weight:800">✕</button>
-          <h2 style="padding-right:28px">Výprava úspěšně ukončena! 🎉</h2>
-          <p>${simSandboxActive ? 'Testovací výprava v simulátoru byla vyhodnocena (skutečný profil zůstal beze změny).' : 'Tvoje výprava byla zaznamenána do osobního atlasu.'}</p>
+      <div class="session-modal" id="postcard-modal" role="dialog" aria-modal="true" aria-labelledby="postcard-modal-title" tabindex="-1">
+        <div class="session-modal-card" style="max-width:620px;text-align:left;position:relative">
+          <button type="button" class="button small ghost" id="btn-close-postcard-x" aria-label="Zavřít souhrn procházky" style="position:absolute;top:12px;right:12px;padding:4px 10px;min-height:38px;font-weight:800">✕</button>
+          <div class="eyebrow" style="margin-bottom:4px">🏁 Vzpomínka na procházku · Souhrn a pohlednice</div>
+          <h2 id="postcard-modal-title" style="padding-right:36px;margin:0 0 6px">Procházka úspěšně dokončena! 🎉</h2>
+          <p class="small-note" style="margin:0 0 12px">${simSandboxActive ? '🧪 Testovací procházka v simulátoru byla vyhodnocena v oddělené paměti (skutečný pas uživatele zůstal nedotčen).' : '✓ Tvoje procházka byla bezpečně uložena do osobního atlasu v „🎒 Můj pas“.'}</p>
+
+          <!-- Pravdivé statistiky procházky -->
           <div class="session-stats-grid" style="margin-bottom:12px">
-            <div class="session-stat-box"><strong>${summary.distanceMeters >= 1000 ? (summary.distanceMeters / 1000).toFixed(1).replace('.', ',') + ' km' : Math.round(summary.distanceMeters) + ' m'}</strong><span>Ušlá vzdálenost</span></div>
-            <div class="session-stat-box"><strong>+${summary.newCellsCount}</strong><span>Nové dílky</span></div>
-            <div class="session-stat-box"><strong>+${summary.newStampsCount}</strong><span>Potvrzená místa</span></div>
-            <div class="session-stat-box"><strong>${summary.goalAchieved ? '✓ Splněn' : 'Dokončeno'}</strong><span>Stav výpravy</span></div>
+            <div class="session-stat-box"><strong>${e(distStr)}</strong><span>📏 Ušlá vzdálenost</span></div>
+            <div class="session-stat-box"><strong>${e(activeTimeStr)}</strong><span>⏱️ Čistý aktivní čas</span></div>
+            <div class="session-stat-box"><strong>~${estSteps.toLocaleString('cs-CZ')}</strong><span>👣 Odhad kroků</span></div>
+            <div class="session-stat-box"><strong>${e(elevStr)}</strong><span>📈 Odhad převýšení</span></div>
+            <div class="session-stat-box"><strong>+${Number(summary.newCellsCount) || 0}</strong><span>🗺️ Nové dílky mapy</span></div>
+            <div class="session-stat-box"><strong>+${Number(summary.newStampsCount) || 0}</strong><span>📍 Potvrzená místa</span></div>
           </div>
-          <div style="margin:8px 0;border-radius:12px;overflow:hidden;box-shadow:0 8px 30px rgba(0,0,0,0.18);line-height:0">
-            <img src="${dataUrl}" alt="Ilustrovaná pohlednice z výpravy" style="width:100%;height:auto;display:block">
+
+          <!-- Přehled potvrzených míst, průchodů v okolí a vlastních vzpomínek -->
+          <div class="postcard-discoveries-summary" style="margin-bottom:12px">
+            ${confirmedList.length > 0 ? `<div class="pds-summary-row"><strong>📍 Potvrzeno podle GPS (zastávka):</strong> ${confirmedList.map(p => e(p.title || p)).join(', ')}</div>` : ''}
+            ${nearbyList.length > 0 ? `<div class="pds-summary-row"><strong>📍 Zaznamenáno poblíž (dle GPS):</strong> ${nearbyList.map(p => e(p.title || p)).join(', ')}</div>` : ''}
+            <div class="pds-summary-row">
+              <strong>✨ Moje malé objevy (vlastní symboly):</strong>
+              ${memList.length > 0
+                ? memList.map(m => `<span class="memory-mini-chip">${e(m.symbolIcon || '✨')} ${e(m.title || 'Vzpomínka')}${m.note ? ` („${e(m.note)}“)` : ''}</span>`).join(' ')
+                : '<span class="muted">Žádná vlastní vzpomínka nebyla při této chůzi uložena.</span>'}
+            </div>
           </div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:10px">
-            <button type="button" class="button primary" id="btn-download-postcard">Stáhnout pohlednici (PNG)</button>
-            <button type="button" class="button" id="btn-share-postcard">Sdílet</button>
-            <button type="button" class="button ghost" id="btn-close-postcard">Zavřít</button>
+
+          <!-- Výběr ze 3 vizuálních motivů pohlednice -->
+          <div class="postcard-theme-picker" role="radiogroup" aria-label="Vizuální motiv pohlednice" style="margin-bottom:10px">
+            <span class="eyebrow" style="display:block;margin-bottom:6px">Vizuální motiv pohlednice:</span>
+            <div class="postcard-theme-buttons">
+              ${Object.values(POSTCARD_THEMES).map(t => `
+                <button type="button" class="button small postcard-theme-btn ${currentTheme === t.id ? 'active lime' : 'ghost'}" data-postcard-theme="${e(t.id)}" role="radio" aria-checked="${currentTheme === t.id}">
+                  ${e(t.label)}
+                </button>
+              `).join('')}
+            </div>
+          </div>
+
+          <!-- Náhled soukromí (Domov v bezpečí) — ve výchozím stavu zapnuto -->
+          <div class="privacy-preview-box" style="margin-bottom:12px">
+            <label class="privacy-preview-toggle" for="chk-postcard-privacy-trim">
+              <input type="checkbox" id="chk-postcard-privacy-trim" ${privacyTrimEnabled ? 'checked' : ''}>
+              <span>
+                <strong>🔒 Skrýt začátek a konec trasy (ochrana soukromí domova)</strong>
+                <small>Ořízne z mini-mapy na pohlednici prvních a posledních 150 metrů trasy a skryje přesné časy průchodu.</small>
+              </span>
+            </label>
+          </div>
+
+          <!-- Animovaný 3D náhled pohlednice (.postcard-animated-wrap) -->
+          <div class="postcard-animated-wrap" id="postcard-animated-wrap">
+            <img id="postcard-preview-img" src="${dataUrl}" alt="Ilustrovaná pohlednice Vzpomínka na procházku" style="width:100%;height:auto;display:block">
+          </div>
+
+          <!-- Sdílení a stažení pohlednice -->
+          <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:12px">
+            <button type="button" class="button primary" id="btn-share-postcard">📤 Sdílet vzpomínku</button>
+            <button type="button" class="button" id="btn-download-postcard">📥 Stáhnout pohlednici (PNG)</button>
+          </div>
+
+          <!-- DÁVKA 3 (Bod 1.3): Co udělat s naplánovanou trasou pro příští start -->
+          <div class="postcard-postwalk-actions" style="margin-top:14px;padding-top:12px;border-top:1px solid rgba(0,0,0,0.12);display:flex;gap:8px;flex-wrap:wrap;justify-content:space-between;align-items:center">
+            <button type="button" class="button lime" id="btn-postcard-new-walk" title="Vyčistí naplánované zastávky pro příští čistý start">
+              ✨ Nová procházka
+            </button>
+            <button type="button" class="button ghost" id="btn-postcard-keep-route" title="Ponechá současné vybrané zastávky na mapě">
+              🔄 Ponechat vybranou trasu
+            </button>
           </div>
         </div>
       </div>
     `;
+
+    const refreshPreviewImg = () => {
+      dataUrl = buildPreviewDataUrl();
+      const imgEl = $('postcard-preview-img');
+      if (imgEl) imgEl.src = dataUrl;
+      summary.postcardTheme = currentTheme;
+      summary.privacyTrimmed = privacyTrimEnabled;
+    };
 
     const closePostcard = () => {
       container.innerHTML = '';
       playTick(stateObj.soundEnabled);
     };
 
+    // Přesun fokusu do přístupného modálního dialogu
+    setTimeout(() => {
+      const modalEl = $('postcard-modal');
+      if (modalEl) {
+        modalEl.focus({ preventScroll: true });
+      }
+    }, 30);
+
+    container.querySelectorAll('[data-postcard-theme]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        currentTheme = btn.dataset.postcardTheme || 'gamified';
+        container.querySelectorAll('[data-postcard-theme]').forEach(b => {
+          const isAct = b.dataset.postcardTheme === currentTheme;
+          b.classList.toggle('active', isAct);
+          b.classList.toggle('lime', isAct);
+          b.classList.toggle('ghost', !isAct);
+          b.setAttribute('aria-checked', String(isAct));
+        });
+        refreshPreviewImg();
+        playTick(stateObj.soundEnabled);
+      });
+    });
+
+    $('chk-postcard-privacy-trim')?.addEventListener('change', (ev) => {
+      privacyTrimEnabled = Boolean(ev.target.checked);
+      refreshPreviewImg();
+      playTick(stateObj.soundEnabled);
+    });
+
     $('postcard-modal')?.addEventListener('click', (ev) => {
-      if (ev.target === $('postcard-modal') || !ev.target.closest('.session-modal-card')) {
+      if (ev.target === $('postcard-modal')) {
         closePostcard();
       }
     });
 
-    $('btn-download-postcard')?.addEventListener('click', () => {
-      const a = document.createElement('a');
-      a.href = dataUrl;
-      a.download = `pohlednice-${summary.id}.png`;
-      a.click();
+    $('btn-download-postcard')?.addEventListener('click', async () => {
+      try {
+        const blob = await generatePostcardBlob(summary, {
+          theme: currentTheme,
+          privacyTrim: privacyTrimEnabled,
+        });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `pohlednice-${summary.id}.png`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1500);
+      } catch {
+        const a = document.createElement('a');
+        a.href = dataUrl;
+        a.download = `pohlednice-${summary.id}.svg`;
+        a.click();
+      }
     });
 
     $('btn-share-postcard')?.addEventListener('click', async () => {
       try {
-        const blob = await generatePostcardBlob(summary);
+        const blob = await generatePostcardBlob(summary, {
+          theme: currentTheme,
+          privacyTrim: privacyTrimEnabled,
+        });
         const file = new File([blob], `pohlednice-${summary.id}.png`, { type: 'image/png' });
         if (navigator.canShare && navigator.canShare({ files: [file] })) {
           await navigator.share({
-            title: 'Moje výprava · Czekpoint',
-            text: `Moje výprava s Czekpointem.`,
+            title: 'Vzpomínka na procházku · Czekpoint',
+            text: `Vzpomínka na procházku s Czekpointem (${distStr}).`,
             files: [file],
           });
         } else {
+          const url = URL.createObjectURL(blob);
           const a = document.createElement('a');
-          a.href = dataUrl;
+          a.href = url;
           a.download = `pohlednice-${summary.id}.png`;
           a.click();
+          setTimeout(() => URL.revokeObjectURL(url), 1500);
         }
       } catch (err) {
         if (err.name !== 'AbortError') status('Sdílení se nezdařilo.');
       }
     });
 
-    $('btn-close-postcard')?.addEventListener('click', closePostcard);
+    // ✨ Nová procházka: vyčistí naplánované zastávky pro příští start
+    $('btn-postcard-new-walk')?.addEventListener('click', () => {
+      plannedRoute.selectedPlaceIds = [];
+      plannedRoute.embeddedStops = [];
+      confirmedStopIds.clear();
+      nearbyRecordedIds.clear();
+      memoryTrail = [];
+      lastRoutedGeometry = null;
+      plannedRouteCoords = null;
+      currentElevationProfile = null;
+      walkState = 'idle';
+      saveAppState();
+      closePostcard();
+      recalculateRemainingRoute('✨ Připraveno na novou procházku (předchozí výprava je uložena v pasu).');
+      stats();
+    });
+
+    // 🔄 Ponechat vybranou trasu: ponechá zastávky a zavře souhrn
+    $('btn-postcard-keep-route')?.addEventListener('click', () => {
+      confirmedStopIds.clear();
+      nearbyRecordedIds.clear();
+      memoryTrail = [];
+      walkState = 'idle';
+      saveAppState();
+      closePostcard();
+      stats();
+      status('🔄 Vybraná trasa ponechána pro další procházku.');
+    });
+
     $('btn-close-postcard-x')?.addEventListener('click', closePostcard);
   }
 
@@ -4054,10 +4223,17 @@ export function mountWalk(root, routes, config, actions = {}) {
     walkState = 'finished';
     lockedExpeditionOrigin = null;
 
+    // DÁVKA 3 (Bod 1.3): Zabránit dvojímu uložení téže výpravy, pokud už byla ukončena
+    if (!currentExpedition && lastSavedSummary && lastSavedExpeditionId === lastSavedSummary.id) {
+      showPostcardModal(lastSavedSummary);
+      return;
+    }
+
     if (!currentExpedition) {
       currentExpedition = createExpedition({ progress, goal: DEFAULT_GOALS[0] });
     }
 
+    const expStartMs = Number(currentExpedition.createdAt) || (Date.now() - 60000);
     const gainedM = Math.max(0, progress.meters - (currentExpedition.startMeters || 0));
     const gainedC = Math.max(0, progress.cells.length - (currentExpedition.startCells || 0));
     const gainedS = Math.max(0, progress.discoveries.length - (currentExpedition.startDiscoveries || 0));
@@ -4070,7 +4246,7 @@ export function mountWalk(root, routes, config, actions = {}) {
       ...new Set([
         ...confirmedStopIds,
         ...(currentExpedition.visitedPlaces || []).map(v => v.id || v),
-        ...plannedPlaces.filter(p => isStopVisited(p)).map(p => p.id),
+        ...plannedPlaces.filter(p => isStopVisitedInSession(p)).map(p => p.id),
       ]),
     ];
     const visitedSourcePlaces = visitedIdsList
@@ -4078,7 +4254,7 @@ export function mountWalk(root, routes, config, actions = {}) {
       .filter(Boolean);
     const fallbackVisitedPlaces = visitedSourcePlaces.length > 0 ? visitedSourcePlaces : plannedPlaces.slice(0, 4);
     const visitedPlacesWithPhotos = fallbackVisitedPlaces.map(p => {
-      const photoInfo = getPlacePhotoSync(p);
+      const photoInfo = getPlacePhotoSync(p, { showExternalPhotos: appSettings.showExternalPhotos !== false });
       return {
         id: p.id,
         title: p.title,
@@ -4088,6 +4264,48 @@ export function mountWalk(root, routes, config, actions = {}) {
         isRealPhoto: photoInfo.isRealPhoto,
       };
     });
+
+    const confirmedPlaces = visitedSourcePlaces.map(p => ({
+      id: p.id,
+      title: p.title,
+      recordType: VISIT_RECORD_TYPES.GPS_CONFIRMED,
+      badge: '📍 Potvrzeno podle GPS (zastávka)',
+    }));
+
+    const nearbyPlaces = [...nearbyRecordedIds]
+      .filter(id => !confirmedStopIds.has(id))
+      .map(id => allKnownPlaces.find(p => p.id === id) || plannedPlaces.find(p => p.id === id))
+      .filter(Boolean)
+      .map(p => ({
+        id: p.id,
+        title: p.title,
+        recordType: VISIT_RECORD_TYPES.NEARBY_PASS,
+        badge: '📍 Zaznamenáno poblíž (dle GPS)',
+      }));
+
+    // Vlastní vzpomínky uložené během procházky (nebo v osobním atlasu)
+    const sessionMemories = personalMemories
+      .filter(m => {
+        const ts = Date.parse(m.createdAt || '');
+        return !Number.isFinite(ts) || ts >= expStartMs - 3600000;
+      })
+      .slice(0, 8);
+    const memoriesForPostcard = sessionMemories.length > 0 ? sessionMemories : personalMemories.slice(0, 4);
+
+    // Skutečně prošlé segmenty se zachováním případných výpadků GPS
+    const trailSegmentsFromMemory = normalizeWalkSegments(memoryTrail);
+    const sessionWalkSegments = trailSegmentsFromMemory.length > 0
+      ? trailSegmentsFromMemory.map(seg => seg.map(pt => [pt.lat, pt.lng]))
+      : (Array.isArray(progress.walkSegments) && progress.walkSegments.length > 0
+          ? progress.walkSegments.slice(-8)
+          : (Array.isArray(plannedRouteCoords) && plannedRouteCoords.length >= 2 ? [plannedRouteCoords] : []));
+
+    const elevationKnown = Boolean(
+      currentElevationProfile &&
+      Array.isArray(currentElevationProfile.points) &&
+      currentElevationProfile.points.length > 0 &&
+      Number.isFinite(Number(currentElevationProfile.gainM))
+    );
 
     let endResult = null;
     try {
@@ -4107,18 +4325,28 @@ export function mountWalk(root, routes, config, actions = {}) {
       stampsCount: gainedS,
       newCellsCount: gainedC,
       newStampsCount: gainedS,
-      durationMs: Math.max(60000, Date.now() - (currentExpedition.createdAt || Date.now())),
-      activeDurationMs: Math.max(60000, Date.now() - (currentExpedition.createdAt || Date.now())),
+      durationMs: Math.max(1000, Date.now() - expStartMs),
+      activeDurationMs: telemetry?.movingTimeMs > 0 ? telemetry.movingTimeMs : Math.max(1000, Date.now() - expStartMs),
       pointsEarned: earnedPoints || 10,
       goal: currentExpedition.goal || DEFAULT_GOALS[0],
       avatarId: stateObj.profile?.avatarId || 'liska',
-      companionMode: 'solo',
+      companionMode: stateObj.companionMode || 'solo',
     };
 
     const summary = {
       ...baseSummary,
+      activeDurationMs: telemetry?.movingTimeMs > 0 ? telemetry.movingTimeMs : baseSummary.activeDurationMs,
+      estimatedSteps: estimateStepsFromMeters(gainedM),
+      elevationKnown,
+      elevationGainM: elevationKnown ? Math.round(Number(currentElevationProfile.gainM)) : null,
+      gameMode: appSettings.gameMode || 'gamified',
+      postcardTheme: appSettings.gameMode || 'gamified',
+      privacyTrimmed: true,
       visitedPlacesWithPhotos,
-      elevationGainM: currentElevationProfile?.gainM || 0,
+      confirmedPlaces,
+      nearbyPlaces,
+      personalMemories: memoriesForPostcard,
+      walkSegments: sessionWalkSegments,
       trailCoordinates: memoryTrail.length >= 2
         ? memoryTrail.filter(pt => pt && Number.isFinite(pt.lat)).map(pt => [pt.lat, pt.lng])
         : (plannedRouteCoords || []),
@@ -4126,16 +4354,19 @@ export function mountWalk(root, routes, config, actions = {}) {
 
     const prevStateSnapshot = { ...stateObj };
     const prevExpeditionSnapshot = currentExpedition;
-    const history = [summary, ...(stateObj.expeditionHistory || [])].slice(0, 100);
+    const history = upsertExpeditionHistory(stateObj.expeditionHistory || [], summary);
 
     const badge = createStickBadge({
       expId: currentExpedition.id,
       distanceMeters: gainedM,
       stampsCount: gainedS,
-      companionMode: 'solo',
+      companionMode: stateObj.companionMode || 'solo',
       categories: currentExpedition.categories || [],
     });
-    stateObj.stickBadges = [badge, ...(stateObj.stickBadges || [])].slice(0, 200);
+    const existingBadges = Array.isArray(stateObj.stickBadges)
+      ? stateObj.stickBadges.filter(b => b && b.expId !== currentExpedition.id)
+      : [];
+    stateObj.stickBadges = [badge, ...existingBadges].slice(0, 200);
 
     stateObj = {
       ...stateObj,
@@ -4143,7 +4374,10 @@ export function mountWalk(root, routes, config, actions = {}) {
       expeditionHistory: history,
       walkSegments: progress.walkSegments,
       revealedFeatures: progress.revealedFeatures,
+      personalMemories,
     };
+    lastSavedExpeditionId = summary.id;
+    lastSavedSummary = summary;
     currentExpedition = null;
 
     if (canPersistRealState()) {
@@ -7795,10 +8029,10 @@ export function mountWalk(root, routes, config, actions = {}) {
       const url = URL.createObjectURL(new Blob([jsonStr], { type: 'application/json' }));
       const a = document.createElement('a');
       a.href = url;
-      a.download = `czekpoint-pruzkum-${today}.json`;
+      a.download = `czekpoint-zaloha-${today}.json`;
       a.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
-      status('Průzkum byl úspěšně exportován.');
+      status('Záloha osobního atlasu byla úspěšně stažena do souboru.');
     } catch (error) { status(error.message); }
   });
 

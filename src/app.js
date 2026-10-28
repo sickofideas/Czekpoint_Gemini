@@ -11,10 +11,20 @@ import {
   exportStateJson,
   previewImportState,
   importStateJson,
+  toggleHideExpeditionEntry,
+  deleteExpeditionEntry,
   DEFAULT_APP_SETTINGS,
 } from './walk-store.js';
 import { ALLOWED_AVATARS, avatarUrl } from './avatars.js';
-import { generatePostcardDataUrl, generatePostcardBlob } from './postcard.js';
+import {
+  generatePostcardDataUrl,
+  generatePostcardBlob,
+  POSTCARD_THEMES,
+  estimateStepsFromMeters,
+  formatActiveDuration,
+  formatElevationSummary,
+} from './postcard.js';
+import { buildMiniMapPathSvg } from './postcards.js';
 import { explorerRank, chapterStatus, totalScore, trophies } from './walk-engine.js';
 import { CHAPTERS, COLLECTIONS, RELICS } from './data.js';
 import { renderWalkingStickHtml } from './walking-stick.js';
@@ -56,6 +66,7 @@ const state = {
   returningFromDetail: false,
   passportSection: 'stick',
   passportTab: 'visited',
+  showHiddenExpeditions: false,
   renderId: 0,
   toastTimer: null,
 };
@@ -361,6 +372,346 @@ function renderReports(route, reports) {
   }).join('');
 }
 
+function renderExpeditionHistorySectionHtml(stateObj) {
+  const allExpeditions = Array.isArray(stateObj.expeditionHistory) ? stateObj.expeditionHistory : [];
+  const hiddenCount = allExpeditions.filter(x => x && x.hidden).length;
+  const visibleExpeditions = state.showHiddenExpeditions
+    ? allExpeditions
+    : allExpeditions.filter(x => x && !x.hidden);
+  const allMemories = Array.isArray(stateObj.personalMemories) ? stateObj.personalMemories : [];
+
+  return `
+    <section class="passport-section" id="passport-history-section" aria-labelledby="passport-history-heading">
+      <div class="section-heading" style="align-items:center">
+        <div>
+          <h2 id="passport-history-heading">🗺️ Historie mých procházek a objevů</h2>
+          <p>Dokončené procházky s mini-mapou ušlé cesty, uloženými vlastními vzpomínkami, potvrzenými i míjenými místy a pohlednicí.</p>
+        </div>
+        ${hiddenCount > 0 ? `
+          <button type="button" class="button small ghost" data-action="toggle-show-hidden-expeditions" aria-pressed="${state.showHiddenExpeditions}">
+            👁️ ${state.showHiddenExpeditions ? 'Skrýt schované záznamy' : `Zobrazit skryté záznamy (${hiddenCount})`}
+          </button>
+        ` : ''}
+      </div>
+
+      ${visibleExpeditions.length > 0 ? `
+        <div class="expedition-history-list">
+          ${visibleExpeditions.map(exp => {
+            const themeId = exp.postcardTheme || exp.gameMode || 'gamified';
+            const themeMeta = POSTCARD_THEMES[themeId] || POSTCARD_THEMES.gamified;
+            const dataUrl = generatePostcardDataUrl(exp, {
+              theme: themeId,
+              privacyTrim: exp.privacyTrimmed !== false,
+            });
+            const dist = exp.distanceMeters >= 1000
+              ? (exp.distanceMeters / 1000).toFixed(1).replace('.', ',') + ' km'
+              : Math.round(exp.distanceMeters || 0) + ' m';
+            const activeTime = formatActiveDuration(exp.activeDurationMs ?? exp.durationMs ?? 60000);
+            const estSteps = exp.estimatedSteps != null
+              ? Math.max(0, Math.round(Number(exp.estimatedSteps)))
+              : estimateStepsFromMeters(exp.distanceMeters || 0);
+            const elevStr = formatElevationSummary(exp);
+            const dateStr = exp.date
+              ? new Date(exp.date).toLocaleDateString('cs-CZ', { day: 'numeric', month: 'long', year: 'numeric' })
+              : 'Dokončená procházka';
+            const miniMapInner = buildMiniMapPathSvg(
+              (Array.isArray(exp.walkSegments) && exp.walkSegments.length > 0) ? exp.walkSegments : (exp.trailCoordinates || []),
+              0,
+              0,
+              290,
+              180,
+              {
+                theme: themeId,
+                privacyTrim: false,
+                newCellsCount: exp.newCellsCount ?? exp.cellsCount ?? 0,
+              }
+            );
+            const expMemories = Array.isArray(exp.personalMemories) ? exp.personalMemories : [];
+            const expConfirmed = Array.isArray(exp.confirmedPlaces) && exp.confirmedPlaces.length > 0
+              ? exp.confirmedPlaces
+              : (Array.isArray(exp.visitedPlacesWithPhotos) ? exp.visitedPlacesWithPhotos : []);
+            const expNearby = Array.isArray(exp.nearbyPlaces) ? exp.nearbyPlaces : [];
+
+            return `
+              <article class="expedition-history-card ${exp.hidden ? 'is-hidden-record' : ''}" data-exp-card="${e(exp.id)}">
+                <div class="ehc-header">
+                  <div>
+                    <span class="ehc-theme-badge">${e(themeMeta.label)}</span>
+                    ${exp.hidden ? '<span class="ehc-hidden-badge">👁️ Skrytý záznam</span>' : ''}
+                    <h3 class="ehc-title">Procházka · ${e(dateStr)}</h3>
+                  </div>
+                  <div class="ehc-actions">
+                    <button type="button" class="button small ghost" data-action="toggle-hide-expedition" data-exp-id="${e(exp.id)}" title="${exp.hidden ? 'Znovu zobrazit tento záznam v přehledu' : 'Schovat krátký nebo nechtěný záznam'}">
+                      👁️ ${exp.hidden ? 'Zobrazit' : 'Skrýt'}
+                    </button>
+                    <button type="button" class="button small danger ghost" data-action="delete-expedition" data-exp-id="${e(exp.id)}" title="Trvale smazat tuto procházku z historie">
+                      🗑️ Smazat
+                    </button>
+                    <button type="button" class="button small primary" data-action="share-postcard" data-exp-id="${e(exp.id)}">
+                      📤 Sdílet vzpomínku
+                    </button>
+                  </div>
+                </div>
+
+                <div class="ehc-stats-row">
+                  <span class="ehc-stat-pill">📏 <strong>${e(dist)}</strong></span>
+                  <span class="ehc-stat-pill">⏱️ Aktivní čas: <strong>${e(activeTime)}</strong></span>
+                  <span class="ehc-stat-pill">👣 Odhad kroků: <strong>~${estSteps.toLocaleString('cs-CZ')}</strong></span>
+                  <span class="ehc-stat-pill">📈 Odhad převýšení: <strong>${e(elevStr)}</strong></span>
+                  <span class="ehc-stat-pill">🗺️ <strong>+${Number(exp.newCellsCount ?? exp.cellsCount) || 0} dílků</strong></span>
+                </div>
+
+                <div class="ehc-visual-grid">
+                  <div class="ehc-minimap-box">
+                    <svg viewBox="0 0 290 180" class="ehc-minimap-svg" role="img" aria-label="Mini-mapa ušlé cesty">${miniMapInner}</svg>
+                  </div>
+                  <div class="ehc-postcard-box">
+                    <div class="postcard-animated-wrap ehc-postcard-thumb" data-action="preview-postcard" data-exp-id="${e(exp.id)}" style="cursor:pointer" title="Klikni pro otevření Náhledu soukromí a pohlednice">
+                      <img src="${dataUrl}" alt="Pohlednice z procházky" loading="lazy">
+                    </div>
+                  </div>
+                </div>
+
+                <div class="ehc-records-box">
+                  <div class="ehc-record-line">
+                    <strong>📍 Potvrzeno podle GPS (zastávka):</strong>
+                    ${expConfirmed.length > 0
+                      ? expConfirmed.map(p => `<span class="ehc-place-chip confirmed">📍 ${e(p.title || p)}</span>`).join(' ')
+                      : '<span class="muted">Žádné místo nebylo v této chůzi potvrzeno zastavením.</span>'}
+                  </div>
+                  <div class="ehc-record-line">
+                    <strong>📍 Zaznamenáno poblíž (dle GPS):</strong>
+                    ${expNearby.length > 0
+                      ? expNearby.map(p => `<span class="ehc-place-chip nearby">📍 ${e(p.title || p)}</span>`).join(' ')
+                      : '<span class="muted">Žádné míjené místo v okolí.</span>'}
+                  </div>
+                  <div class="ehc-record-line">
+                    <strong>✨ Moje malé objevy (vlastní vzpomínky):</strong>
+                    ${expMemories.length > 0
+                      ? expMemories.map(m => `<span class="ehc-place-chip memory">${e(m.symbolIcon || '✨')} ${e(m.title || 'Vzpomínka')}${m.note ? ` — „${e(m.note)}“` : ''}</span>`).join(' ')
+                      : '<span class="muted">Při této procházce nebyla uložena vlastní poznámka.</span>'}
+                  </div>
+                </div>
+              </article>
+            `;
+          }).join('')}
+        </div>
+      ` : `
+        <div class="empty-state" style="padding:24px 16px;text-align:center">
+          <p class="small-note">${allExpeditions.length > 0 ? 'Všechny záznamy procházek jsou momentálně skryté. Klikni na „👁️ Zobrazit skryté záznamy“ výše.' : 'Zatím nemáš žádnou dokončenou procházku. Vyraz ven s mapou, ulož si vlastní vzpomínku a po kliknutí na „⏹ Dokončit“ zde najdeš kompletní historii i pohlednici!'}</p>
+          <a class="button small primary" href="#/prochazka">Vyrazit na procházku s mapou</a>
+        </div>
+      `}
+
+      ${allMemories.length > 0 ? `
+        <div class="passport-memories-subcard" style="margin-top:16px">
+          <h3 style="margin:0 0 6px;font-size:1.05rem">✨ Všechny moje uložené vzpomínky v zařízení (${allMemories.length})</h3>
+          <p class="small-note" style="margin:0 0 10px">Vlastnoruční soukromé poznámky uživatele (nejde o GPS ověřené památky).</p>
+          <div class="passport-memories-chips">
+            ${allMemories.slice(0, 30).map(m => `
+              <div class="passport-memory-pill">
+                <span class="pmp-icon">${e(m.symbolIcon || '✨')}</span>
+                <div>
+                  <strong>${e(m.title || m.symbolLabel || 'Vlastní vzpomínka')}</strong>
+                  ${m.note ? `<p>${e(m.note)}</p>` : ''}
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      ` : ''}
+    </section>
+  `;
+}
+
+function renderPassportBackupCardHtml(stateObj) {
+  const cellsCount = Array.isArray(stateObj.cells) ? stateObj.cells.length : 0;
+  const memCount = Array.isArray(stateObj.personalMemories) ? stateObj.personalMemories.length : 0;
+  const expCount = Array.isArray(stateObj.expeditionHistory) ? stateObj.expeditionHistory.length : 0;
+
+  return `
+    <section class="passport-section passport-backup-card" id="passport-backup-card" aria-labelledby="passport-backup-heading">
+      <div class="section-heading" style="margin-bottom:10px">
+        <div>
+          <span class="eyebrow" style="margin-bottom:4px">Ochrana dat při výměně telefonu</span>
+          <h2 id="passport-backup-heading">💾 Záloha a přenos mého atlasu</h2>
+          <p>Tvůj osobní atlas (<strong>${cellsCount}</strong> odkrytých dílků mapy, <strong>${memCount}</strong> vlastních vzpomínek a <strong>${expCount}</strong> dokončených procházek s pohlednicemi) je uložen soukromě v tomto prohlížeči. Stáhni si zálohu do souboru a kdykoliv ji obnov na novém telefonu.</p>
+        </div>
+      </div>
+      <div class="passport-backup-actions" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        <button type="button" class="button primary" id="btn-passport-export-backup" data-action="export-state">
+          📥 Stáhnout zálohu do souboru (.json)
+        </button>
+        <button type="button" class="button lime" id="btn-passport-import-backup" data-action="import-state">
+          📂 Obnovit atlas ze souboru
+        </button>
+      </div>
+    </section>
+  `;
+}
+
+function openPassportPostcardModal(exp) {
+  const slot = document.querySelector('#passport-postcard-modal-slot');
+  if (!slot || !exp) return;
+
+  let currentTheme = exp.postcardTheme || exp.gameMode || 'gamified';
+  // DÁVKA 3 (Bod 2.2): Ve výchozím stavu zapnutý přepínač ochrany soukromí domova (±150 m)
+  let privacyTrimEnabled = true;
+
+  let dataUrl = generatePostcardDataUrl(exp, {
+    theme: currentTheme,
+    privacyTrim: privacyTrimEnabled,
+  });
+
+  const distStr = exp.distanceMeters >= 1000
+    ? (exp.distanceMeters / 1000).toFixed(1).replace('.', ',') + ' km'
+    : Math.round(exp.distanceMeters || 0) + ' m';
+
+  slot.innerHTML = `
+    <div class="session-modal" id="passport-privacy-modal" role="dialog" aria-modal="true" aria-labelledby="passport-privacy-title" tabindex="-1">
+      <div class="session-modal-card" style="max-width:600px;text-align:left;position:relative">
+        <button type="button" class="button small ghost" id="btn-close-passport-modal-x" aria-label="Zavřít náhled soukromí" style="position:absolute;top:12px;right:12px;padding:4px 10px;min-height:38px;font-weight:800">✕</button>
+        <div class="eyebrow" style="margin-bottom:4px">🔒 Náhled soukromí před sdílením (Domov v bezpečí)</div>
+        <h2 id="passport-privacy-title" style="padding-right:36px;margin:0 0 8px">Vzpomínka na procházku (${e(distStr)})</h2>
+
+        <!-- Přepínač ochrany soukromí domova (ve výchozím stavu zapnutý) -->
+        <div class="privacy-preview-box" style="margin-bottom:12px">
+          <label class="privacy-preview-toggle" for="chk-passport-privacy-trim">
+            <input type="checkbox" id="chk-passport-privacy-trim" checked>
+            <span>
+              <strong>🔒 Skrýt začátek a konec trasy (ochrana soukromí domova)</strong>
+              <small>Ořízne z mapy na pohlednici prvních a posledních 150 metrů trasy a skryje přesné časy průchodu.</small>
+            </span>
+          </label>
+        </div>
+
+        <!-- Výběr ze 3 vizuálních motivů pohlednice -->
+        <div class="postcard-theme-picker" role="radiogroup" aria-label="Vizuální motiv pohlednice" style="margin-bottom:10px">
+          <span class="eyebrow" style="display:block;margin-bottom:6px">Vizuální motiv pohlednice:</span>
+          <div class="postcard-theme-buttons">
+            ${Object.values(POSTCARD_THEMES).map(t => `
+              <button type="button" class="button small postcard-theme-btn ${currentTheme === t.id ? 'active lime' : 'ghost'}" data-passport-pc-theme="${e(t.id)}" role="radio" aria-checked="${currentTheme === t.id}">
+                ${e(t.label)}
+              </button>
+            `).join('')}
+          </div>
+        </div>
+
+        <div class="postcard-animated-wrap">
+          <img id="passport-modal-pc-img" src="${dataUrl}" alt="Náhled pohlednice před sdílením" style="width:100%;height:auto;display:block">
+        </div>
+
+        <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:14px">
+          <button type="button" class="button primary" id="btn-passport-modal-share">📤 Sdílet vzpomínku</button>
+          <button type="button" class="button" id="btn-passport-modal-download">📥 Stáhnout pohlednici (PNG)</button>
+          <button type="button" class="button ghost" id="btn-close-passport-modal">Zavřít</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const updatePreview = () => {
+    dataUrl = generatePostcardDataUrl(exp, {
+      theme: currentTheme,
+      privacyTrim: privacyTrimEnabled,
+    });
+    const img = slot.querySelector('#passport-modal-pc-img');
+    if (img) img.src = dataUrl;
+  };
+
+  const closeModal = () => {
+    slot.innerHTML = '';
+    playTick();
+  };
+
+  setTimeout(() => {
+    slot.querySelector('#passport-privacy-modal')?.focus({ preventScroll: true });
+  }, 30);
+
+  slot.querySelector('#chk-passport-privacy-trim')?.addEventListener('change', ev => {
+    privacyTrimEnabled = Boolean(ev.target.checked);
+    updatePreview();
+    playTick();
+  });
+
+  slot.querySelectorAll('[data-passport-pc-theme]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      currentTheme = btn.dataset.passportPcTheme || 'gamified';
+      slot.querySelectorAll('[data-passport-pc-theme]').forEach(b => {
+        const isAct = b.dataset.passportPcTheme === currentTheme;
+        b.classList.toggle('active', isAct);
+        b.classList.toggle('lime', isAct);
+        b.classList.toggle('ghost', !isAct);
+        b.setAttribute('aria-checked', String(isAct));
+      });
+      updatePreview();
+      playTick();
+    });
+  });
+
+  slot.querySelector('#passport-privacy-modal')?.addEventListener('click', ev => {
+    if (ev.target === slot.querySelector('#passport-privacy-modal')) {
+      closeModal();
+    }
+  });
+
+  slot.querySelector('#btn-close-passport-modal-x')?.addEventListener('click', closeModal);
+  slot.querySelector('#btn-close-passport-modal')?.addEventListener('click', closeModal);
+
+  slot.querySelector('#btn-passport-modal-download')?.addEventListener('click', async () => {
+    try {
+      const blob = await generatePostcardBlob(exp, {
+        theme: currentTheme,
+        privacyTrim: privacyTrimEnabled,
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `pohlednice-${exp.id}.png`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+      toast('Pohlednice byla stažena.');
+    } catch {
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      a.download = `pohlednice-${exp.id}.svg`;
+      a.click();
+    }
+  });
+
+  slot.querySelector('#btn-passport-modal-share')?.addEventListener('click', async () => {
+    try {
+      const blob = await generatePostcardBlob(exp, {
+        theme: currentTheme,
+        privacyTrim: privacyTrimEnabled,
+      });
+      const file = new File([blob], `pohlednice-${exp.id}.png`, { type: 'image/png' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          title: 'Vzpomínka na procházku · Czekpoint',
+          text: `Pohlednice z mé procházky s Czekpointem (${distStr}).`,
+          files: [file],
+        });
+      } else if (navigator.share) {
+        await navigator.share({
+          title: 'Vzpomínka na procházku · Czekpoint',
+          text: `Pohlednice z mé procházky s Czekpointem (${distStr}).`,
+        });
+      } else {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `pohlednice-${exp.id}.png`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1500);
+        toast('Pohlednice byla stažena do zařízení.');
+      }
+    } catch (err) {
+      if (err.name !== 'AbortError') toast('Sdílení se nezdařilo.', true);
+    }
+  });
+}
+
 function renderPassport() {
   state.passportSection = state.passportSection || 'stick';
   const visitedRoutes = state.routes.filter(route => visitFor(route.id));
@@ -372,7 +723,6 @@ function renderPassport() {
   const totalPts = totalScore(stateObj);
   const rank = explorerRank(totalPts);
   const cStatus = chapterStatus(CHAPTERS, state.routes, stateObj.discoveries);
-  const expeditions = stateObj.expeditionHistory || [];
 
   let sectionContent = '';
 
@@ -423,44 +773,6 @@ function renderPassport() {
   } else if (state.passportSection === 'postcards') {
     // Tab 2: 🖼️ Pohlednice a deník
     sectionContent = `
-      <section class="passport-section">
-        <div class="section-heading">
-          <div>
-            <h2>Moje pohlednice z dokončených výprav</h2>
-            <p>Ilustrované vzpomínky sestavené z tvých dokončených výprav.</p>
-          </div>
-        </div>
-        ${expeditions.length ? `
-          <div class="postcard-grid">
-            ${expeditions.map(exp => {
-              const dataUrl = generatePostcardDataUrl(exp);
-              const dist = exp.distanceMeters >= 1000 ? (exp.distanceMeters / 1000).toFixed(1).replace('.', ',') + ' km' : Math.round(exp.distanceMeters) + ' m';
-              return `
-                <div class="postcard-card">
-                  <img src="${dataUrl}" alt="Pohlednice z výpravy" loading="lazy" data-action="preview-postcard" data-exp-id="${e(exp.id)}" style="cursor:pointer" title="Klikni pro zvětšení pohlednice">
-                  <div class="postcard-card-stats">
-                    <span>👣 ${dist}</span>
-                    <span>🗺️ +${exp.newCellsCount} dílků</span>
-                    <span>⭐ +${exp.newStampsCount} razítek</span>
-                  </div>
-                  <div class="postcard-actions">
-                    <button type="button" class="button small ghost" data-action="preview-postcard" data-exp-id="${e(exp.id)}">🔍 Zvětšit</button>
-                    <button type="button" class="button small primary" data-action="download-postcard" data-exp-id="${e(exp.id)}">Stáhnout pohlednici (PNG)</button>
-                    <button type="button" class="button small" data-action="share-postcard" data-exp-id="${e(exp.id)}">Sdílet</button>
-                  </div>
-                </div>
-              `;
-            }).join('')}
-          </div>
-          <div id="passport-postcard-modal-slot"></div>
-        ` : `
-          <div class="empty-state" style="padding:24px 12px;text-align:center">
-            <p class="small-note">Zatím nemáš žádnou pohlednici. Vydej se na procházku, ukonči výpravu a vytvoř svou první ilustrovanou vzpomínku!</p>
-            <a class="button small" href="#/prochazka">Vyrazit na procházku s GPS</a>
-          </div>
-        `}
-      </section>
-
       <section class="passport-section">
         <div class="section-heading">
           <div>
@@ -577,7 +889,7 @@ function renderPassport() {
       <div>
         <div class="eyebrow">${icon('book')} Tvoje výpravy a atlas</div>
         <h1 tabindex="-1">Můj výletový pas.</h1>
-        <p>Sbírka navštívených míst, kapitol a relikvií z Rožmitálska.</p>
+        <p>Sbírka navštívených míst, historie tvých procházek, vlastních vzpomínek a záloha osobního atlasu.</p>
       </div>
       <div class="passport-brand-banner">${renderBrandLogoHtml({ id: 'passport-brand-logo', className: 'logo-stage passport-banner-logo' })}</div>
       <div class="passport-stats">
@@ -585,6 +897,15 @@ function renderPassport() {
         <div class="passport-stat"><strong>${stateObj.discoveries.length}</strong><span>GPS razítek</span></div>
       </div>
     </section>
+
+    <!-- DÁVKA 3 (Bod 2.1): Historie mých procházek a objevů přímo v Můj pas (#/pas) -->
+    ${renderExpeditionHistorySectionHtml(stateObj)}
+
+    <!-- DÁVKA 3 (Bod 2.3): Karta Záloha a přenos mého atlasu přímo v Můj pas (#/pas) -->
+    ${renderPassportBackupCardHtml(stateObj)}
+
+    <input type="file" id="app-import-file" accept=".json,application/json" hidden>
+    <div id="passport-postcard-modal-slot"></div>
 
     <!-- 3 Big Clean Passport Tabs -->
     <div class="passport-section-tabs" role="tablist" aria-label="Sekce pasu">
@@ -633,11 +954,11 @@ function renderAbout() {
       <p style="margin-top:6px;font-size:0.92rem"><strong>Ukázkoví poutníci v pasu:</strong> postavy poutníků v sekci „Ukázkoví poutníci v okolí“ jsou generované lokální ukázkové postavy pro atmosféru revíru, nikoli skuteční uživatelé připojení přes síť.</p>
     </section></div>
     <div class="about-foot">
-      <p class="small-note">Bez sledovacích reklam a bez analytických měřicích skriptů. Toto je verze v1.4-part2.</p>
+      <p class="small-note">Bez sledovacích reklam a bez analytických měřicích skriptů. Toto je verze v1.4-part3.</p>
       <div class="data-actions">
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
-          <button type="button" class="button small" data-action="export-state">${icon('arrow')}Exportovat průzkum (JSON)</button>
-          <button type="button" class="button small" data-action="import-state">${icon('book')}Obnovit průzkum ze zálohy (JSON)</button>
+          <button type="button" class="button small" data-action="export-state">${icon('arrow')}📥 Stáhnout zálohu do souboru (.json)</button>
+          <button type="button" class="button small" data-action="import-state">${icon('book')}📂 Obnovit atlas ze souboru</button>
           <input type="file" id="app-import-file" accept=".json,application/json" hidden>
         </div>
         <button type="button" class="button danger small" data-action="clear-local">${icon('trash')}Vymazat lokální data a resetovat průzkum</button>
@@ -1005,11 +1326,45 @@ document.addEventListener('click', async event => {
       setTimeout(() => renderPassport(), 180);
       return;
     }
-    if (action === 'preview-postcard') {
+    if (action === 'toggle-show-hidden-expeditions') {
+      state.showHiddenExpeditions = !state.showHiddenExpeditions;
+      playTick();
+      renderPassport();
+      return;
+    }
+    if (action === 'toggle-hide-expedition') {
+      const expId = button.dataset.expId;
+      let stateObj = loadState();
+      stateObj = toggleHideExpeditionEntry(stateObj, expId);
+      saveState(stateObj);
+      playTick();
+      const updated = (stateObj.expeditionHistory || []).find(x => x && x.id === expId);
+      toast(updated?.hidden ? 'Procházka byla skryta z přehledu.' : 'Procházka je znovu viditelná v přehledu.');
+      renderPassport();
+      return;
+    }
+    if (action === 'delete-expedition') {
+      const expId = button.dataset.expId;
+      const confirmed = await askConfirmation(
+        'Smazat tuto procházku z historie?',
+        'Procházka a její pohlednice budou trvale odstraněny ze seznamu dokončených procházek. Tuto akci nelze vrátit.',
+        '🗑️ Smazat procházku'
+      );
+      if (!confirmed) return;
+      let stateObj = loadState();
+      stateObj = deleteExpeditionEntry(stateObj, expId);
+      saveState(stateObj);
+      playTick();
+      toast('Procházka byla smazána z historie.');
+      renderPassport();
+      return;
+    }
+    if (action === 'preview-postcard' || action === 'share-postcard') {
       const expId = button.dataset.expId;
       const stateObj = loadState();
       const exp = (stateObj.expeditionHistory || []).find(x => x.id === expId);
       if (exp) {
+        // DÁVKA 3 (Bod 2.2): Před sdílením výletu/pohlednice otevři Náhled soukromí s ve výchozím stavu zapnutým ořezem ±150 m
         openPassportPostcardModal(exp);
       }
       return;
@@ -1019,43 +1374,14 @@ document.addEventListener('click', async event => {
       const stateObj = loadState();
       const exp = (stateObj.expeditionHistory || []).find(x => x.id === expId);
       if (exp) {
-        const dataUrl = generatePostcardDataUrl(exp);
+        const dataUrl = generatePostcardDataUrl(exp, {
+          theme: exp.postcardTheme || exp.gameMode || 'gamified',
+          privacyTrim: true,
+        });
         const a = document.createElement('a');
         a.href = dataUrl;
-        a.download = `pohlednice-${exp.id}.png`;
+        a.download = `pohlednice-${exp.id}.svg`;
         a.click();
-      }
-      return;
-    }
-    if (action === 'share-postcard') {
-      const expId = button.dataset.expId;
-      const stateObj = loadState();
-      const exp = (stateObj.expeditionHistory || []).find(x => x.id === expId);
-      if (exp) {
-        try {
-          const blob = await generatePostcardBlob(exp);
-          const file = new File([blob], `pohlednice-${exp.id}.png`, { type: 'image/png' });
-          if (navigator.canShare && navigator.canShare({ files: [file] })) {
-            await navigator.share({
-              title: 'Moje malá výprava · Czekpoint',
-              text: `Pohlednice z mé výpravy s Czekpointem.`,
-              files: [file],
-            });
-          } else if (navigator.share) {
-            await navigator.share({
-              title: 'Moje malá výprava · Czekpoint',
-              text: `Pohlednice z mé výpravy s Czekpointem.`,
-            });
-          } else {
-            const dataUrl = generatePostcardDataUrl(exp);
-            const a = document.createElement('a');
-            a.href = dataUrl;
-            a.download = `pohlednice-${exp.id}.png`;
-            a.click();
-          }
-        } catch (err) {
-          if (err.name !== 'AbortError') toast('Sdílení se nezdařilo.', true);
-        }
       }
       return;
     }
@@ -1065,10 +1391,10 @@ document.addEventListener('click', async event => {
       const url = URL.createObjectURL(new Blob([jsonStr], { type: 'application/json' }));
       const a = document.createElement('a');
       a.href = url;
-      a.download = `czekpoint-pruzkum-${today}.json`;
+      a.download = `czekpoint-zaloha-${today}.json`;
       a.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
-      toast('Záloha průzkumu byla exportována.');
+      toast('Záloha osobního atlasu byla stažena do souboru.');
       return;
     }
     if (action === 'import-state') {
@@ -1086,6 +1412,16 @@ document.addEventListener('click', async event => {
   } catch (error) { toast(errorMessage(error), true); } finally { if (button.isConnected) button.disabled = false; }
 });
 
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape') {
+    const privacyModal = document.querySelector('#passport-privacy-modal');
+    if (privacyModal) {
+      const slot = document.querySelector('#passport-postcard-modal-slot');
+      if (slot) slot.innerHTML = '';
+    }
+  }
+});
+
 document.addEventListener('change', async event => {
   if (event.target.id === 'app-import-file') {
     const file = event.target.files?.[0];
@@ -1094,15 +1430,15 @@ document.addEventListener('change', async event => {
       const text = await file.text();
       const preview = previewImportState(text);
       const confirmed = await askConfirmation(
-        'Obnovit průzkum ze zálohy?',
-        `Záloha obsahuje: Avatar ${preview.avatarId}, ${preview.cellsCount} dílků, ${preview.metersKm} km, ${preview.stampsCount} razítek a ${preview.historyCount} výprav. Současný postup v tomto prohlížeči bude nahrazen.`,
-        'Obnovit zálohu'
+        'Obnovit osobní atlas ze souboru?',
+        `Záloha obsahuje: Avatar ${preview.avatarId}, ${preview.cellsCount} odkrytých dílků mapy, ${preview.metersKm} km, ${preview.stampsCount} razítek, ${preview.personalMemoriesCount || 0} vlastních vzpomínek a ${preview.historyCount} dokončených procházek. Současný atlas v tomto prohlížeči bude bezpečně obnoven.`,
+        'Obnovit atlas'
       );
       if (confirmed) {
         importStateJson(text);
         await refreshPersonal();
         await renderPage();
-        toast('Průzkum byl úspěšně obnoven ze zálohy.');
+        toast('Osobní atlas byl úspěšně obnoven ze zálohy.');
       }
     } catch (err) {
       toast('Chyba při obnově zálohy: ' + err.message, true);

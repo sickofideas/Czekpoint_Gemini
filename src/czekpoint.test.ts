@@ -37,6 +37,9 @@ import {
   previewImportState,
   importStateJson,
   exportStateJson,
+  upsertExpeditionHistory,
+  toggleHideExpeditionEntry,
+  deleteExpeditionEntry,
 } from './walk-store.js';
 import {
   analyzePlannedRoute,
@@ -81,6 +84,13 @@ import {
   renderElevationProfileCardHtml,
 } from './elevation.js';
 import {
+  POSTCARD_THEMES,
+  estimateStepsFromMeters,
+  formatActiveDuration,
+  formatElevationSummary,
+  normalizeWalkSegments,
+  trimTrackForHomePrivacy,
+  buildMiniMapPathSvg,
   renderPostcardSvg,
   renderPostcardSvgDataUrl,
 } from './postcards.js';
@@ -1474,5 +1484,120 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
       }
     }
   });
+
+  it('DÁVKA 3 (v1.4-part3): Přístupný dialog dokončení (z-index: 3000), 3 motivy pohlednice, vlastní vzpomínky, ochrana soukromí domova (±150 m) a Historie + Záloha v Můj pas', () => {
+    // 1. Ochrana soukromí domova: ořez prvních a posledních 150 metrů trasy se zachováním výpadků GPS (walkSegments)
+    const seg1 = [
+      { lat: 49.6000, lng: 13.8600 }, // 0 m (domov)
+      { lat: 49.6010, lng: 13.8600 }, // ~111 m
+      { lat: 49.6020, lng: 13.8600 }, // ~222 m
+      { lat: 49.6030, lng: 13.8600 }, // ~333 m
+    ];
+    const seg2 = [
+      { lat: 49.6050, lng: 13.8620 }, // po výpadku GPS
+      { lat: 49.6060, lng: 13.8620 }, // +111 m
+      { lat: 49.6070, lng: 13.8620 }, // +222 m (návrat domů)
+    ];
+
+    const trimmed = trimTrackForHomePrivacy([seg1, seg2], 150);
+    assert.equal(trimmed.trimmed, true, 'Trasa delší než 320 m musí být na začátku i na konci oříznuta o 150 m');
+    assert.equal(trimmed.tooShortToDisplay, false);
+    assert.equal(trimmed.segments.length, 2, 'Vícesegmentová trasa (walkSegments) musí zachovat přerušení při výpadku GPS');
+    // Začátek oříznuté trasy nesmí začínat na původním domově 49.6000, ale až po 150 m (> 49.6012)
+    assert.ok(trimmed.segments[0][0].lat > 49.6012, 'Prvních 150 m od domova musí být oříznuto');
+    // Konec oříznuté trasy nesmí končit na 49.6070, ale před posledními 150 m (< 49.6058)
+    const lastSeg = trimmed.segments[trimmed.segments.length - 1];
+    const lastPt = lastSeg[lastSeg.length - 1];
+    assert.ok(lastPt.lat < 49.6058, 'Posledních 150 m před domovem musí být oříznuto');
+
+    // Krátká trasa u domu (<= 320 m) se při zapnuté ochraně soukromí celá skryje
+    const shortHomeWalk = [
+      { lat: 49.6000, lng: 13.8600 },
+      { lat: 49.6010, lng: 13.8600 }, // ~111 m
+    ];
+    const trimmedShort = trimTrackForHomePrivacy([shortHomeWalk], 150);
+    assert.equal(trimmedShort.tooShortToDisplay, true, 'Krátká procházka kolem domu musí být při ořezu ±150 m skryta');
+    assert.equal(trimmedShort.segments.length, 0);
+
+    // 2. Pohlednice: 3 vizuální motivy, koláž fotek + vlastní uložené symboly (Moje malé objevy), pravdivé statistiky a skrytí přesného času
+    assert.ok(POSTCARD_THEMES.explorer && POSTCARD_THEMES.gamified && POSTCARD_THEMES.casual);
+    assert.equal(estimateStepsFromMeters(1500) > 1800, true);
+    assert.equal(formatActiveDuration(25 * 60 * 1000), '25 min');
+    assert.equal(formatElevationSummary({ elevationKnown: false, elevationGainM: null }), 'nedostupné');
+    assert.equal(formatElevationSummary({ elevationKnown: true, elevationGainM: 85 }), '+85 m');
+
+    const summarySample = {
+      id: 'exp-davka3-1',
+      date: '2026-10-28T14:35:00.000Z',
+      distanceMeters: 2450,
+      activeDurationMs: 32 * 60 * 1000,
+      estimatedSteps: 3267,
+      elevationKnown: false,
+      elevationGainM: null,
+      newCellsCount: 7,
+      stampsCount: 1,
+      walkSegments: [seg1, seg2],
+      visitedPlacesWithPhotos: [
+        { title: 'Zámek Rožmitál', photoUrl: './assets/castle.svg', kind: 'culture' },
+      ],
+      personalMemories: [
+        { symbolId: 'tree', symbolIcon: '🌳', title: 'Staletý dub', note: 'Krásný stín u vody' },
+        { symbolId: 'view', symbolIcon: '🌄', title: 'Výhled na Třemšín', note: '' },
+      ],
+    };
+
+    const svgPrivacyOn = renderPostcardSvg(summarySample as any, { theme: 'explorer', privacyTrim: true });
+    assert.match(svgPrivacyOn, /🧭 Objevování/);
+    assert.match(svgPrivacyOn, /✨ MOJE MALÉ OBJEVY/);
+    assert.match(svgPrivacyOn, /Staletý dub/);
+    assert.match(svgPrivacyOn, /Odhad kroků: ~3/);
+    assert.match(svgPrivacyOn, /Odhad převýšení: nedostupné/);
+    assert.match(svgPrivacyOn, /\+7 dílků/);
+    assert.match(svgPrivacyOn, /🔒 Ochrana soukromí domova \(\±150 m\)/);
+    assert.equal(svgPrivacyOn.includes('14:35'), false, 'Při zapnuté ochraně soukromí nesmí pohlednice zobrazovat přesný čas průchodu');
+
+    const svgCasual = renderPostcardSvg(summarySample as any, { theme: 'casual', privacyTrim: false });
+    assert.match(svgCasual, /🗺️ Turistická mapa/);
+
+    // 3. Bezpečné uložení bez duplicit (upsertExpeditionHistory) a akce v Můj pas (Skrýt/Zobrazit, Smazat)
+    let history: any[] = [];
+    history = upsertExpeditionHistory(history, summarySample);
+    history = upsertExpeditionHistory(history, { ...summarySample, postcardTheme: 'casual' });
+    assert.equal(history.length, 1, 'upsertExpeditionHistory musí zabránit dvojímu uložení téže výpravy');
+    assert.equal(history[0].postcardTheme, 'casual');
+
+    let stateObj: any = {
+      ...loadState(),
+      expeditionHistory: history,
+      personalMemories: summarySample.personalMemories,
+    };
+    stateObj = toggleHideExpeditionEntry(stateObj, 'exp-davka3-1');
+    assert.equal(stateObj.expeditionHistory[0].hidden, true, 'Procházka musí jít skrýt');
+    stateObj = toggleHideExpeditionEntry(stateObj, 'exp-davka3-1');
+    assert.equal(stateObj.expeditionHistory[0].hidden, false, 'Procházka musí jít znovu zobrazit');
+
+    // 4. Záloha a obnova osobního atlasu při výměně telefonu (cells + personalMemories + expeditionHistory)
+    const backupJson = exportStateJson(stateObj);
+    const preview = previewImportState(backupJson);
+    assert.equal(preview.valid, true);
+    assert.equal(preview.personalMemoriesCount, 2);
+    assert.equal(preview.historyCount, 1);
+
+    stateObj = deleteExpeditionEntry(stateObj, 'exp-davka3-1');
+    assert.equal(stateObj.expeditionHistory.length, 0, 'Smazaná procházka musí zmizet ze seznamu');
+
+    const restored = importStateJson(backupJson);
+    assert.equal(restored.expeditionHistory.length, 1, 'Obnova ze zálohy musí vrátit historii procházek');
+    assert.equal(restored.personalMemories.length, 2, 'Obnova ze zálohy musí vrátit vlastní vzpomínky');
+
+    // 5. Ověření přítomnosti modálního dialogu s z-index: 3000 a prvků v kódu
+    const walkCss = fs.readFileSync('assets/walk.css', 'utf-8');
+    const appJs = fs.readFileSync('src/app.js', 'utf-8');
+    assert.ok(walkCss.includes('z-index: 3000'), 'Modální dialog dokončení procházky musí mít z-index: 3000');
+    assert.ok(walkCss.includes('.postcard-animated-wrap'), 'Třída .postcard-animated-wrap musí být definována pro 3D náklon pohlednice');
+    assert.ok(appJs.includes('Historie mých procházek a objevů'), 'Můj pas musí obsahovat sekci Historie mých procházek a objevů');
+    assert.ok(appJs.includes('Záloha a přenos mého atlasu'), 'Můj pas musí obsahovat kartu Záloha a přenos mého atlasu');
+  });
 });
+
 

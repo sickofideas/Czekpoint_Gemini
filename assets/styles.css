@@ -106,3 +106,335 @@ button:active,.button:active{transform:scale(.97)}
 @media(max-width:760px){.site-header{padding:12px 16px;gap:12px;flex-wrap:wrap}.brand{font-size:22px}.header-logo-slot{width:52px;height:52px;min-width:52px;min-height:52px}.header-logo-slot .czekpoint-logo-svg{width:52px;height:52px}.main-nav{gap:12px;font-size:14px;flex-wrap:wrap}.page-shell{padding:14px 16px 40px}.hero{gap:22px;padding-top:0;grid-template-columns:1fr}.hero h1{font-size:42px;max-width:480px}.hero-copy>p{max-width:500px;font-size:15px;margin-bottom:20px}.hero-art{max-width:580px}.hero-art>img{aspect-ratio:720/315}.art-label{bottom:14px;left:15px;padding:9px 12px}.trust-line{margin-top:17px}.route-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.route-card:last-child{grid-column:auto}.filter-top{gap:10px}.search-field{max-width:none;flex-basis:100%}.filter-select{flex:1}.filter-top .check-filter{margin-left:3px}.section-heading h2{font-size:22px}.detail-grid{grid-template-columns:1fr}.detail-header{align-items:start;flex-wrap:wrap}.detail-header h1{font-size:35px}.detail-header>.button{padding:10px 14px;font-size:14px}.sidebar-card{position:static;grid-row:1}.detail-main{grid-row:2}.facts{grid-template-columns:repeat(2,1fr);gap:12px}.fact strong{font-size:17px}.fact strong.unknown{font-size:13px}.fact>span{font-size:12px}.access-box{margin-bottom:15px}.sidebar-card .stack-actions{display:grid;grid-template-columns:1fr}.about-grid{grid-template-columns:1fr}.passport-header{flex-wrap:wrap}.passport-header h1,.about-intro h1{font-size:34px}.passport-stats{width:100%}.passport-stat{flex:1;display:flex;align-items:center;justify-content:center;gap:10px;padding:12px}.passport-stat strong{font-size:28px}.site-footer{margin:0 16px;flex-wrap:wrap;gap:10px 18px}.site-footer .version{display:none}.site-footer>a:not(.brand){margin-left:auto}.site-footer>span:not(.version){display:none}.report-section>.section-heading{align-items:start;flex-wrap:wrap}.mode-banner{font-size:12px;text-align:left;padding:9px 16px}.mode-banner a{white-space:nowrap}}
 @media(max-width:460px){.route-grid{grid-template-columns:1fr}.card-image img{aspect-ratio:600/290}.card-content{padding:16px}.card-content h3{font-size:20px}.card-description{min-height:0}.card-stats{font-size:13px}.card-kicker{font-size:11px}.card-verification{font-size:12px}.access-tag{font-size:12px}.hero h1{font-size:38px}.hero-art>img{aspect-ratio:720/385}.hero-actions .button{font-size:14px;padding:12px 14px}.section-heading>span{display:none}.filter-chips{gap:6px}.chip{padding:8px 12px;font-size:13px}.trust-line{gap:14px;font-size:12px}.facts{grid-template-columns:1fr 1fr;gap:14px}.fact strong{font-size:18px}.fact>span{font-size:12px}.form-row{grid-template-columns:1fr;gap:0}.dialog-header{padding:19px 18px 15px}.report-form{padding:18px}.dialog-header h2{font-size:22px}.form-footer{flex-direction:column;align-items:stretch;gap:13px}.panel{padding:18px}.detail-header h1{font-size:30px}.header-region{display:none}.main-nav{gap:10px;width:100%;justify-content:space-between}.main-nav .nav-count{display:none}.brand{gap:7px}.brand:not(.small) .header-logo-slot{width:48px;height:48px;min-width:48px;min-height:48px}.brand:not(.small) .header-logo-slot img,.brand:not(.small) .header-logo-slot .czekpoint-logo-svg{width:48px;height:48px}.brand.small img{width:22px;height:22px;min-width:22px;min-height:22px}}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;scroll-behavior:auto!important}body::before,#ambient-bg,.ambient-contours,.ambient-silhouette,.floating-spore,.czekpoint-logo-svg,.anim-trees-left,.anim-trees-right,.anim-tree-center,.anim-hiker-arm,.anim-hiker-body,.anim-pin,.anim-target-ring,.anim-sign-1,.anim-sign-2,.anim-sign-3,.anim-firefly-1,.anim-firefly-2,.anim-shine{animation:none!important}}
+
+/* DÁVKA 3 (Verze v1.4-part3): Historie výletů v Můj pas, Náhled soukromí domova a Záloha osobního atlasu */
+#passport-privacy-modal,
+.session-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  background: rgba(15, 29, 23, 0.78);
+  backdrop-filter: blur(5px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.session-modal-card {
+  background: #faf7ef;
+  color: #1c2820;
+  border: 2px solid #2b4f40;
+  border-radius: 20px;
+  max-width: 600px;
+  width: 100%;
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  padding: 20px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.48);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.postcard-animated-wrap {
+  perspective: 1000px;
+  transform: perspective(1000px) rotateX(1.8deg) rotateY(-1.4deg);
+  transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.28s ease;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 12px 30px rgba(20, 38, 28, 0.22);
+  background: #241911;
+}
+
+.postcard-animated-wrap:hover,
+.postcard-animated-wrap:focus-within {
+  transform: perspective(1000px) rotateX(0deg) rotateY(0deg) translateY(-2px);
+  box-shadow: 0 16px 38px rgba(20, 38, 28, 0.32);
+}
+
+.privacy-preview-box {
+  background: #ecfdf5;
+  border: 1.5px solid #10b981;
+  border-radius: 12px;
+  padding: 10px 12px;
+  color: #064e3b;
+}
+
+.privacy-preview-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+  margin: 0;
+}
+
+.privacy-preview-toggle input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  margin-top: 2px;
+  accent-color: #15803d;
+  flex-shrink: 0;
+}
+
+.privacy-preview-toggle span {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.privacy-preview-toggle strong {
+  font-size: 0.9rem;
+  color: #064e3b;
+}
+
+.privacy-preview-toggle small {
+  font-size: 0.78rem;
+  color: #047857;
+  line-height: 1.35;
+}
+
+.postcard-theme-picker {
+  background: #f2ece0;
+  border: 1px solid #d5c7ad;
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+
+.postcard-theme-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.postcard-theme-btn {
+  flex: 1 1 130px;
+  min-height: 38px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  justify-content: center;
+}
+
+.expedition-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.expedition-history-card {
+  background: #ffffff;
+  border: 1.5px solid #cfd9c7;
+  border-radius: 18px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: 0 6px 20px rgba(20, 47, 38, 0.06);
+}
+
+.expedition-history-card.is-hidden-record {
+  opacity: 0.72;
+  border-style: dashed;
+  background: #f8faf5;
+}
+
+.ehc-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.ehc-title {
+  margin: 4px 0 0;
+  font-size: 1.15rem;
+  color: #142f26;
+}
+
+.ehc-theme-badge {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 750;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: #eef5ce;
+  color: #2b4529;
+  border: 1px solid #afbf68;
+}
+
+.ehc-hidden-badge {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: #fef3c7;
+  color: #78350f;
+  margin-left: 6px;
+}
+
+.ehc-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.ehc-stats-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ehc-stat-pill {
+  background: #f4f7ef;
+  border: 1px solid #dce4d3;
+  border-radius: 999px;
+  padding: 5px 11px;
+  font-size: 0.82rem;
+  color: #243829;
+}
+
+.ehc-visual-grid {
+  display: grid;
+  grid-template-columns: 1.15fr 1fr;
+  gap: 14px;
+  align-items: stretch;
+}
+
+@media (max-width: 720px) {
+  .ehc-visual-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.ehc-minimap-box {
+  background: #f5efe0;
+  border: 1px solid #d5c7ab;
+  border-radius: 14px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 170px;
+}
+
+.ehc-minimap-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.ehc-postcard-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ehc-postcard-thumb {
+  width: 100%;
+  max-width: 260px;
+}
+
+.ehc-postcard-thumb img {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.ehc-records-box {
+  background: #fafcf7;
+  border: 1px solid #e2eadb;
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.86rem;
+}
+
+.ehc-record-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.ehc-place-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
+.ehc-place-chip.confirmed {
+  background: #dcfce7;
+  color: #14532d;
+  border: 1px solid #86efac;
+}
+
+.ehc-place-chip.nearby {
+  background: #e0f2fe;
+  color: #0c4a6e;
+  border: 1px solid #7dd3fc;
+}
+
+.ehc-place-chip.memory {
+  background: #fef3c7;
+  color: #78350f;
+  border: 1px solid #fcd34d;
+}
+
+.passport-memories-subcard {
+  background: #fffdf7;
+  border: 1.5px solid #e2d5b5;
+  border-radius: 16px;
+  padding: 14px 16px;
+}
+
+.passport-memories-chips {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+.passport-memory-pill {
+  background: #ffffff;
+  border: 1px solid #e5d8bc;
+  border-radius: 12px;
+  padding: 8px 10px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.passport-memory-pill .pmp-icon {
+  font-size: 1.35rem;
+  line-height: 1;
+}
+
+.passport-memory-pill strong {
+  display: block;
+  font-size: 0.86rem;
+  color: #24190c;
+}
+
+.passport-memory-pill p {
+  margin: 2px 0 0;
+  font-size: 0.78rem;
+  color: #5c4b37;
+}
+
+.passport-backup-card {
+  background: linear-gradient(135deg, #f4f9ee 0%, #eaf3df 100%);
+  border: 2px solid #84a969;
+  border-radius: 18px;
+  padding: 18px 20px;
+  margin: 18px 0;
+}
+
