@@ -4564,19 +4564,35 @@
    3. Okrajový ukazatel cíle mimo obrazovku (#offscreen-target-indicator)
    ========================================================================== */
 
+.map-right-toolbar {
+  align-items: flex-end !important;
+}
+
+#btn-toggle-3d.map-right-btn {
+  width: auto !important;
+  height: auto !important;
+  min-height: 44px !important;
+  padding: 6px 12px !important;
+  font-size: 0.86rem !important;
+  white-space: nowrap !important;
+}
+
 #btn-follow-heading,
 .map-follow-heading-btn {
-  min-height: 44px;
-  padding: 6px 12px;
-  border-radius: 999px;
-  border: 1.5px solid #2b5444;
-  background: rgba(255, 255, 255, 0.96);
-  color: #142f26;
-  font-size: 0.84rem;
-  font-weight: 750;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+  width: auto !important;
+  height: auto !important;
+  min-height: 44px !important;
+  padding: 6px 12px !important;
+  border-radius: 999px !important;
+  border: 1.5px solid #2b5444 !important;
+  background: rgba(255, 255, 255, 0.96) !important;
+  color: #142f26 !important;
+  font-size: 0.84rem !important;
+  font-weight: 750 !important;
+  white-space: nowrap !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
   cursor: pointer;
   box-shadow: 0 3px 10px rgba(20, 47, 38, 0.16);
   transition: background-color 0.16s ease, color 0.16s ease, border-color 0.16s ease, transform 0.12s ease;
@@ -4584,8 +4600,8 @@
 
 #btn-follow-heading:hover,
 .map-follow-heading-btn:hover {
-  border-color: #1f6b45;
-  background: #f1f8ec;
+  border-color: #1f6b45 !important;
+  background: #f1f8ec !important;
 }
 
 #btn-follow-heading.is-active,
@@ -4717,4 +4733,49 @@
   border: none;
   cursor: pointer;
 }
+
+/* ==========================================================================
+   KRITICKÁ OPRAVA 1 (Hotfix v2.0.1):
+   Plovoucí tlačítko „🎯 Zpět na postavičku“ (#btn-recenter-avatar)
+   uprostřed dole nad lištou (z-index: 1100, min-height: 46px)
+   ========================================================================== */
+
+#btn-recenter-avatar,
+.recenter-avatar-btn {
+  position: absolute;
+  bottom: 78px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1100;
+  min-height: 46px;
+  padding: 10px 20px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #142f26 0%, #1d4637 100%);
+  color: #ffffff;
+  border: 2.5px solid #ffd46b;
+  box-shadow: 0 8px 24px rgba(10, 26, 20, 0.55);
+  font-size: 0.94rem;
+  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: transform 0.14s ease, background-color 0.14s ease, box-shadow 0.14s ease;
+}
+
+#btn-recenter-avatar:hover,
+.recenter-avatar-btn:hover {
+  background: linear-gradient(135deg, #1c4134 0%, #265c48 100%);
+  transform: translateX(-50%) translateY(-1px);
+  box-shadow: 0 10px 28px rgba(10, 26, 20, 0.65);
+}
+
+#btn-recenter-avatar[hidden],
+.recenter-avatar-btn[hidden],
+.return-to-gps-btn[hidden] {
+  display: none !important;
+}
+
 

@@ -2326,6 +2326,40 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
       assert.ok(readmeMd.includes(requiredTerm), `Dokumentace README.md musí obsahovat „${requiredTerm}“`);
     }
   });
+
+  it('KRITICKÁ OPRAVA 1 (Hotfix v2.0.1) — Odblokování pohybu mapy ve 3D, konec problikávání, 3D hory + 3D budovy a tlačítko „🎯 Zpět na postavičku“', () => {
+    const walkJs = fs.readFileSync('src/walk.js', 'utf-8');
+    const walkCss = fs.readFileSync('assets/walk.css', 'utf-8');
+    const configJs = fs.readFileSync('config.js', 'utf-8');
+
+    // 1. Odblokování pohybu mapy ve 3D a plovoucí tlačítko #btn-recenter-avatar
+    assert.ok(walkJs.includes('map.dragPan?.enable?.()'), 'Musí být povolen map.dragPan.enable()');
+    assert.ok(walkJs.includes('map.touchZoomRotate?.enable?.()'), 'Musí být povolen map.touchZoomRotate.enable()');
+    assert.ok(walkJs.includes('map.dragRotate?.enable?.()'), 'Musí být povolen map.dragRotate.enable()');
+    assert.ok(walkJs.includes('map.touchPitch?.enable?.()'), 'Musí být povolen map.touchPitch.enable()');
+    assert.ok(walkJs.includes("map.on('dragstart'"), 'Posluchač dragstart musí odpojit follow');
+    assert.ok(walkJs.includes("map.on('pitchstart'"), 'Posluchač pitchstart musí odpojit follow');
+    assert.ok(walkJs.includes("map.on('mousedown'"), 'Posluchač mousedown musí odpojit follow');
+    assert.ok(walkJs.includes("map.on('touchstart'"), 'Posluchač touchstart musí odpojit follow');
+    assert.ok(walkJs.includes('id="btn-recenter-avatar"'), 'DOM obsahuje plovoucí tlačítko #btn-recenter-avatar');
+    assert.ok(walkJs.includes('🎯 Zpět na postavičku'), 'Tlačítko má popisek „🎯 Zpět na postavičku“');
+    assert.ok(walkJs.includes('updateRecenterButtonVisibility'), 'Funkce updateRecenterButtonVisibility hlídá vzdálenost > 30 m a follow === false');
+    assert.ok(walkCss.includes('#btn-recenter-avatar'), 'CSS definuje styl pro #btn-recenter-avatar (z-index: 1100, min-height: 46px)');
+
+    // 2. Zákaz mazání a znovuvytváření vrstev (konec problikávání)
+    assert.equal(walkJs.includes('map.removeLayer('), false, 'src/walk.js nikdy nesmí volat map.removeLayer(');
+    assert.equal(walkJs.includes('map.removeSource('), false, 'src/walk.js nikdy nesmí volat map.removeSource(');
+    assert.ok(walkJs.includes('appliedTerrain3D'), 'setTerrain je chráněn příznakem appliedTerrain3D pouze při změně 2D/3D');
+
+    // 3. Skutečné 3D hory (terrain-dem + terrain-hillshade, exaggeration: 1.9, pitch: 58) a 3D budovy (openfreemap-v + czekpoint-3d-buildings)
+    assert.ok(walkJs.includes('https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'), 'Zdroj terrain-dem používá AWS Terrarium dlaždice');
+    assert.ok(walkJs.includes("id: 'terrain-hillshade'"), 'Vrstva terrain-hillshade zvýrazňuje svahy a údolí');
+    assert.ok(walkJs.includes('exaggeration: 1.9'), '3D terén má exaggeration: 1.9');
+    assert.ok(walkJs.includes('pitch: 58'), 'Přepnutí do 3D nastavuje pitch: 58');
+    assert.ok(walkJs.includes('https://tiles.openfreemap.org/planet'), 'Vektorový zdroj openfreemap-v používá OpenFreeMap planet');
+    assert.ok(walkJs.includes("id: 'czekpoint-3d-buildings'"), 'Vrstva czekpoint-3d-buildings vykresluje 3D budovy (fill-extrusion)');
+    assert.ok(configJs.includes('terrainExaggeration: 1.9'), 'config.js má terrainExaggeration: 1.9');
+  });
 });
 
 

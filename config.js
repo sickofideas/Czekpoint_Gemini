@@ -14,7 +14,8 @@ export const config = {
   terrainEncoding: 'terrarium',
   terrainTileSize: 256,
   terrainMaxZoom: 15,
-  terrainExaggeration: 1.25,
+  terrainExaggeration: 1.9,
+  openFreeMapVectorUrl: 'https://tiles.openfreemap.org/planet',
   firebase: {
     enabled: false,
     apiKey: '',
@@ -89,12 +90,14 @@ export function createGeoJsonCirclePolygon(center, radiusMeters, steps = 48) {
 }
 
 /**
- * Sestaví čistý MapLibre GL styl (v8) s rastrovými vrstvami (OSM, OpenTopoMap, Waymarked Trails)
- * a skutečným výškovým zdrojem `raster-dem` (`terrain-dem`) pro plynulé přepínání 2D/3D.
+ * Sestaví čistý MapLibre GL styl (v8) s rastrovými vrstvami (OSM, OpenTopoMap, Waymarked Trails),
+ * skutečným výškovým zdrojem `raster-dem` (`terrain-dem`), prostorovým stínováním svahů (`terrain-hillshade`)
+ * a 3D budovami (`czekpoint-3d-buildings` z bezklíčového `openfreemap-v`).
  */
 export function buildMapLibreStyle(cfg = config, options = {}) {
   const showContourLayer = Boolean(options.showContourLayer);
   const showHikingTrails = options.showHikingTrails !== false;
+  const is3dMode = Boolean(options.is3dMode || options.is3DMode);
   const hasMaptilerKey = Boolean(cfg?.maptilerApiKey && String(cfg.maptilerApiKey).trim());
 
   const terrainDemSource = hasMaptilerKey
@@ -137,6 +140,10 @@ export function buildMapLibreStyle(cfg = config, options = {}) {
         attribution: '&copy; <a href="https://hiking.waymarkedtrails.org">Waymarked Trails</a>',
       },
       'terrain-dem': terrainDemSource,
+      'openfreemap-v': {
+        type: 'vector',
+        url: cfg?.openFreeMapVectorUrl || 'https://tiles.openfreemap.org/planet',
+      },
     },
     layers: [
       {
@@ -145,6 +152,16 @@ export function buildMapLibreStyle(cfg = config, options = {}) {
         source: 'osm-raster',
         minzoom: 0,
         maxzoom: 22,
+      },
+      {
+        id: 'terrain-hillshade',
+        type: 'hillshade',
+        source: 'terrain-dem',
+        paint: {
+          'hillshade-exaggeration': 0.65,
+          'hillshade-shadow-color': '#193e32',
+          'hillshade-accent-color': '#2d5a46',
+        },
       },
       {
         id: 'opentopo-raster-layer',
@@ -170,6 +187,22 @@ export function buildMapLibreStyle(cfg = config, options = {}) {
         },
         paint: {
           'raster-opacity': 0.92,
+        },
+      },
+      {
+        id: 'czekpoint-3d-buildings',
+        source: 'openfreemap-v',
+        'source-layer': 'building',
+        type: 'fill-extrusion',
+        minzoom: 14,
+        layout: {
+          visibility: is3dMode ? 'visible' : 'none',
+        },
+        paint: {
+          'fill-extrusion-color': '#dfd8c8',
+          'fill-extrusion-height': ['coalesce', ['get', 'render_height'], ['get', 'height'], 9],
+          'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0],
+          'fill-extrusion-opacity': 0.85,
         },
       },
     ],

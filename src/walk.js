@@ -940,7 +940,13 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
   let fogTextureCanvas = null;
   let fogGeographicBounds = null;
   let fogRenderTimer = null;
+  let lastFogUpdateAt = 0;
+  let lastFogPlayerPos = null;
+  let lastFogRenderedMode = null;
+  let lastFogCellsCount = -1;
   let is3DMode = false;
+  let is3dMode = false;
+  let appliedTerrain3D = false;
   let terrainFallbackTriggered = false;
   let footprintMarkers = [];
   let hikingBlazeMarkers = [];
@@ -965,7 +971,8 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
   let fakeGpsSim = null;
 
   const compassStabilizer = createCompassStabilizer({ alpha: 0.12, deadbandDeg: 2.5, minIntervalMs: 80 });
-  const headingFollowStabilizer = createCompassStabilizer({ alpha: 0.14, deadbandDeg: 2.5, minIntervalMs: 85 });
+  const headingFollowStabilizer = createCompassStabilizer({ alpha: 0.14, deadbandDeg: 2.5, minIntervalMs: 250 });
+  let lastCameraEaseAt = 0;
   let followHeadingMode = false;
   let compassSensorState = 'unknown'; // 'unknown' | 'active' | 'denied' | 'unavailable'
   let lastAbsoluteCompassAt = 0;
@@ -1382,8 +1389,11 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       <!-- Bublina po kliknutí na ikonu v mapě (Vynechat zastávku / Přidat po cestě / Nastavit jako nový konec) -->
       <div id="place-detail-sheet" class="place-detail-sheet" hidden role="dialog" aria-label="Úprava bodu na trase"></div>
 
-      <!-- Výrazné tlačítko „🎯 Zpět ke mně“ při ručním posunu mapy (DÁVKA 1 Bod 3.2) -->
-      <button type="button" id="btn-return-to-gps" class="return-to-gps-btn" hidden title="Obnovit automatické sledování tvé polohy">
+      <!-- Plovoucí tlačítko „🎯 Zpět na postavičku“ (#btn-recenter-avatar, z-index: 1100, min-height: 46px) -->
+      <button type="button" id="btn-recenter-avatar" class="recenter-avatar-btn" hidden title="Vycentrovat mapu zpět na postavičku (🎯 Zpět ke mně)">
+        🎯 Zpět na postavičku
+      </button>
+      <button type="button" id="btn-return-to-gps" class="return-to-gps-btn" hidden aria-hidden="true" tabindex="-1">
         🎯 Zpět ke mně
       </button>
 
@@ -1991,12 +2001,14 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
   let lastUserZoomAt = 0;
 
   function centerMapOnPlayer(pos = lastFix || telemetry.lastKnownPosition, animate = false) {
+    if (!follow) return;
     if (!map || !pos || !Number.isFinite(pos.lat) || !Number.isFinite(pos.lng)) return;
+    if (typeof map.isMoving === 'function' && map.isMoving() && !animate) return;
     const pxSize = getMapPixelSize();
     const width = zenMode ? window.innerWidth : pxSize.x;
     const height = zenMode ? window.innerHeight : pxSize.y;
     const bottomObsPx = zenMode ? 0 : getBottomSheetOverlapPx();
-    const currentZoom = (typeof map.getZoom === 'function' ? map.getZoom() : null) || 15.5;
+    const currentZoom = (typeof map.getZoom === 'function' ? map.getZoom() : null) || 16.5;
 
     const targetCenter = computeVisibleMapCenterForPlayer(
       pos,
@@ -2009,19 +2021,49 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     setMapView(targetCenter.lat, targetCenter.lng, currentZoom, animate);
   }
 
-  function updateFollowUi() {
+  function getAvatarReferencePosition() {
+    if (lastFix && Number.isFinite(lastFix.lat) && Number.isFinite(lastFix.lng)) return lastFix;
+    if (telemetry?.lastKnownPosition && Number.isFinite(telemetry.lastKnownPosition.lat) && Number.isFinite(telemetry.lastKnownPosition.lng)) {
+      return telemetry.lastKnownPosition;
+    }
+    const markerPos = typeof player?.getLatLng === 'function' ? player.getLatLng() : null;
+    if (markerPos && Number.isFinite(markerPos.lat) && Number.isFinite(markerPos.lng)) return markerPos;
+    return getRouteOriginPoint();
+  }
+
+  function updateRecenterButtonVisibility() {
+    const recenterBtn = $('btn-recenter-avatar');
     const returnBtn = $('btn-return-to-gps');
+    let isFarFromAvatar = false;
+    if (map && typeof map.getCenter === 'function') {
+      const c = map.getCenter();
+      const avatarPos = getAvatarReferencePosition();
+      if (c && avatarPos && Number.isFinite(c.lat) && Number.isFinite(c.lng) && Number.isFinite(avatarPos.lat) && Number.isFinite(avatarPos.lng)) {
+        const distM = haversineMeters({ lat: c.lat, lng: c.lng }, { lat: avatarPos.lat, lng: avatarPos.lng });
+        if (Number.isFinite(distM) && distM > 30) {
+          isFarFromAvatar = true;
+        }
+      }
+    }
+    const shouldShowRecenter = !follow || isFarFromAvatar;
+    if (recenterBtn) {
+      recenterBtn.hidden = !shouldShowRecenter;
+    }
     if (returnBtn) {
-      returnBtn.hidden = Boolean(follow);
+      returnBtn.hidden = true;
     }
     const zenBtn = $('zen-follow-btn');
     const zenLabel = $('zen-follow-label');
     if (zenBtn) {
-      zenBtn.classList.toggle('is-following', Boolean(follow));
+      zenBtn.classList.toggle('is-following', Boolean(follow && !isFarFromAvatar));
       if (zenLabel) {
-        zenLabel.textContent = follow ? 'Sleduji polohu' : '◎ Vycentrovat';
+        zenLabel.textContent = (follow && !isFarFromAvatar) ? 'Sleduji polohu' : '◎ Vycentrovat';
       }
     }
+  }
+
+  function updateFollowUi() {
+    updateRecenterButtonVisibility();
   }
 
   // DÁVKA 1 (Bod 2.2): Úplná izolace Simulátoru od skutečných dat v odděleném paměťovém prostoru
@@ -2172,7 +2214,8 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
   }
 
   /**
-   * ZADÁNÍ #08 (Bod 2): Plynulý LERP pohyb Avatara po mapě pomocí requestAnimationFrame.
+   * ZADÁNÍ #08 (Bod 2) & Hotfix v2.0.1: Plynulý LERP pohyb Avatara po mapě pomocí requestAnimationFrame.
+   * Pokud je follow === false, NIKDY nevolá map.easeTo, map.jumpTo, map.flyTo ani map.setCenter!
    */
   function smoothMovePlayerTo(targetLat, targetLng, durationMs = 1100) {
     if (!map || !player || !Number.isFinite(targetLat) || !Number.isFinite(targetLng)) return;
@@ -2188,12 +2231,20 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     const startLatLng = typeof player.getLatLng === 'function' ? player.getLatLng() : null;
     const distM = startLatLng ? (haversineMeters({ lat: startLatLng.lat, lng: startLatLng.lng }, { lat: targetLat, lng: targetLng }) ?? 999) : 999;
 
+    if (follow) {
+      const nowMs = Date.now();
+      const mapBusy = (typeof map.isMoving === 'function' && map.isMoving()) || (typeof map.isEasing === 'function' && map.isEasing());
+      if (!mapBusy && nowMs - lastCameraEaseAt >= 250) {
+        lastCameraEaseAt = nowMs;
+        centerMapOnPlayer({ lat: targetLat, lng: targetLng }, false);
+      }
+    } else {
+      updateRecenterButtonVisibility();
+    }
+
     if (!startLatLng || currentOpacity === 0 || distM > 350 || distM < 0.2 || durationMs <= 0) {
       player.setLatLng([targetLat, targetLng]);
       accuracyRing?.setLatLng([targetLat, targetLng]);
-      if (follow) {
-        centerMapOnPlayer({ lat: targetLat, lng: targetLng }, false);
-      }
       return;
     }
 
@@ -2215,15 +2266,14 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       player.setLatLng([curLat, curLng]);
       accuracyRing?.setLatLng([curLat, curLng]);
 
-      if (follow) {
-        panMapTo(curLat, curLng, false);
-      }
-
       if (t < 1) {
         playerLerpRafId = requestAnimationFrame(stepLerp);
       } else {
         playerLerpRafId = null;
         updatePlayerAvatarIcon(Boolean(active || demo));
+        if (!follow) {
+          updateRecenterButtonVisibility();
+        }
       }
     };
 
@@ -2239,12 +2289,35 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
 
   /**
    * Vykreslí geograficky ukotvenou texturu mlhy (MapLibre raster vrstva `czekpoint-fog-layer`).
-   * Textura pokrývá geografický obdélník fogGeographicBounds a MapLibre ji automaticky promítá
-   * přímo na 3D síť terénu (terrain-dem). Odkrytá místa proto 100% lícují ve 2D i 3D pohledu!
+   * Nikdy nevolá map.removeLayer ani map.removeSource!
+   * Aktualizuje pouze offscreen canvas a volá source.updateImage({ url: canvas.toDataURL(), coordinates: fogBounds })
+   * nejvýše jednou za 600 ms (throttle) a pouze tehdy, když se hráč pohnul o >= 3 m nebo se změnil fogMode.
    */
   function drawFog(force = false) {
     if (!map || disposed) return;
     if (typeof document === 'undefined') return;
+
+    const nowMs = Date.now();
+    const curCenter = (typeof map.getCenter === 'function' ? map.getCenter() : null) || lastFix || getRouteOriginPoint();
+    const outOfSafeBounds = !fogGeographicBounds || !isPointInsideFogSafeBounds(curCenter.lat, curCenter.lng, fogGeographicBounds, 0.65);
+
+    const activePlayerPos = (active || demo || simSandboxActive) ? lastFix : null;
+    const movedDistM = (activePlayerPos && lastFogPlayerPos)
+      ? (haversineMeters(lastFogPlayerPos, activePlayerPos) ?? Infinity)
+      : (activePlayerPos && !lastFogPlayerPos ? Infinity : 0);
+
+    const modeChanged = fogMode !== lastFogRenderedMode;
+    const cellsChanged = progress.cells.length !== lastFogCellsCount;
+    const playerMoved3m = movedDistM >= 3;
+
+    if (!force && !modeChanged && !outOfSafeBounds && !playerMoved3m && !cellsChanged && lastFogRenderedMode !== null) {
+      return;
+    }
+
+    if (!force && !modeChanged && (nowMs - lastFogUpdateAt) < 600 && lastFogRenderedMode !== null) {
+      scheduleFog(Math.max(50, 600 - (nowMs - lastFogUpdateAt)));
+      return;
+    }
 
     if (!fogTextureCanvas) {
       fogTextureCanvas = document.createElement('canvas');
@@ -2252,18 +2325,14 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       fogTextureCanvas.height = 1024;
     }
 
-    const curCenter = (typeof map.getCenter === 'function' ? map.getCenter() : null) || lastFix || getRouteOriginPoint();
-    if (
-      force ||
-      !fogGeographicBounds ||
-      !isPointInsideFogSafeBounds(curCenter.lat, curCenter.lng, fogGeographicBounds, 0.65)
-    ) {
+    if (force || outOfSafeBounds) {
       fogGeographicBounds = computeFogGeographicBounds(curCenter, {
         walkSegments: progress.walkSegments,
         cells: progress.cells,
       });
     }
 
+    const fogBounds = fogGeographicBounds.coordinates;
     const result = renderFogTextureToCanvas(fogTextureCanvas, {
       fogMode,
       fogBounds: fogGeographicBounds,
@@ -2271,27 +2340,30 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       cells: progress.cells,
       revealedFeatures: progress.revealedFeatures,
       activeLocalReveals,
-      lastFix: (active || demo || simSandboxActive) ? lastFix : null,
+      lastFix: activePlayerPos,
       revealRadiusM: FOG_REVEAL_RADIUS_M,
       width: 1024,
       height: 1024,
     });
 
+    lastFogUpdateAt = nowMs;
+    lastFogRenderedMode = fogMode;
+    lastFogCellsCount = progress.cells.length;
+    if (activePlayerPos && Number.isFinite(activePlayerPos.lat) && Number.isFinite(activePlayerPos.lng)) {
+      lastFogPlayerPos = { lat: activePlayerPos.lat, lng: activePlayerPos.lng };
+    }
+
     try {
       if (map.getLayer('czekpoint-fog-layer')) {
         map.setLayoutProperty('czekpoint-fog-layer', 'visibility', fogMode === 'none' ? 'none' : 'visible');
       }
-      const src = map.getSource('czekpoint-fog-source');
-      if (src && result?.dataUrl) {
-        if (typeof src.updateImage === 'function') {
-          src.updateImage({
-            url: result.dataUrl,
-            coordinates: fogGeographicBounds.coordinates,
-          });
-        }
-        if (typeof src.setCoordinates === 'function') {
-          src.setCoordinates(fogGeographicBounds.coordinates);
-        }
+      const source = map.getSource('czekpoint-fog-source');
+      const canvasUrl = result?.dataUrl || (typeof fogTextureCanvas.toDataURL === 'function' ? fogTextureCanvas.toDataURL() : '');
+      if (source && canvasUrl && typeof source.updateImage === 'function') {
+        source.updateImage({
+          url: canvasUrl,
+          coordinates: fogBounds,
+        });
       }
     } catch {
       if (is3DMode) {
@@ -2302,12 +2374,12 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     }
   }
 
-  function scheduleFog(delayMs = 40) {
+  function scheduleFog(delayMs = 600, force = false) {
     if (disposed) return;
     if (fogRenderTimer) clearTimeout(fogRenderTimer);
     fogRenderTimer = setTimeout(() => {
       fogRenderTimer = null;
-      drawFog();
+      drawFog(force);
     }, delayMs);
   }
 
@@ -2634,30 +2706,21 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
 
   function applyHeadingToMapCamera(rawHeadingDeg, source = 'compass') {
     if (!followHeadingMode || !follow || !map || disposed) return;
-    const stab = headingFollowStabilizer.update(rawHeadingDeg, Date.now());
+    if ((typeof map.isMoving === 'function' && map.isMoving()) || (typeof map.isEasing === 'function' && map.isEasing())) {
+      return;
+    }
+    const nowMs = Date.now();
+    if (nowMs - lastCameraEaseAt < 250) return;
+    const stab = headingFollowStabilizer.update(rawHeadingDeg, nowMs);
     if (!stab.updated) return;
 
-    const activePos = lastFix || telemetry.lastKnownPosition || getRouteOriginPoint();
-    const pxSize = getMapPixelSize();
-    const width = zenMode ? window.innerWidth : pxSize.x;
-    const height = zenMode ? window.innerHeight : pxSize.y;
-    const bottomObsPx = zenMode ? 0 : getBottomSheetOverlapPx();
-    const currentZoom = (typeof map.getZoom === 'function' ? map.getZoom() : null) || 16.5;
-
-    const targetCenter = activePos && Number.isFinite(activePos.lat) && Number.isFinite(activePos.lng)
-      ? computeVisibleMapCenterForPlayer(activePos, { width, height }, bottomObsPx, 0, currentZoom)
-      : null;
-
+    lastCameraEaseAt = nowMs;
     try {
-      const easeOpts = {
+      map.easeTo({
         bearing: stab.smoothedHeading,
-        duration: source === 'gps_course' ? 280 : 115,
+        duration: source === 'gps_course' ? 280 : 220,
         easing: t => t,
-      };
-      if (targetCenter && Number.isFinite(targetCenter.lat) && Number.isFinite(targetCenter.lng)) {
-        easeOpts.center = [targetCenter.lng, targetCenter.lat];
-      }
-      map.easeTo(easeOpts);
+      });
     } catch {}
   }
 
@@ -3872,7 +3935,8 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         memoryObj: m,
       }));
 
-    // Odstraníme markery, které už nejsou v mapPlaces ani v memoryMapItems
+    // U DOM markerů míst (placeMarkersById) nikdy nemažeme existující markery míst při posunu mapy (moveend);
+    // odstraníme pouze tehdy, pokud uživatel výslovně smazal vlastní vzpomínku ze seznamu personalMemories.
     for (const p of mapPlaces) {
       activeMapPlaceIds.add(p.id);
     }
@@ -3880,7 +3944,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       activeMapPlaceIds.add(m.id);
     }
     for (const [existingId, entry] of placeMarkersById.entries()) {
-      if (!activeMapPlaceIds.has(existingId)) {
+      if (entry.place?.isUserMemory && !activeMapPlaceIds.has(existingId)) {
         try { entry.marker.remove(); } catch {}
         placeMarkersById.delete(existingId);
       }
@@ -6248,6 +6312,59 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         });
       }
 
+      if (!map.getSource('terrain-dem')) {
+        map.addSource('terrain-dem', {
+          type: 'raster-dem',
+          tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
+          encoding: 'terrarium',
+          tileSize: 256,
+          maxzoom: 15,
+        });
+      }
+      if (!map.getLayer('terrain-hillshade')) {
+        const hillshadeBefore = map.getLayer('opentopo-raster-layer')
+          ? 'opentopo-raster-layer'
+          : map.getLayer('waymarked-hiking-layer')
+          ? 'waymarked-hiking-layer'
+          : undefined;
+        map.addLayer(
+          {
+            id: 'terrain-hillshade',
+            type: 'hillshade',
+            source: 'terrain-dem',
+            paint: {
+              'hillshade-exaggeration': 0.65,
+              'hillshade-shadow-color': '#193e32',
+              'hillshade-accent-color': '#2d5a46',
+            },
+          },
+          hillshadeBefore
+        );
+      }
+
+      if (!map.getSource('openfreemap-v')) {
+        map.addSource('openfreemap-v', {
+          type: 'vector',
+          url: 'https://tiles.openfreemap.org/planet',
+        });
+      }
+      if (!map.getLayer('czekpoint-3d-buildings')) {
+        map.addLayer({
+          id: 'czekpoint-3d-buildings',
+          source: 'openfreemap-v',
+          'source-layer': 'building',
+          type: 'fill-extrusion',
+          minzoom: 14,
+          layout: { visibility: is3dMode ? 'visible' : 'none' },
+          paint: {
+            'fill-extrusion-color': '#dfd8c8',
+            'fill-extrusion-height': ['coalesce', ['get', 'render_height'], ['get', 'height'], 9],
+            'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0],
+            'fill-extrusion-opacity': 0.85,
+          },
+        });
+      }
+
       if (!map.getSource('czekpoint-fog-source')) {
         const initCenter = lastFix || telemetry.lastKnownPosition || getRouteOriginPoint() || { lat: 49.6014, lng: 13.8644 };
         fogGeographicBounds = computeFogGeographicBounds(initCenter, {
@@ -6296,7 +6413,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         : `<span class="btn-3d-icon" aria-hidden="true">🗺️</span><span class="btn-3d-label">2D</span>`;
       toggleBtn.title = is3DMode
         ? 'Přepnout zpět na plochou 2D mapu shora'
-        : 'Přepnout na 3D zobrazení terénu a kopců';
+        : 'Přepnout na 3D zobrazení terénu, hor a 3D budov';
     }
     const camControls = $('map-3d-camera-controls');
     if (camControls) {
@@ -6305,60 +6422,79 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     $('walk-map-wrap')?.classList.toggle('is-3d-mode', is3DMode);
   }
 
+  function enableAllMapInteractions() {
+    if (!map) return;
+    try {
+      map.dragPan?.enable?.();
+      map.touchZoomRotate?.enable?.();
+      map.dragRotate?.enable?.();
+      map.touchPitch?.enable?.();
+    } catch {}
+  }
+
   function setMap3DMode(enable3D, opts = {}) {
     if (!map) return;
     const next3D = Boolean(enable3D);
+    is3DMode = next3D;
+    is3dMode = next3D;
+    enableAllMapInteractions();
+
     if (next3D) {
       // DÁVKA 4 (Bod 1.2): Bezpečné přepnutí 2D/3D i během načítání stylu (!map.isStyleLoaded())
       const styleReady = typeof map.isStyleLoaded === 'function' ? map.isStyleLoaded() : true;
       if (!styleReady) {
-        is3DMode = true;
         update3DUiState();
         try {
-          map.easeTo({ pitch: 55, duration: opts.instant ? 0 : 700 });
+          map.easeTo({ pitch: 58, duration: opts.instant ? 0 : 700 });
         } catch {}
         if (!opts.silent) {
-          status('🏔️ Zapnuto 3D zobrazení terénu (dokončuji načítání výškového modelu…).');
+          status('🏔️ Zapnuto 3D zobrazení terénu a budov (dokončuji načítání výškového modelu…).');
         }
         return;
       }
       try {
-        if (!map.getSource('terrain-dem')) {
-          const demUrl = config.maptilerApiKey
-            ? `https://api.maptiler.com/tiles/terrain-rgb-v2/{z}/{x}/{y}.webp?key=${encodeURIComponent(config.maptilerApiKey)}`
-            : (config.terrainDemUrl || 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png');
-          const demEnc = config.maptilerApiKey ? 'mapbox' : (config.terrainEncoding || 'terrarium');
-          map.addSource('terrain-dem', {
-            type: 'raster-dem',
-            tiles: [demUrl],
-            tileSize: 256,
-            maxzoom: 15,
-            encoding: demEnc,
-          });
+        ensureCustomMapSourcesAndLayers();
+        if (appliedTerrain3D !== is3dMode) {
+          map.setTerrain({ source: 'terrain-dem', exaggeration: 1.9 });
+          appliedTerrain3D = true;
         }
-        map.setTerrain({
-          source: 'terrain-dem',
-          exaggeration: Number(config.terrainExaggeration) || 1.25,
-        });
-        is3DMode = true;
+        if (map.getLayer('czekpoint-3d-buildings')) {
+          map.setLayoutProperty('czekpoint-3d-buildings', 'visibility', 'visible');
+        }
         update3DUiState();
         map.easeTo({
-          pitch: 55,
+          pitch: 58,
           duration: opts.instant ? 0 : 700,
         });
         if (!opts.silent) {
-          status('🏔️ Zapnuto 3D zobrazení terénu (náklon 55°). Tlačítkem 2D/3D se kdykoliv vrátíš k plochému pohledu shora.');
+          status('🏔️ Zapnuto 3D zobrazení hor a 3D budov (náklon 58°). Mapou můžeš volně otáčet a posouvat.');
         }
       } catch {
         is3DMode = false;
+        is3dMode = false;
+        appliedTerrain3D = false;
         try { map.setTerrain(null); } catch {}
+        try {
+          if (map.getLayer('czekpoint-3d-buildings')) {
+            map.setLayoutProperty('czekpoint-3d-buildings', 'visibility', 'none');
+          }
+        } catch {}
         try { map.easeTo({ pitch: 0, duration: 300 }); } catch {}
         update3DUiState();
         status('3D terén není momentálně dostupný, pokračuji ve 2D zobrazení.');
       }
     } else {
       is3DMode = false;
-      try { map.setTerrain(null); } catch {}
+      is3dMode = false;
+      try {
+        if (appliedTerrain3D !== is3dMode) {
+          map.setTerrain(null);
+          appliedTerrain3D = false;
+        }
+        if (map.getLayer('czekpoint-3d-buildings')) {
+          map.setLayoutProperty('czekpoint-3d-buildings', 'visibility', 'none');
+        }
+      } catch {}
       update3DUiState();
       try {
         map.easeTo({
@@ -6410,16 +6546,18 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
 
       map = new maplibregl.Map({
         container: mapContainer,
-        style: buildMapLibreStyle(config, { showContourLayer, showHikingTrails }),
+        style: buildMapLibreStyle(config, { showContourLayer, showHikingTrails, is3dMode }),
         center: [center.lng, center.lat],
         zoom: 16.5,
-        pitch: is3DMode ? 55 : 0,
+        pitch: is3dMode ? 58 : 0,
         bearing: 0,
         minZoom: 3,
         maxZoom: 19,
         maxPitch: 75,
         attributionControl: false,
       });
+      appliedTerrain3D = false;
+      enableAllMapInteractions();
       hideWebGLErrorBanner();
     } catch (err) {
       map = null;
@@ -6504,35 +6642,31 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
 
     const onStyleOrMapLoad = () => {
       if (disposed || !map) return;
+      enableAllMapInteractions();
       ensureCustomMapSourcesAndLayers();
-      if (is3DMode) {
+      if (appliedTerrain3D !== is3dMode) {
         try {
-          if (!map.getSource('terrain-dem')) {
-            const demUrl = config.maptilerApiKey
-              ? `https://api.maptiler.com/tiles/terrain-rgb-v2/{z}/{x}/{y}.webp?key=${encodeURIComponent(config.maptilerApiKey)}`
-              : (config.terrainDemUrl || 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png');
-            const demEnc = config.maptilerApiKey ? 'mapbox' : (config.terrainEncoding || 'terrarium');
-            map.addSource('terrain-dem', {
-              type: 'raster-dem',
-              tiles: [demUrl],
-              tileSize: 256,
-              maxzoom: 15,
-              encoding: demEnc,
-            });
+          if (is3dMode) {
+            map.setTerrain({ source: 'terrain-dem', exaggeration: 1.9 });
+            appliedTerrain3D = true;
+          } else {
+            map.setTerrain(null);
+            appliedTerrain3D = false;
           }
-          map.setTerrain({
-            source: 'terrain-dem',
-            exaggeration: Number(config.terrainExaggeration) || 1.25,
-          });
         } catch {}
       }
+      try {
+        if (map.getLayer('czekpoint-3d-buildings')) {
+          map.setLayoutProperty('czekpoint-3d-buildings', 'visibility', is3dMode ? 'visible' : 'none');
+        }
+      } catch {}
       plannedRouteRenderKey = null;
       renderPlannedRouteOnMap(true);
       renderHikingTrailsOnMap();
       renderTrail();
       renderPlaces({ skipListRebuild: true });
       accuracyRing.sync();
-      scheduleFog();
+      drawFog(true);
     };
 
     map.on('style.load', onStyleOrMapLoad);
@@ -6639,12 +6773,29 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       renderTrail();
       renderPlaces({ skipListRebuild: true });
     });
-    // DÁVKA 3 (Bod 1.3): Při ručním posunutí mapy uživatelem (dragstart vyvolaný dotykem/myší, e.originalEvent)
-    // okamžitě pozastavíme automatické sledování a zobrazíme výrazné tlačítko „🎯 Zpět ke mně“
-    map.on('dragstart', (ev) => {
-      if (!ev || ev.originalEvent !== undefined) {
+    // KRITICKÁ OPRAVA 1 (Hotfix v2.0.1): Okamžité uvolnění mapy při dotyku uživatele (dragstart, pitchstart, mousedown, touchstart)
+    map.on('dragstart', (e) => {
+      if (!e || e.originalEvent) {
         follow = false;
-        updateFollowUi();
+        updateRecenterButtonVisibility();
+      }
+    });
+    map.on('pitchstart', (e) => {
+      if (!e || e.originalEvent) {
+        follow = false;
+        updateRecenterButtonVisibility();
+      }
+    });
+    map.on('mousedown', (e) => {
+      if (e && e.originalEvent) {
+        follow = false;
+        updateRecenterButtonVisibility();
+      }
+    });
+    map.on('touchstart', (e) => {
+      if (e && e.originalEvent) {
+        follow = false;
+        updateRecenterButtonVisibility();
       }
     });
     // DÁVKA 3 (Bod 2.2): Při otočení mapy (ve 2D, 3D i při ručním otočení) okamžitě přepočítáme směrovou šipku u Avatara a okrajový štítek
@@ -6655,13 +6806,14 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       updateOffscreenTargetIndicator();
     });
     map.on('moveend', () => {
+      updateRecenterButtonVisibility();
       renderPlaces({ skipListRebuild: true });
       updateScanMapAreaButtonState();
       scheduleMapPanAutoFetch();
       updateDirectionalIndicators();
       const c = map.getCenter();
       if (c && !isPointInsideFogSafeBounds(c.lat, c.lng, fogGeographicBounds, 0.65)) {
-        scheduleFog(50);
+        scheduleFog(600);
       }
     });
 
@@ -8853,13 +9005,26 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     playTick(stateObj.soundEnabled);
   });
 
-  // Bod 25 & DÁVKA 3 (Bod 1.3): Tlačítka „🎯 Zpět ke mně“ a „◎ Moje poloha“ obnoví sledování polohy i případné sledování směru
+  // KRITICKÁ OPRAVA 1 (Hotfix v2.0.1): Tlačítka „🎯 Zpět na postavičku“ (#btn-recenter-avatar) a „◎ Moje poloha“ (#walk-center)
   const restoreFollowOnPlayer = () => {
     follow = true;
-    updateFollowUi();
-    const targetPos = lastFix || telemetry.lastKnownPosition;
-    if (targetPos && map) {
-      centerMapOnPlayer(targetPos, false);
+    const recenterBtn = $('btn-recenter-avatar');
+    if (recenterBtn) recenterBtn.hidden = true;
+    const returnBtn = $('btn-return-to-gps');
+    if (returnBtn) returnBtn.hidden = true;
+
+    const playerPos = getAvatarReferencePosition();
+    if (playerPos && map && Number.isFinite(playerPos.lat) && Number.isFinite(playerPos.lng)) {
+      if (typeof map.flyTo === 'function') {
+        map.flyTo({
+          center: [playerPos.lng, playerPos.lat],
+          zoom: Math.max(map.getZoom(), 16.5),
+          pitch: is3dMode ? 55 : 0,
+          duration: 700,
+        });
+      } else {
+        centerMapOnPlayer(playerPos, true);
+      }
       if (followHeadingMode) {
         const headingToApply = (compassSensorState === 'active' && currentDeviceHeading != null)
           ? currentDeviceHeading
@@ -8868,10 +9033,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
           applyHeadingToMapCamera(headingToApply, compassSensorState === 'active' ? 'compass' : 'gps_course');
         }
       }
-      status('Sledování tvé polohy bylo obnoveno (zvolené přiblížení zachováno).');
-    } else if (map && plannedRoute.origin) {
-      centerMapOnPlayer(plannedRoute.origin, false);
-      status('Mapa vycentrována na výchozí bod (čekám na GPS signál).');
+      status('🎯 Sledování postavičky obnoveno.');
     } else {
       status('Nejdřív spusť GPS nebo simulátor.');
     }
@@ -8895,6 +9057,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
   });
 
   $('walk-center')?.addEventListener('click', restoreFollowOnPlayer);
+  $('btn-recenter-avatar')?.addEventListener('click', restoreFollowOnPlayer);
   $('btn-return-to-gps')?.addEventListener('click', restoreFollowOnPlayer);
 
   $('walk-demo')?.addEventListener('click', () => {
