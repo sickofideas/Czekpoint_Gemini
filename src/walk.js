@@ -156,7 +156,7 @@ import {
   triggerHaptic,
   applyStaggerAnimation,
 } from './fx.js';
-import { initGpsSimulator, ROZMITAL_CENTER } from './gps-simulator.js';
+import { initGpsSimulator, ROZMITAL_CENTER, moveCoordinates, calculateBearing } from './gps-simulator.js';
 import { getHikingTrails, renderOsmcBadgeSvg, parseOsmcSymbol } from './hiking-trails.js';
 import {
   computeVisibleMapCenterForPlayer,
@@ -218,29 +218,36 @@ function renderCategoryMarkerGlyph(kind, state = 'default') {
 }
 
 /**
- * Vykreslí ikonu levé nebo pravé podrážky pohorky (`.footprint-marker`, 18 × 18 px)
- * natočenou ve směru chůze (`bearingDeg`) se stárnoucí průhledností (`opacity` 0.85 až 0.15) (ZADÁNÍ #08 Bod 3).
+ * Vykreslí ikonu levé nebo pravé podrážky pohorky (`.footprint-marker`, 26 × 26 px)
+ * s vysokým kontrastem: tmavě hnědý/černý obrys (#1a120b) a jasně zlatavý/světlý vnitřek podrážky (#f5c542 / #e8d5a7)
+ * s výrazným vzorkem pohorky (Bod 4).
  */
-export function renderBootFootprintSvg(side = 'L', bearingDeg = 0, opacity = 0.82) {
+export function renderBootFootprintSvg(side = 'L', bearingDeg = 0, opacity = 0.88) {
   const isLeft = side === 'L';
-  const offsetX = isLeft ? -2.2 : 2.2;
   const scaleX = isLeft ? 1 : -1;
-  const safeOpacity = Number.isFinite(Number(opacity)) ? Math.max(0.15, Math.min(0.9, Number(opacity))) : 0.82;
+  const safeOpacity = Number.isFinite(Number(opacity)) ? Math.max(0.2, Math.min(0.95, Number(opacity))) : 0.88;
   return `
-    <span class="footprint-marker czekpoint-footprint-rotator" style="opacity:${safeOpacity};transform: rotate(${Math.round(bearingDeg)}deg) translateX(${offsetX}px) scaleX(${scaleX})">
-      <svg viewBox="0 0 18 26" width="14" height="18" aria-hidden="true" class="footprint-svg">
-        <path d="M5.6 2.2 C3.6 2.6 2.6 4.8 2.9 8.0 C3.2 10.9 4.0 12.6 4.4 14.3 L12.4 14.3 C12.8 12.4 13.5 10.5 13.6 7.7 C13.7 4.4 12.1 2.2 9.5 2.0 C8.1 1.9 6.8 2.0 5.6 2.2 Z" fill="#2c5530" stroke="#f4f8ec" stroke-width="1.25"/>
-        <line x1="4.6" y1="6.5" x2="12.2" y2="6.5" stroke="#f4f8ec" stroke-width="0.9" stroke-opacity="0.65"/>
-        <line x1="4.8" y1="10.2" x2="12.0" y2="10.2" stroke="#f4f8ec" stroke-width="0.9" stroke-opacity="0.65"/>
-        <path d="M4.6 16.2 L12.2 16.2 L11.8 21.0 C11.6 22.8 10.1 23.8 8.4 23.8 C6.7 23.8 5.2 22.8 5.0 21.0 Z" fill="#2c5530" stroke="#f4f8ec" stroke-width="1.25"/>
+    <span class="footprint-marker czekpoint-footprint-rotator" style="opacity:${safeOpacity};transform: rotate(${Math.round(bearingDeg)}deg) scaleX(${scaleX});">
+      <svg viewBox="0 0 22 30" width="22" height="26" aria-hidden="true" class="footprint-svg">
+        <!-- Obrys a výplň přední části podrážky pohorky -->
+        <path d="M6.8 2.2 C4.2 2.7 2.8 5.4 3.2 9.5 C3.6 13.2 4.6 15.4 5.2 17.5 L16.8 17.5 C17.4 15.2 18.2 12.8 18.4 9.2 C18.6 4.9 16.5 2.1 13.2 1.9 C11.3 1.8 9.0 2.0 6.8 2.2 Z"
+          fill="#f5c542" stroke="#1a120b" stroke-width="1.8" stroke-linejoin="round"/>
+        <!-- Příčné zuby vzorku pohorky (hluboký trek vzorek) -->
+        <line x1="5.2" y1="6.0" x2="16.4" y2="6.0" stroke="#1a120b" stroke-width="1.3" stroke-linecap="round"/>
+        <line x1="5.5" y1="9.8" x2="16.2" y2="9.8" stroke="#1a120b" stroke-width="1.3" stroke-linecap="round"/>
+        <line x1="5.8" y1="13.6" x2="16.0" y2="13.6" stroke="#1a120b" stroke-width="1.3" stroke-linecap="round"/>
+        <!-- Podpatek pohorky -->
+        <path d="M5.5 19.8 L16.5 19.8 L15.9 26.2 C15.6 28.5 13.8 29.8 11.2 29.8 C8.6 29.8 6.8 28.5 6.4 26.2 Z"
+          fill="#e8d5a7" stroke="#1a120b" stroke-width="1.8" stroke-linejoin="round"/>
+        <line x1="7.4" y1="24.2" x2="14.6" y2="24.2" stroke="#1a120b" stroke-width="1.3" stroke-linecap="round"/>
       </svg>
     </span>
   `;
 }
 
 /**
- * Vykreslí živého animovaného Avatara hráče na mapě (`.player-avatar-marker`, 54 × 54 px)
- * s obíhající zlatou směrovou šipkou (`.avatar-direction-pointer`) (ZADÁNÍ #08 Bod 2).
+ * Vykreslí živého animovaného Avatara hráče na mapě (`.player-avatar-marker`, 72 × 72 px ve 2D, 86 × 86 px ve 3D)
+ * s obíhající zlatou směrovou šipkou (`.avatar-direction-pointer`), perspektivním stínem a pulzujícím prstencem na zemi (Bod 3).
  */
 export function renderPlayerAvatarMarkerHtml(arg1 = 'liska', arg2 = 0, arg3 = false) {
   const opts = typeof arg1 === 'object' && arg1 !== null
@@ -249,18 +256,21 @@ export function renderPlayerAvatarMarkerHtml(arg1 = 'liska', arg2 = 0, arg3 = fa
   const avatarId = opts.avatarId || 'liska';
   const bearingDeg = Number.isFinite(Number(opts.bearingDeg)) ? Number(opts.bearingDeg) : 0;
   const isWalking = Boolean(opts.isWalking);
+  const is3D = Boolean(opts.is3D || opts.is3dMode || opts.is3DMode);
   const imgSrc = avatarUrl(avatarId);
   const avatarMeta = ALLOWED_AVATARS.find(a => a.id === avatarId) || ALLOWED_AVATARS[0];
   const showArrow = opts.orbitalArrow !== false && opts.showOrbitalArrow !== false;
   return `
-    <div class="player-avatar-marker ${isWalking ? 'is-walking' : 'is-idle'}" data-avatar-id="${e(avatarMeta.id)}">
+    <div class="player-avatar-marker ${isWalking ? 'is-walking' : 'is-idle'} ${is3D ? 'is-3d-avatar' : ''}" data-avatar-id="${e(avatarMeta.id)}">
+      <div class="avatar-ground-shadow" aria-hidden="true"></div>
+      <div class="avatar-ground-ring" aria-hidden="true"></div>
       <div class="avatar-direction-pointer" style="transform: rotate(${Math.round(bearingDeg)}deg); ${showArrow ? '' : 'display:none;'}" title="Směr k další zastávce">
-        <svg viewBox="0 0 20 20" class="avatar-direction-arrow" aria-hidden="true">
-          <path d="M10 1 L17 15 L10 11.5 L3 15 Z" fill="#ffd25a" stroke="#231709" stroke-width="1.6" stroke-linejoin="round"/>
+        <svg viewBox="0 0 24 24" class="avatar-direction-arrow" aria-hidden="true">
+          <path d="M12 1 L21 18 L12 14 L3 18 Z" fill="#ffd25a" stroke="#1a120b" stroke-width="2" stroke-linejoin="round"/>
         </svg>
       </div>
-      <div class="avatar-medallion-core">
-        <img src="${e(imgSrc)}" alt="${e(avatarMeta.name)}" width="34" height="34" class="player-avatar-img">
+      <div class="avatar-medallion-core player-avatar-inner">
+        <img src="${e(imgSrc)}" alt="${e(avatarMeta.name)}" width="58" height="58" class="player-avatar-img">
       </div>
     </div>
   `;
@@ -1138,7 +1148,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     });
 
   root.innerHTML = `
-    <h1 tabindex="-1" class="visually-hidden">Mapa objevování a procházka · Czekpoint v2.1</h1>
+    <h1 tabindex="-1" class="visually-hidden">Mapa objevování a procházka · Czekpoint v2.2 (v2.1)</h1>
 
     <!-- Horní přehledový panel trasy: zobrazí se AŽ ve chvíli, kdy má uživatel vybraný alespoň 1 bod v trase -->
     <section class="phase1-top-bar" id="phase1-top-bar" hidden aria-label="Souhrn trasy, plán zastávek a spuštění výpravy">
@@ -1988,6 +1998,10 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
    * Bod 25: Sledování hráče s vycentrováním do viditelné části mapy nad spodním panelem.
    * Respektuje uživatelem zvolené přiblížení (zoom) a nikdy automaticky neoddaluje na celou trasu.
    */
+  /**
+   * Bod 25 & Verze v2.2 (Bod 2): Sledování hráče s vycentrováním do viditelné části mapy nad spodním panelem.
+   * Ve 3D režimu posune Avatara do spodní části displeje (top: 44%), takže před sebou vidí dlouhý kus cesty.
+   */
   function getBottomSheetOverlapPx() {
     if (!map || zenMode || sheetCollapsed) return 0;
     const mapRect = $('walk-map')?.getBoundingClientRect?.();
@@ -1997,17 +2011,44 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     return overlap > 0 ? Math.min(mapRect.height * 0.5, overlap + 32) : Math.round(mapRect.height * 0.16);
   }
 
+  function getMapCameraPadding() {
+    if (!map) return { top: 0, bottom: 0, left: 0, right: 0 };
+    const h = (typeof map.getContainer === 'function' ? map.getContainer()?.clientHeight : null) || 600;
+    if (is3dMode || is3DMode) {
+      // Posune Avatara do spodní části displeje, takže před ním je vidět dlouhý kus cesty (GTA styl)
+      return {
+        top: Math.round(h * 0.44),
+        bottom: zenMode ? 20 : Math.min(120, Math.round(getBottomSheetOverlapPx() * 0.4)),
+        left: 0,
+        right: 0,
+      };
+    }
+    return {
+      top: 20,
+      bottom: zenMode ? 0 : Math.min(160, Math.round(getBottomSheetOverlapPx() * 0.5)),
+      left: 0,
+      right: 0,
+    };
+  }
+
   let userZoomLocked = false;
   let lastUserZoomAt = 0;
 
   function centerMapOnPlayer(pos = lastFix || telemetry.lastKnownPosition, animate = false) {
     if (!follow || isUserTouchingMap) return;
     if (!map || !pos || !Number.isFinite(pos.lat) || !Number.isFinite(pos.lng)) return;
-    const bottomPad = zenMode ? 0 : Math.min(180, Math.round(getBottomSheetOverlapPx() * 0.6));
+    const padding = getMapCameraPadding();
     const opts = {
       center: [Number(pos.lng), Number(pos.lat)],
-      padding: { top: 20, bottom: bottomPad, left: 0, right: 0 },
+      padding,
     };
+    if (is3dMode || is3DMode) {
+      opts.pitch = 66;
+      opts.zoom = Math.max(typeof map.getZoom === 'function' ? map.getZoom() : 18.4, 18.4);
+      if (currentWalkHeadingDeg != null) {
+        opts.bearing = currentWalkHeadingDeg;
+      }
+    }
     if (animate && typeof map.easeTo === 'function') {
       map.easeTo({ ...opts, duration: 350 });
     } else if (typeof map.jumpTo === 'function') {
@@ -2214,9 +2255,16 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     }
   }
 
+  let camLng = null;
+  let camLat = null;
+  let camBearing = 0;
+  let currentWalkHeadingDeg = null;
+
   /**
-   * ZADÁNÍ #08 (Bod 2) & Hotfix v2.0.1: Plynulý LERP pohyb Avatara po mapě pomocí requestAnimationFrame.
-   * Pokud je follow === false, NIKDY nevolá map.easeTo, map.jumpTo, map.flyTo ani map.setCenter!
+   * ZADÁNÍ Verze v2.2 (Bod 1 & 2): Jednotná smyčka kamery bez cukání ve 3D a GTA pohled.
+   * - Zákaz map.easeTo uvnitř smyčky pohybu.
+   * - V jediné requestAnimationFrame smyčce plynule interpoluje jak pozici Avatara (curLat, curLng),
+   *   tak natočení kamery (camBearing přes kruhový LERP), a na konci snímku volá jediné synchronní map.jumpTo!
    */
   function smoothMovePlayerTo(targetLat, targetLng, durationMs = 1100) {
     if (!map || !player || !Number.isFinite(targetLat) || !Number.isFinite(targetLng)) return;
@@ -2232,21 +2280,43 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     const startLatLng = typeof player.getLatLng === 'function' ? player.getLatLng() : null;
     const distM = startLatLng ? (haversineMeters({ lat: startLatLng.lat, lng: startLatLng.lng }, { lat: targetLat, lng: targetLng }) ?? 999) : 999;
 
-    if (follow && !isUserTouchingMap) {
-      const nowMs = Date.now();
-      const mapBusy = (typeof map.isMoving === 'function' && map.isMoving()) || (typeof map.isEasing === 'function' && map.isEasing());
-      if (!mapBusy && nowMs - lastCameraEaseAt >= 250) {
-        lastCameraEaseAt = nowMs;
-        centerMapOnPlayer({ lat: targetLat, lng: targetLng }, false);
+    // Azimut kroku pro natáčení kamery a stopy pohorek
+    if (startLatLng && Number.isFinite(startLatLng.lat) && Number.isFinite(startLatLng.lng) && distM >= 0.5) {
+      currentWalkHeadingDeg = calculateBearing({ lat: startLatLng.lat, lng: startLatLng.lng }, { lat: targetLat, lng: targetLng });
+    }
+
+    // Inicializace stavu kamery z mapy
+    if (map && typeof map.getCenter === 'function') {
+      const curCenter = map.getCenter();
+      if (curCenter && Number.isFinite(curCenter.lng) && Number.isFinite(curCenter.lat)) {
+        camLng = curCenter.lng;
+        camLat = curCenter.lat;
       }
-    } else {
-      updateRecenterButtonVisibility();
+      camBearing = (typeof map.getBearing === 'function' ? Number(map.getBearing()) : 0) || 0;
     }
 
     if (!startLatLng || currentOpacity === 0 || distM > 350 || distM < 0.2 || durationMs <= 0) {
       visualPlayerPos = { lat: targetLat, lng: targetLng };
       player.setLatLng([targetLat, targetLng]);
       accuracyRing?.setLatLng([targetLat, targetLng]);
+      if (follow && !isUserTouchingMap && map) {
+        let snapBearing = camBearing;
+        if (is3dMode || is3DMode) {
+          snapBearing = currentWalkHeadingDeg != null ? currentWalkHeadingDeg : (Number.isFinite(targetBearing) ? targetBearing : camBearing);
+        } else if (followHeadingMode) {
+          snapBearing = currentDeviceHeading != null ? currentDeviceHeading : (currentWalkHeadingDeg != null ? currentWalkHeadingDeg : camBearing);
+        }
+        const jumpOpts = {
+          center: [targetLng, targetLat],
+          padding: getMapCameraPadding(),
+        };
+        if (is3dMode || is3DMode || followHeadingMode) {
+          jumpOpts.bearing = snapBearing;
+        }
+        if (typeof map.jumpTo === 'function') {
+          map.jumpTo(jumpOpts);
+        }
+      }
       return;
     }
 
@@ -2255,7 +2325,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     const startTime = performance.now();
 
     const stepLerp = (nowPerf) => {
-      if (disposed || !player) {
+      if (disposed || !player || !map) {
         playerLerpRafId = null;
         return;
       }
@@ -2269,6 +2339,38 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       player.setLatLng([curLat, curLng]);
       accuracyRing?.setLatLng([curLat, curLng]);
 
+      // Jediná synchronní aktualizace kamery v LERP smyčce bez cukání
+      if (follow && !isUserTouchingMap) {
+        let targetCamHeading = camBearing;
+        if (is3dMode || is3DMode) {
+          // GTA pohled zezadu ve směru pohybu
+          targetCamHeading = currentWalkHeadingDeg != null
+            ? currentWalkHeadingDeg
+            : (Number.isFinite(targetBearing) ? targetBearing : camBearing);
+        } else if (followHeadingMode) {
+          targetCamHeading = currentDeviceHeading != null
+            ? currentDeviceHeading
+            : (currentWalkHeadingDeg != null ? currentWalkHeadingDeg : camBearing);
+        }
+
+        // Kruhový LERP přes nejmenší úhel
+        const delta = ((targetCamHeading - camBearing + 540) % 360) - 180;
+        camBearing = (camBearing + delta * 0.12 + 360) % 360;
+        camLng = curLng;
+        camLat = curLat;
+
+        const jumpOpts = {
+          center: [curLng, curLat],
+          padding: getMapCameraPadding(),
+        };
+        if (is3dMode || is3DMode || followHeadingMode) {
+          jumpOpts.bearing = camBearing;
+        }
+        if (typeof map.jumpTo === 'function') {
+          map.jumpTo(jumpOpts);
+        }
+      }
+
       if (t < 1) {
         playerLerpRafId = requestAnimationFrame(stepLerp);
       } else {
@@ -2278,6 +2380,8 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         if (!follow) {
           updateRecenterButtonVisibility();
         }
+        renderTrail();
+        drawFog();
       }
     };
 
@@ -2302,6 +2406,13 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     if (typeof document === 'undefined') return;
 
     const nowMs = Date.now();
+
+    // Verze v2.2 (Bod 1.2): Během aktivní animace pohybu spouštět drawFog maximálně jednou za 1200 ms
+    if (playerLerpRafId !== null && !force && (nowMs - lastFogUpdateAt < 1200)) {
+      scheduleFog(1200);
+      return;
+    }
+
     const curCenter = (typeof map.getCenter === 'function' ? map.getCenter() : null) || lastFix || getRouteOriginPoint();
     const outOfSafeBounds = !fogGeographicBounds || !isPointInsideFogSafeBounds(curCenter.lat, curCenter.lng, fogGeographicBounds, 0.65);
 
@@ -2335,10 +2446,15 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       return;
     }
 
+    // Verze v2.2 (Bod 1.2): 512 × 512 px offscreen canvas pro 60 FPS (4× rychlejší toDataURL)
     if (!fogTextureCanvas) {
       fogTextureCanvas = document.createElement('canvas');
-      fogTextureCanvas.width = 1024;
-      fogTextureCanvas.height = 1024;
+      fogTextureCanvas.width = 512;
+      fogTextureCanvas.height = 512;
+    }
+    if (fogTextureCanvas.width !== 512) {
+      fogTextureCanvas.width = 512;
+      fogTextureCanvas.height = 512;
     }
 
     const fogBounds = fogGeographicBounds.coordinates;
@@ -2351,8 +2467,8 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       activeLocalReveals,
       lastFix: activePlayerPos,
       revealRadiusM: FOG_REVEAL_RADIUS_M,
-      width: 1024,
-      height: 1024,
+      width: 512,
+      height: 512,
     });
 
     lastFogStateKey = fogStateKey;
@@ -2402,8 +2518,108 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
   }
 
   /**
+   * Generování stop každé 2.2 metru přímo za patami Avatara (Bod 4):
+   * - Prochází úseky podél prošlé trasy walkSegments až k aktuální pozici Avatara.
+   * - První stopa začíná ~2 metry za patami Avatara.
+   * - Střídá levou a pravou botu (isLeft = stepIndex % 2 === 0) s bočním odsazením ±0.4 m.
+   * - Ukládá směr chůze bearingDeg a vrací posledních 60 stop.
+   */
+  function computeDenseTrailFootprints(walkSegments, playerPos, maxSteps = 60) {
+    if (!Array.isArray(walkSegments) || walkSegments.length === 0) return [];
+
+    const segments = [];
+    for (const seg of walkSegments) {
+      if (!Array.isArray(seg) || seg.length < 2) continue;
+      const pts = seg.map(p => (Array.isArray(p) ? { lat: Number(p[0]), lng: Number(p[1]) } : { lat: Number(p.lat), lng: Number(p.lng) })).filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lng));
+      if (pts.length >= 2) segments.push(pts);
+    }
+
+    if (segments.length === 0) return [];
+
+    // Pokud máme aktuální pozici Avatara, napojíme ji na konec posledního segmentu
+    if (playerPos && Number.isFinite(playerPos.lat) && Number.isFinite(playerPos.lng)) {
+      const lastSeg = segments[segments.length - 1];
+      const lastPt = lastSeg[lastSeg.length - 1];
+      const gapM = haversineMeters(lastPt, playerPos) ?? 0;
+      if (gapM >= 0.8 && gapM <= 60) {
+        lastSeg.push({ lat: playerPos.lat, lng: playerPos.lng });
+      }
+    }
+
+    const footprints = [];
+    let stepIndex = 0;
+
+    for (let sIdx = 0; sIdx < segments.length; sIdx++) {
+      const seg = segments[sIdx];
+      let segLen = 0;
+      const legDistances = [];
+      for (let i = 0; i < seg.length - 1; i++) {
+        const d = haversineMeters(seg[i], seg[i + 1]) ?? 0;
+        legDistances.push(d);
+        segLen += d;
+      }
+      if (segLen < 2.2) continue;
+
+      // Pro poslední segment skončíme ~2.0 metry před koncem (přímo za patami Avatara)
+      const endOffset = (sIdx === segments.length - 1) ? 2.0 : 0;
+      const maxDistance = segLen - endOffset;
+
+      let targetDist = 2.0;
+      let currentDist = 0;
+      let legIdx = 0;
+
+      while (targetDist <= maxDistance && legIdx < seg.length - 1) {
+        while (legIdx < seg.length - 1 && currentDist + legDistances[legIdx] < targetDist) {
+          currentDist += legDistances[legIdx];
+          legIdx++;
+        }
+        if (legIdx >= seg.length - 1) break;
+
+        const legLenM = legDistances[legIdx];
+        if (legLenM < 0.1) {
+          legIdx++;
+          continue;
+        }
+
+        const legDist = targetDist - currentDist;
+        const t = Math.max(0, Math.min(1, legDist / legLenM));
+        const p1 = seg[legIdx];
+        const p2 = seg[legIdx + 1];
+
+        const interpLat = p1.lat + (p2.lat - p1.lat) * t;
+        const interpLng = p1.lng + (p2.lng - p1.lng) * t;
+        const bearingDeg = calculateBearing(p1, p2);
+
+        const isLeft = (stepIndex % 2 === 0);
+        const perpAngleDeg = (bearingDeg + (isLeft ? -90 : 90) + 360) % 360;
+        const offsetPt = moveCoordinates({ lat: interpLat, lng: interpLng }, 0.4, perpAngleDeg);
+
+        footprints.push({
+          lat: offsetPt.lat,
+          lng: offsetPt.lng,
+          bearingDeg: Math.round(bearingDeg),
+          side: isLeft ? 'L' : 'R',
+          stepIndex,
+        });
+
+        stepIndex++;
+        targetDist += 2.2; // Rozestup 2.2 metru
+      }
+    }
+
+    // Posledních maxSteps stop (až 60 kroků) přímo za Avatarem se stárnoucí průhledností
+    const recent = footprints.slice(-maxSteps);
+    const totalRecent = recent.length;
+    for (let i = 0; i < totalRecent; i++) {
+      const ageRatio = totalRecent <= 1 ? 1 : i / (totalRecent - 1);
+      recent[i].opacity = Number((0.35 + 0.60 * ageRatio).toFixed(2));
+    }
+    return recent;
+  }
+
+  /**
    * Vykreslí prošlou trasu (`walkSegments` jako GeoJSON vrstvu) a střídavé levé/pravé otisky podrážky pohorky
-   * (`.footprint-marker`, 18×18 px) ukotvené na střed (`anchor: 'center'`).
+   * (`.footprint-marker`, 26 × 26 px) s rotationAlignment: 'map' a pitchAlignment: 'map' (Bod 4).
    */
   function renderTrail() {
     if (!map) return;
@@ -2424,8 +2640,9 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       }
       return;
     }
-    const zoom = Math.round(((typeof map.getZoom === 'function' ? map.getZoom() : 15.5) || 15.5) * 2) / 2;
-    const footprints = computeFootprintPlacements(progress.walkSegments, zoom);
+
+    const avatarPos = visualPlayerPos || lastFix || getRouteOriginPoint();
+    const footprints = computeDenseTrailFootprints(progress.walkSegments, avatarPos, 60);
     const totalCount = footprints.length;
 
     if ($('trail-info')) {
@@ -2433,7 +2650,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     }
 
     const lastFp = totalCount > 0 ? footprints[totalCount - 1] : null;
-    const trailKey = `${zoom}|${totalCount}|${lastFp ? `${lastFp.lat.toFixed(5)},${lastFp.lng.toFixed(5)}` : '0'}`;
+    const trailKey = `${totalCount}|${lastFp ? `${lastFp.lat.toFixed(5)},${lastFp.lng.toFixed(5)}` : '0'}`;
     if (trailKey === lastTrailRenderKey) return;
     lastTrailRenderKey = trailKey;
 
@@ -2442,17 +2659,20 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
 
     for (let i = 0; i < totalCount; i++) {
       const fp = footprints[i];
-      const ageRatio = totalCount <= 1 ? 1 : i / (totalCount - 1);
-      const fadeOpacity = Number.isFinite(fp.opacity)
-        ? fp.opacity
-        : Number((0.22 + 0.63 * ageRatio).toFixed(2));
       const el = document.createElement('div');
       el.className = 'footprint-marker-anchor';
-      el.style.width = '18px';
-      el.style.height = '18px';
+      el.style.width = '26px';
+      el.style.height = '26px';
       el.style.pointerEvents = 'none';
-      el.innerHTML = renderBootFootprintSvg(fp.side, fp.bearingDeg, fadeOpacity);
-      const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
+      el.innerHTML = renderBootFootprintSvg(fp.side, fp.bearingDeg, fp.opacity);
+
+      // Ve 3D leží stopy přímo na zemi v terénu a míří ve směru chůze
+      const marker = new maplibregl.Marker({
+        element: el,
+        anchor: 'center',
+        rotationAlignment: 'map',
+        pitchAlignment: 'map',
+      })
         .setLngLat([fp.lng, fp.lat])
         .addTo(map);
       footprintMarkers.push(marker);
@@ -6521,15 +6741,38 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     enableAllMapInteractions();
 
     if (next3D) {
+      // Verze v2.2 (Bod 2): Automatické sledování polohy i směru chůze
+      follow = true;
+      followHeadingMode = true;
+      updateFollowUi();
+      updateHeadingModeBannerUi();
+
+      const curZoom = typeof map.getZoom === 'function' ? map.getZoom() : 16.5;
+      const targetZoom = curZoom < 18.2 ? 18.4 : curZoom;
+      const initialBearing = (Number.isFinite(currentWalkHeadingDeg) && currentWalkHeadingDeg !== null)
+        ? currentWalkHeadingDeg
+        : (Number.isFinite(targetBearing) ? targetBearing : ((typeof map.getBearing === 'function' ? map.getBearing() : 0) || 0));
+      camBearing = initialBearing;
+
+      const playerPos = getAvatarReferencePosition();
+      const padding = getMapCameraPadding();
+
       // DÁVKA 4 (Bod 1.2): Bezpečné přepnutí 2D/3D i během načítání stylu (!map.isStyleLoaded())
       const styleReady = typeof map.isStyleLoaded === 'function' ? map.isStyleLoaded() : true;
       if (!styleReady) {
         update3DUiState();
         try {
-          map.easeTo({ pitch: 58, duration: opts.instant ? 0 : 700 });
+          map.easeTo({
+            pitch: 66,
+            zoom: targetZoom,
+            bearing: initialBearing,
+            center: playerPos ? [playerPos.lng, playerPos.lat] : undefined,
+            padding,
+            duration: opts.instant ? 0 : 700,
+          });
         } catch {}
         if (!opts.silent) {
-          status('🏔️ Zapnuto 3D zobrazení terénu a budov (dokončuji načítání výškového modelu…).');
+          status('🏔️ Zapnuto 3D zobrazení GTA (pohled zezadu, náklon 66°, zoom 18.4, načítám výškový model…).');
         }
         return;
       }
@@ -6547,11 +6790,15 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         }
         update3DUiState();
         map.easeTo({
-          pitch: 58,
+          pitch: 66, // původně pitch: 58, ve verzi v2.2 GTA náklon 66°
+          zoom: targetZoom,
+          bearing: initialBearing,
+          center: playerPos ? [playerPos.lng, playerPos.lat] : undefined,
+          padding,
           duration: opts.instant ? 0 : 700,
         });
         if (!opts.silent) {
-          status('🏔️ Zapnuto 3D zobrazení hor a 3D budov (náklon 58°). Mapou můžeš volně otáčet a posouvat.');
+          status('🏔️ Zapnuto 3D zobrazení GTA (pohled zezadu, náklon 66°, zoom 18.4).');
         }
       } catch {
         is3DMode = false;
@@ -6563,7 +6810,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
             map.setLayoutProperty('czekpoint-3d-buildings', 'visibility', 'none');
           }
         } catch {}
-        try { map.easeTo({ pitch: 0, duration: 300 }); } catch {}
+        try { map.easeTo({ pitch: 0, padding: getMapCameraPadding(), duration: 300 }); } catch {}
         update3DUiState();
         status('3D terén není momentálně dostupný, pokračuji ve 2D zobrazení.');
       }
@@ -6583,6 +6830,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       try {
         map.easeTo({
           pitch: 0,
+          padding: getMapCameraPadding(),
           duration: opts.instant ? 0 : 600,
         });
       } catch {}

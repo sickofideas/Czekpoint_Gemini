@@ -2211,8 +2211,8 @@
 
 .player-avatar-marker {
   position: relative;
-  width: 54px;
-  height: 54px;
+  width: 72px;
+  height: 72px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2220,48 +2220,108 @@
   will-change: transform;
 }
 
+/* 3D režim Avatara — 86 × 86 px */
+.is-3d-mode .player-avatar-marker,
+.player-avatar-marker.is-3d-avatar {
+  width: 86px;
+  height: 86px;
+}
+
 .player-avatar-marker.is-walking {
   animation: avatarWalkBob 0.55s ease-in-out infinite alternate;
 }
 
-.avatar-medallion-core {
-  width: 40px;
-  height: 40px;
+/* Perspektivní eliptický stín a pulzující smaragdově-zlatý prstenec na zemi pod medailonem */
+.avatar-ground-shadow {
+  position: absolute;
+  bottom: 0px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 58px;
+  height: 18px;
   border-radius: 50%;
-  background: radial-gradient(circle at 35% 30%, #fffdf7 0%, #f1e3c6 100%);
-  border: 2.5px solid #d49b27;
-  box-shadow: 0 4px 12px rgba(20, 14, 6, 0.42), 0 0 0 2px rgba(255, 255, 255, 0.85);
+  background: radial-gradient(ellipse at center, rgba(16, 12, 6, 0.7) 0%, rgba(16, 12, 6, 0.28) 55%, transparent 75%);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.avatar-ground-ring {
+  position: absolute;
+  bottom: -2px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 54px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid rgba(45, 212, 191, 0.75);
+  box-shadow: 0 0 14px rgba(45, 212, 191, 0.55), inset 0 0 8px rgba(245, 184, 46, 0.45);
+  pointer-events: none;
+  animation: groundRingPulse 2.4s ease-in-out infinite;
+  z-index: 1;
+}
+
+@keyframes groundRingPulse {
+  0%, 100% {
+    transform: translateX(-50%) scale(0.96);
+    opacity: 0.7;
+    border-color: rgba(45, 212, 191, 0.75);
+  }
+  50% {
+    transform: translateX(-50%) scale(1.08);
+    opacity: 1;
+    border-color: rgba(245, 184, 46, 0.95);
+    box-shadow: 0 0 18px rgba(245, 184, 46, 0.75);
+  }
+}
+
+.avatar-medallion-core {
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #fffdf7 0%, #f4e8cc 100%);
+  border: 3.5px solid #f5b82e;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.55), 0 0 0 2px rgba(255, 255, 255, 0.9);
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
   z-index: 2;
+  position: relative;
+  transition: transform 0.2s ease-out;
 }
 
-.avatar-medallion-core svg {
-  width: 34px;
-  height: 34px;
+.avatar-medallion-core svg,
+.avatar-medallion-core img {
+  width: 58px;
+  height: 58px;
   display: block;
+  object-fit: contain;
 }
 
 .avatar-direction-pointer {
   position: absolute;
   inset: 0;
-  width: 54px;
-  height: 54px;
+  width: 72px;
+  height: 72px;
   pointer-events: none;
   transition: transform 0.22s ease-out;
   z-index: 3;
 }
 
+.is-3d-mode .avatar-direction-pointer,
+.player-avatar-marker.is-3d-avatar .avatar-direction-pointer {
+  width: 86px;
+  height: 86px;
+}
+
 .avatar-direction-arrow {
   position: absolute;
-  top: -3px;
+  top: -5px;
   left: 50%;
   transform: translateX(-50%);
-  width: 16px;
-  height: 16px;
-  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.55));
+  width: 22px;
+  height: 22px;
+  filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.7));
 }
 
 @keyframes avatarIdleBreathe {
@@ -2269,7 +2329,7 @@
     transform: scale(1);
   }
   50% {
-    transform: scale(1.04);
+    transform: scale(1.03);
   }
 }
 
@@ -2278,25 +2338,27 @@
     transform: translateY(0) rotate(-3deg);
   }
   100% {
-    transform: translateY(-4px) rotate(3deg);
+    transform: translateY(-5px) rotate(3deg);
   }
 }
 
-/* 3. Stopy pohorek (.footprint-marker, 18×18 px) */
+/* 3. Stopy pohorek (.footprint-marker, 26×26 px, MapLibre map/map alignment) */
 .footprint-marker-anchor {
   background: transparent !important;
   border: 0 !important;
   pointer-events: none;
+  width: 26px !important;
+  height: 26px !important;
 }
 
 .footprint-marker {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: 26px;
+  height: 26px;
   will-change: transform, opacity;
-  filter: drop-shadow(0 1px 1px rgba(255, 255, 255, 0.32));
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.55));
 }
 
 /* 5. Kompaktní odbočovací navigace vedle kompasu (.turn-nav-pill) */

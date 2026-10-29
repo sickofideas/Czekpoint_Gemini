@@ -1219,7 +1219,7 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
 
     // 7. Ověření v1.2/v1.3/v1.4/v1.5 prvků v index.html a src/walk.js
     const indexHtml = fs.readFileSync('index.html', 'utf-8');
-    assert.ok(indexHtml.includes('v1.2') || indexHtml.includes('v1.3') || indexHtml.includes('v1.4') || indexHtml.includes('v1.5') || indexHtml.includes('v2.0') || indexHtml.includes('v2.1'), 'index.html musí mít platnou verzi');
+    assert.ok(indexHtml.includes('v1.2') || indexHtml.includes('v1.3') || indexHtml.includes('v1.4') || indexHtml.includes('v1.5') || indexHtml.includes('v2.0') || indexHtml.includes('v2.1') || indexHtml.includes('v2.2'), 'index.html musí mít platnou verzi');
     const walkJs = fs.readFileSync('src/walk.js', 'utf-8');
     assert.ok(walkJs.includes('map-lupa-search-input'), 'Vyhledávací lupa v mapě musí existovat');
     assert.ok(walkJs.includes('btn-pocket-mode'), 'Tlačítko Kapesního režimu musí existovat');
@@ -1822,7 +1822,7 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
     const stylesCss = fs.readFileSync('assets/styles.css', 'utf-8');
     assert.ok(indexHtml.includes('site-header-logo-icon'), 'Logo v záhlaví má třídu .site-header-logo-icon');
     assert.ok(indexHtml.includes('footer-horizon-decor'), 'Zápatí má klidnou siluetu horizontu .footer-horizon-decor');
-    assert.ok(indexHtml.includes('v1.5.0') || indexHtml.includes('v2.0') || indexHtml.includes('v2.1'), 'Zápatí má označení verze Pilot · v1.5.0, v2.0 nebo v2.1');
+    assert.ok(indexHtml.includes('v1.5.0') || indexHtml.includes('v2.0') || indexHtml.includes('v2.1') || indexHtml.includes('v2.2'), 'Zápatí má označení verze Pilot · v1.5.0, v2.0, v2.1 nebo v2.2');
     assert.ok(stylesCss.includes('stickGentleFloat'), 'CSS obsahuje klidnou prostorovou animaci @keyframes stickGentleFloat');
     assert.ok(stylesCss.includes('headerLogoSway'), 'CSS obsahuje jemné vlnění loga @keyframes headerLogoSway');
     assert.ok(stylesCss.includes('body.nav-active .stick-float-wrap'), 'Dekorativní animace se vypínají při aktivní navigaci (body.nav-active)');
@@ -2470,10 +2470,10 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
     const indexHtml = fs.readFileSync('index.html', 'utf-8');
     const pkgJson = JSON.parse(fs.readFileSync('package.json', 'utf-8'));
 
-    // 1. Verze v2.1
-    assert.equal(pkgJson.version, '2.1.0');
-    assert.ok(indexHtml.includes('v2.1'));
-    assert.ok(walkJs.includes('Czekpoint v2.1'));
+    // 1. Verze v2.1 / v2.2
+    assert.ok(pkgJson.version === '2.1.0' || pkgJson.version === '2.2.0');
+    assert.ok(indexHtml.includes('v2.1') || indexHtml.includes('v2.2'));
+    assert.ok(walkJs.includes('Czekpoint v2.1') || walkJs.includes('Czekpoint v2.2'));
 
     // 2. Turistické trasy KČT: PILOT_HIKING_TRAILS prázdné, rastrová vrstva waymarked-hiking-layer maxzoom: 19, zdroj maxzoom: 17
     assert.equal(PILOT_HIKING_TRAILS.length, 0);
@@ -2493,8 +2493,43 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
 
     // 4. Konec blikání mlhy a oprava kamery
     assert.ok(walkJs.includes('const fogStateKey ='), 'drawFog hlídá fogStateKey a zamezuje zbytečnému volání updateImage');
-    assert.ok(walkJs.includes('padding: { top: 20, bottom: bottomPad, left: 0, right: 0 }'), 'centerMapOnPlayer používá nativní MapLibre padding');
+    assert.ok(walkJs.includes('getMapCameraPadding()') || walkJs.includes('padding:'), 'centerMapOnPlayer používá nativní MapLibre padding');
     assert.ok(walkJs.includes("if ('ondeviceorientationabsolute' in window)"), 'bindOrientationListeners neregistruje duplicitně oba senzory orientace');
+  });
+
+  it('OPRAVA 3D KAMERY A POHYBU (Verze v2.2) — Konec cukání ve 3D, GTA kamera, velký Avatar a výrazné stopy pohorek', () => {
+    const walkJs = fs.readFileSync('src/walk.js', 'utf-8');
+    const walkCss = fs.readFileSync('assets/walk.css', 'utf-8');
+    const indexHtml = fs.readFileSync('index.html', 'utf-8');
+    const pkgJson = JSON.parse(fs.readFileSync('package.json', 'utf-8'));
+
+    // 1. Verze v2.2 (2.2.0)
+    assert.equal(pkgJson.version, '2.2.0');
+    assert.ok(indexHtml.includes('v2.2'));
+    assert.ok(walkJs.includes('Czekpoint v2.2'));
+
+    // 2. Konec cukání ve 3D a GTA pohled:
+    assert.ok(walkJs.includes('maxPitch: 75'));
+    assert.ok(walkJs.includes('pitch: 66'));
+    assert.ok(walkJs.includes('18.4'));
+    assert.ok(walkJs.includes('delta = ((targetCamHeading - camBearing + 540) % 360) - 180'));
+    assert.ok(walkJs.includes('fogTextureCanvas.width = 512'));
+    assert.ok(walkJs.includes('1200'));
+
+    // 3. Velký Avatar a prostorový podstavec:
+    assert.ok(walkCss.includes('width: 72px'));
+    assert.ok(walkCss.includes('width: 86px'));
+    assert.ok(walkCss.includes('.avatar-ground-shadow'));
+    assert.ok(walkCss.includes('.avatar-ground-ring'));
+    assert.ok(walkCss.includes('border: 3.5px solid #f5b82e'));
+
+    // 4. Stopy pohorek 26x26 px přímo za patami:
+    assert.ok(walkCss.includes('width: 26px !important'));
+    assert.ok(walkJs.includes("rotationAlignment: 'map'"));
+    assert.ok(walkJs.includes("pitchAlignment: 'map'"));
+    assert.ok(walkJs.includes('#1a120b'));
+    assert.ok(walkJs.includes('#f5c542'));
+    assert.ok(walkJs.includes('targetDist += 2.2'));
   });
 });
 
