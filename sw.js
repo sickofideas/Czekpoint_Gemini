@@ -5,7 +5,7 @@
 // - Poskytuje cache-first strategii s doživotním fallbackem pro dlaždice při výpadku signálu
 // ============================================================
 
-const APP_CACHE_NAME = 'czekpoint-app-shell-v2.0-part3';
+const APP_CACHE_NAME = 'czekpoint-app-shell-v2.0-final';
 const TILE_CACHE_NAME = 'czekpoint-offline-tiles-v1.3';
 
 const CORE_ASSETS = [

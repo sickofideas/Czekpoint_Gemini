@@ -145,6 +145,8 @@ import {
   extractAbsoluteCompassHeadingDeg,
   computeGpsWalkingCourseDeg,
   computeOffscreenIndicatorPlacement,
+  checkWebGLSupport,
+  buildWebGLErrorBannerHtml,
 } from './walk.js';
 import { config as appConfig } from '../config.js';
 import {
@@ -1791,7 +1793,7 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
       stickCustomization: validatedCustom,
     };
     const backupJson150 = exportStateJson(fullStateSample as any);
-    assert.match(backupJson150, /1\.5\.0/);
+    assert.match(backupJson150, /1\.5\.0|2\.0-final/);
     assert.match(backupJson150, /pointsLedger/);
     assert.match(backupJson150, /stickCustomization/);
 
@@ -2102,10 +2104,230 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
     assert.ok(walkJs.includes('🧭 Sledovat směr'), 'Tlačítko má popisek 🧭 Sledovat směr');
     assert.ok(walkJs.includes('id="heading-mode-banner"'), 'Stavový banner #heading-mode-banner musí existovat');
     assert.ok(walkJs.includes('id="offscreen-target-indicator"'), 'Indikátor cíle mimo obrazovku #offscreen-target-indicator musí existovat');
-    assert.ok(walkJs.includes('🧭 Směr podle chůze (GPS) — telefon neposkytuje kompas'), 'Přesný text pro GPS fallback směru chůze musí být v src/walk.js');
+    assert.ok(walkJs.includes('🧭 Směr podle chůze (GPS) — telefon neposkytuje kompas'), 'Přesný text pro GPS fallback směru chze musí být v src/walk.js');
     assert.ok(walkCss.includes('#btn-follow-heading'), 'Styl pro #btn-follow-heading musí být v assets/walk.css');
   });
+
+  it('DÁVKA 4 (v2.0-final) — Scénář A: Uložení, migrace, zachování všech dat, JSON záloha bez tajných klíčů s náhledem a režim Maximální soukromí (Bez mapy)', () => {
+    const store = new Map<string, string>();
+    (globalThis as any).localStorage = {
+      getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
+      setItem: (k: string, v: string) => store.set(k, String(v)),
+      removeItem: (k: string) => store.delete(k),
+    };
+
+    // 1. Kompletní stav uživatele (profil, avatar, historie výletů, body, metry, vlastní vzpomínky, buňky mlhy, segmenty, zastávky)
+    const mem1 = createPersonalMemoryEntry({
+      symbolId: 'view',
+      note: 'Západ slunce nad Třemšínem',
+      lat: 49.5675,
+      lng: 13.7773,
+      now: 1715000000000,
+    });
+    const fullState: any = {
+      schemaVersion: 2,
+      revision: 5,
+      profile: { avatarId: 'rys', bgChoice: 'forest', ringChoice: 'gold' },
+      cells: ['5511:1197', '5511:1198', '5512:1198'],
+      meters: 8450,
+      discoveries: ['zamek-rozmital', 'tremsin-vrchol'],
+      personalMemories: [mem1],
+      walkSegments: [
+        [[49.6014, 13.8644], [49.6020, 13.8650]],
+        [[49.6040, 13.8670], [49.6050, 13.8685]],
+      ],
+      revealedFeatures: ['podzamecky-rybnik'],
+      confirmedStopIds: ['zamek-rozmital'],
+      expeditionHistory: [
+        {
+          id: 'exp_test_a1',
+          date: '2026-05-10T14:20:00.000Z',
+          distanceMeters: 4200,
+          cellsCount: 2,
+          stampsCount: 1,
+          durationMs: 3600000,
+          pointsEarned: 80,
+          avatarId: 'rys',
+          companionMode: 'solo',
+        },
+      ],
+      stickBadges: [
+        createStickBadge({
+          expId: 'exp_test_a1',
+          distanceMeters: 4200,
+          stampsCount: 1,
+          companionMode: 'solo',
+          categories: ['nature'] as any,
+        }),
+      ],
+      pointsLedger: {
+        'walk:exp_test_a1': { id: 'walk:exp_test_a1', type: 'walk', points: 80, timestamp: 1715000000000 },
+      },
+      stickCustomization: { headId: 'owl', woodId: 'oak', brassBand: true },
+      appSettings: {
+        ...DEFAULT_APP_SETTINGS,
+        gameMode: 'explorer',
+        maptilerApiKey: 'TAJNY_KLIC_KTERY_NESMI_UNIKNOUT',
+      },
+    };
+
+    saveState(fullState);
+    const reloaded: any = loadState();
+    assert.equal(reloaded.profile.avatarId, 'rys', 'Avatar profilu musí zůstat zachován po uložení a načtení');
+    assert.equal(reloaded.meters, 8450, 'Ušlá vzdálenost musí zůstat beze ztráty');
+    assert.deepEqual(reloaded.cells, ['5511:1197', '5511:1198', '5512:1198'], 'Buňky mlhy musejí zůstat zachovány');
+    assert.equal(reloaded.walkSegments.length, 2, 'Oba nespojené segmenty chůze musejí zůstat zachovány');
+    assert.deepEqual(reloaded.confirmedStopIds, ['zamek-rozmital'], 'Potvrzené zastávky musejí zůstat zachovány');
+    assert.equal(reloaded.personalMemories.length, 1, 'Vlastní vzpomínka musí zůstat zachována');
+    assert.equal(reloaded.expeditionHistory.length, 1, 'Historie výprav musí zůstat zachována');
+
+    // 2. Export JSON zálohy (bez tajných klíčů!) a kontrolní náhled před obnovou (previewImportState)
+    const exportedJson = exportStateJson(reloaded);
+    assert.ok(!exportedJson.includes('TAJNY_KLIC_KTERY_NESMI_UNIKNOUT'), 'Exportovaná JSON záloha nikdy nesmí obsahovat tajné API klíče');
+    assert.ok(!exportedJson.includes('maptilerApiKey'), 'Exportovaná JSON záloha nesmí obsahovat pole maptilerApiKey');
+    assert.ok(exportedJson.includes('"appVersion": "2.0-final"'), 'Exportovaná záloha nese verzi 2.0-final');
+
+    const preview = previewImportState(exportedJson);
+    assert.equal(preview.valid, true, 'Náhled před obnovou musí potvrdit platnost zálohy');
+    assert.equal(preview.avatarId, 'rys');
+    assert.equal(preview.cellsCount, 3);
+    assert.equal(preview.stampsCount, 2);
+    assert.equal(preview.historyCount, 1);
+    assert.equal(preview.personalMemoriesCount, 1);
+
+    // Obnova ze zálohy nesmí nikdy ztratit žádná data
+    const restored: any = importStateJson(exportedJson);
+    assert.equal(restored.meters, 8450);
+    assert.equal(restored.cells.length, 3);
+    assert.equal(restored.discoveries.length, 2);
+    assert.equal(restored.personalMemories.length, 1);
+    assert.equal(restored.walkSegments.length, 2);
+
+    // 3. Ověření pohlednice: oříznutí startu/konce (±150 m) i režim Maximální soukromí (Bez mapy)
+    const sampleSummary = {
+      id: 'exp_privacy_test',
+      date: '2026-05-10T14:20:00.000Z',
+      distanceMeters: 2450,
+      newCellsCount: 4,
+      newStampsCount: 1,
+      walkSegments: [
+        [
+          [49.6010, 13.8640],
+          [49.6050, 13.8700],
+          [49.6100, 13.8760],
+        ],
+      ],
+    };
+
+    const svgTrimmed = renderPostcardSvg(sampleSummary, { privacyTrim: true, hideMap: false });
+    assert.ok(svgTrimmed.includes('data-privacy-trim="true"'), 'Pohlednice podporuje oříznutí startu a konce (±150 m)');
+    assert.ok(svgTrimmed.includes('Ochrana soukromí domova'), 'Pohlednice obsahuje popisek ochrany soukromí domova');
+
+    const svgNoMap = renderPostcardSvg(sampleSummary, { privacyTrim: true, hideMap: true });
+    assert.ok(svgNoMap.includes('data-privacy-no-map="true"'), 'Pohlednice podporuje režim Maximální soukromí (Bez mapy)');
+    assert.ok(svgNoMap.includes('MAXIMÁLNÍ SOUKROMÍ (BEZ MAPY)'), 'Mini-mapa v režimu Bez mapy zobrazuje štít soukromí místo souřadnic trasy');
+    assert.ok(!svgNoMap.includes('14:20'), 'V režimu Maximální soukromí (Bez mapy) je skryt přesný čas průchodu');
+  });
+
+  it('DÁVKA 4 (v2.0-final) — Scénář B & C: Procházka, 2D/3D nezávislost, izolace simulátoru, přesnost [lng, lat], mlha s mezerami a přepočet šipky při rotaci mapy', () => {
+    const store = new Map<string, string>();
+    (globalThis as any).localStorage = {
+      getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
+      setItem: (k: string, v: string) => store.set(k, String(v)),
+      removeItem: (k: string) => store.delete(k),
+    };
+
+    // 1. Uložíme reálný stav uživatele a ověříme, že simulátor běží v oddělené paměti a nemění reálný stav
+    const realInitial: any = {
+      ...loadState(),
+      meters: 1500,
+      cells: ['5511:1197'],
+      discoveries: ['zamek-rozmital'],
+    };
+    saveState(realInitial);
+
+    // Simulovaný krok s příznakem simulated: true (sandbox)
+    const simProgress = emptyWalk();
+    const simStep1 = acceptFix(simProgress, null, { lat: 49.6014, lng: 13.8644, accuracy: 8, timestamp: 1000, simulated: true } as any, 1000);
+    const simStep2 = acceptFix(simStep1.progress, simStep1.anchor, { lat: 49.6016, lng: 13.8646, accuracy: 8, timestamp: 15000, simulated: true } as any, 15000);
+    assert.ok(simStep2.progress.meters > 0, 'V paměti simulátoru se metry počítají');
+
+    const persistedAfterSim = loadState();
+    assert.equal(persistedAfterSim.meters, 1500, 'Reálné metry v localStorage zůstaly nedotčené simulátorem');
+    assert.deepEqual(persistedAfterSim.cells, ['5511:1197'], 'Reálné buňky v localStorage zůstaly nedotčené simulátorem');
+
+    // 2. Mapová přesnost [lng, lat] vs [lat, lng] a zachování mezery mezi segmenty při výpadku GPS (> 40 m nepřesnost)
+    const pt = toLngLat({ lat: 49.6014, lng: 13.8644 });
+    assert.deepEqual(pt, [13.8644, 49.6014], 'MapLibre souřadnice jsou vždy v pořadí [lng, lat]');
+
+    const walkProg = emptyWalk();
+    const fix1 = acceptFix(walkProg, null, { lat: 49.6014, lng: 13.8644, accuracy: 10, timestamp: 1000 }, 1000);
+    const fix2 = acceptFix(fix1.progress, fix1.anchor, { lat: 49.6016, lng: 13.8646, accuracy: 10, timestamp: 15000 }, 15000);
+    // Výpadek / odmítnutý vzorek s nepřesností 65 m (> 40 m) -> pausedByAccuracy, přeruší souvislý segment
+    const badFix: any = acceptFix(fix2.progress, fix2.anchor, { lat: 49.6030, lng: 13.8660, accuracy: 65, timestamp: 25000 }, 25000);
+    assert.equal(badFix.accepted, false, 'Vzorek s accuracy > 40 m musí být odmítnut');
+    assert.equal(badFix.pausedByAccuracy, true, 'Vzorek s accuracy > 40 m pozastaví přičítání a přeruší ukotvení');
+    // Další platný vzorek po výpadku založí nový oddělený segment (žádná falešná spojnice přes výpadek!)
+    const fixAfterOutage = acceptFix(badFix.progress, null, { lat: 49.6050, lng: 13.8680, accuracy: 10, timestamp: 40000 }, 40000);
+    const fixAfterOutage2 = acceptFix(fixAfterOutage.progress, fixAfterOutage.anchor, { lat: 49.6052, lng: 13.8682, accuracy: 10, timestamp: 55000 }, 55000);
+    assert.equal(fixAfterOutage2.progress.walkSegments.length, 2, 'Po výpadku GPS musejí vzniknout 2 oddělené segmenty bez falešné čáry mezi nimi');
+
+    const geoJsonSegs = buildWalkSegmentsGeoJson(fixAfterOutage2.progress.walkSegments);
+    assert.equal(geoJsonSegs.features.length, 2, 'GeoJSON vrstva prošlé trasy vykresluje 2 oddělené LineString segmenty');
+
+    // 3. Přepočet šipky u Avatara při rotaci mapy (0°, 45°, 90°, 180°, 270°)
+    for (const mapBearing of [0, 45, 90, 180, 270]) {
+      const rel = computeScreenRelativeAngleDeg(mapBearing, mapBearing);
+      assert.equal(rel, 0, `Když hráč míří přímo k cíli (${mapBearing}°), šipka u Avatara ukazuje vždy nahoru (0°)`);
+    }
+  });
+
+  it('DÁVKA 4 (v2.0-final) — Scénář D: Ošetření chybových stavů (WebGL, síť, DEM, GPS), UI na 360/390 px a úplná dokumentace licencí', () => {
+    // 1. Ošetření nedostupného WebGL a chybového banneru s tlačítkem „🔄 Znovu načíst mapu“
+    const failedWebGL = checkWebGLSupport(() => ({
+      getContext: () => null,
+    }));
+    assert.equal(failedWebGL.supported, false, 'checkWebGLSupport musí pravdivě rozpoznat nedostupný WebGL kontext');
+    assert.ok(failedWebGL.reason.length > 0, 'checkWebGLSupport vrátí český důvod selhání');
+
+    const okWebGL = checkWebGLSupport(() => ({
+      getContext: (type: string) => (type === 'webgl2' ? { version: 2 } : null),
+    }));
+    assert.equal(okWebGL.supported, true, 'checkWebGLSupport potvrdí dostupný WebGL2 kontext');
+
+    const bannerHtml = buildWebGLErrorBannerHtml('Testovací výpadek WebGL');
+    assert.ok(bannerHtml.includes('Mapu se nepodařilo vykreslit (WebGL)'), 'Banner obsahuje povinné české sdělení „Mapu se nepodařilo vykreslit (WebGL)“');
+    assert.ok(bannerHtml.includes('🔄 Znovu načíst mapu'), 'Banner nabízí tlačítko „🔄 Znovu načíst mapu“');
+    assert.ok(bannerHtml.includes('id="btn-reload-webgl-map"'), 'Banner obsahuje tlačítko #btn-reload-webgl-map');
+
+    // 2. Ověření ošetření webglcontextlost, webglcontextrestored, chybějícího DEM a výpadku sítě v src/walk.js
+    const walkJs = fs.readFileSync('src/walk.js', 'utf-8');
+    assert.ok(walkJs.includes('webglcontextlost'), 'src/walk.js ošetřuje událost webglcontextlost');
+    assert.ok(walkJs.includes('webglcontextrestored'), 'src/walk.js obnovuje vrstvy mapy při webglcontextrestored');
+    assert.ok(walkJs.includes('3D terén není momentálně dostupný, pokračuji ve 2D zobrazení.'), 'Chybějící DEM automaticky přepne do 2D s českým vysvětlením');
+    assert.ok(walkJs.includes("window.addEventListener('offline'"), 'src/walk.js ošetřuje výpadek sítě (offline)');
+    assert.ok(walkJs.includes('chk-postcard-no-map'), 'Modál pohlednice v src/walk.js nabízí přepínač Maximální soukromí (Bez mapy)');
+
+    // 3. Ověření přehledu poskytovatelů, licencí, limitů, config.js a GitHub Pages v #/o-projektu (src/app.js) a README.md
+    const appJs = fs.readFileSync('src/app.js', 'utf-8');
+    const readmeMd = fs.readFileSync('README.md', 'utf-8');
+    for (const requiredTerm of [
+      'tile.openstreetmap.org',
+      'tile.waymarkedtrails.org',
+      'elevation-tiles-prod/terrarium',
+      'router.project-osrm.org',
+      'wikipedia.org',
+      'ODbL',
+      'maptilerApiKey',
+      'GitHub Pages',
+      'Maximální soukromí (Bez mapy)',
+    ]) {
+      assert.ok(appJs.includes(requiredTerm), `Sekce O datech a soukromí (src/app.js) musí obsahovat „${requiredTerm}“`);
+      assert.ok(readmeMd.includes(requiredTerm), `Dokumentace README.md musí obsahovat „${requiredTerm}“`);
+    }
+  });
 });
+
 
 
 

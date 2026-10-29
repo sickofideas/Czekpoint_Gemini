@@ -846,6 +846,50 @@ export function renderFogTextureToCanvas(canvas, options = {}) {
   };
 }
 
+/**
+ * DÁVKA 4 (Bod 1.1): Ověří dostupnost WebGL kontextu před inicializací MapLibre GL JS.
+ * @param {(() => any) | null} [canvasFactory]
+ */
+export function checkWebGLSupport(canvasFactory = null) {
+  try {
+    if (typeof window === 'undefined' && !canvasFactory) {
+      return { supported: false, reason: 'Prostředí nepodporuje vykreslovací plátno (window není dostupné).' };
+    }
+    if (typeof window !== 'undefined' && !canvasFactory && !window.WebGLRenderingContext) {
+      return { supported: false, reason: 'Prohlížeč nepodporuje WebGLRenderingContext.' };
+    }
+    const canvas = typeof canvasFactory === 'function'
+      ? canvasFactory()
+      : (typeof document !== 'undefined' ? document.createElement('canvas') : null);
+    if (!canvas || typeof canvas.getContext !== 'function') {
+      return { supported: false, reason: 'Nelze vytvořit HTML5 canvas pro WebGL.' };
+    }
+    const gl =
+      canvas.getContext('webgl2') ||
+      canvas.getContext('webgl') ||
+      canvas.getContext('experimental-webgl');
+    if (!gl) {
+      return { supported: false, reason: 'Grafický adaptér nebo prohlížeč neumožnil vytvořit WebGL kontext.' };
+    }
+    return { supported: true, reason: '' };
+  } catch (err) {
+    return { supported: false, reason: err?.message || 'Chyba při ověřování WebGL.' };
+  }
+}
+
+/**
+ * DÁVKA 4 (Bod 1.1): Sestaví český informační banner při nedostupném WebGL nebo ztrátě grafického kontextu
+ * s tlačítkem „🔄 Znovu načíst mapu“ (#btn-reload-webgl-map), aniž by zakryl běžící výpravu nebo smazal data.
+ */
+export function buildWebGLErrorBannerHtml(detailReason = '') {
+  const safeDetail = detailReason ? ` (${e(detailReason)})` : '';
+  return `
+    <strong>⚠️ Mapu se nepodařilo vykreslit (WebGL)</strong>
+    <p>Grafické vykreslování mapy narazilo na omezení zařízení nebo ztrátu WebGL kontextu${safeDetail}. <strong>Záznam tvé procházky, GPS poloha i všechna uložená data běží normálně dál.</strong></p>
+    <button type="button" class="button small webgl-reload-btn" id="btn-reload-webgl-map">🔄 Znovu načíst mapu</button>
+  `;
+}
+
 export function mountWalk(root, routes, config = defaultAppConfig, actions = {}) {
   const maplibregl = typeof window !== 'undefined' ? window.maplibregl : null;
   const { onAddVisit } = actions;
@@ -1305,6 +1349,9 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     <!-- Hlavní mapa zabírající většinu obrazovky -->
     <div class="walk-map-wrap" id="walk-map-wrap">
       <div id="walk-map" aria-label="Interaktivní Mapa objevování"></div>
+
+      <!-- DÁVKA 4 (Bod 1.1): Chybový pruh při nedostupném WebGL nebo ztrátě grafického kontextu (nezakrývá telemetrii a nemaže data) -->
+      <div id="webgl-error-banner" class="webgl-error-banner" role="alert" hidden></div>
 
       <!-- DÁVKA 1 (Bod 1.1): Plovoucí stavový indikátor načítání a výpočtu přímo v mapě (z-index: 1200) -->
       <div id="map-busy-indicator" class="map-busy-indicator" role="status" aria-live="polite" hidden>
@@ -4645,6 +4692,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
 
     let currentTheme = summary.postcardTheme || summary.gameMode || appSettings.gameMode || 'gamified';
     let privacyTrimEnabled = summary.privacyTrimmed !== undefined ? Boolean(summary.privacyTrimmed) : true;
+    let hideMapEnabled = Boolean(summary.hideMap);
 
     const buildPreviewDataUrl = () => {
       const summaryTaskId = beginMapTask('⏳ Připravuji souhrn procházky…');
@@ -4652,6 +4700,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         return generatePostcardDataUrl(summary, {
           theme: currentTheme,
           privacyTrim: privacyTrimEnabled,
+          hideMap: hideMapEnabled,
         });
       } finally {
         endMapTask(summaryTaskId);
@@ -4714,13 +4763,20 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
             </div>
           </div>
 
-          <!-- Náhled soukromí (Domov v bezpečí) — ve výchozím stavu zapnuto -->
-          <div class="privacy-preview-box" style="margin-bottom:12px">
+          <!-- Náhled soukromí (Domov v bezpečí + Maximální soukromí Bez mapy) -->
+          <div class="privacy-preview-box" style="margin-bottom:12px;display:flex;flex-direction:column;gap:8px">
             <label class="privacy-preview-toggle" for="chk-postcard-privacy-trim">
               <input type="checkbox" id="chk-postcard-privacy-trim" ${privacyTrimEnabled ? 'checked' : ''}>
               <span>
                 <strong>🔒 Skrýt začátek a konec trasy (ochrana soukromí domova)</strong>
                 <small>Ořízne z mini-mapy na pohlednici prvních a posledních 150 metrů trasy a skryje přesné časy průchodu.</small>
+              </span>
+            </label>
+            <label class="privacy-preview-toggle" for="chk-postcard-no-map" style="padding-top:6px;border-top:1px solid rgba(16,185,129,0.28)">
+              <input type="checkbox" id="chk-postcard-no-map" ${hideMapEnabled ? 'checked' : ''}>
+              <span>
+                <strong>🛡️ Maximální soukromí (Bez mapy)</strong>
+                <small>Zcela skryje zákres trasy i souřadnice na pohlednici — zůstane jen koláž míst, statistiky a počet dílků.</small>
               </span>
             </label>
           </div>
@@ -4755,6 +4811,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       if (imgEl) imgEl.src = dataUrl;
       summary.postcardTheme = currentTheme;
       summary.privacyTrimmed = privacyTrimEnabled;
+      summary.hideMap = hideMapEnabled;
     };
 
     const closePostcard = () => {
@@ -4791,6 +4848,12 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       playTick(stateObj.soundEnabled);
     });
 
+    $('chk-postcard-no-map')?.addEventListener('change', (ev) => {
+      hideMapEnabled = Boolean(ev.target.checked);
+      refreshPreviewImg();
+      playTick(stateObj.soundEnabled);
+    });
+
     $('postcard-modal')?.addEventListener('click', (ev) => {
       if (ev.target === $('postcard-modal')) {
         closePostcard();
@@ -4802,6 +4865,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         const blob = await generatePostcardBlob(summary, {
           theme: currentTheme,
           privacyTrim: privacyTrimEnabled,
+          hideMap: hideMapEnabled,
         });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -4822,6 +4886,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         const blob = await generatePostcardBlob(summary, {
           theme: currentTheme,
           privacyTrim: privacyTrimEnabled,
+          hideMap: hideMapEnabled,
         });
         const file = new File([blob], `pohlednice-${summary.id}.png`, { type: 'image/png' });
         if (navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -6244,6 +6309,19 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     if (!map) return;
     const next3D = Boolean(enable3D);
     if (next3D) {
+      // DÁVKA 4 (Bod 1.2): Bezpečné přepnutí 2D/3D i během načítání stylu (!map.isStyleLoaded())
+      const styleReady = typeof map.isStyleLoaded === 'function' ? map.isStyleLoaded() : true;
+      if (!styleReady) {
+        is3DMode = true;
+        update3DUiState();
+        try {
+          map.easeTo({ pitch: 55, duration: opts.instant ? 0 : 700 });
+        } catch {}
+        if (!opts.silent) {
+          status('🏔️ Zapnuto 3D zobrazení terénu (dokončuji načítání výškového modelu…).');
+        }
+        return;
+      }
       try {
         if (!map.getSource('terrain-dem')) {
           const demUrl = config.maptilerApiKey
@@ -6294,21 +6372,60 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     }
   }
 
-  if (maplibregl) {
-    const center = progress.cells.length ? cellCenter(progress.cells.at(-1)) : { lat: 49.6014, lng: 13.8644 };
+  // DÁVKA 4 (Bod 1.1): Ošetření nedostupného WebGL nebo ztráty grafického kontextu (webglcontextlost / webglcontextrestored)
+  function showWebGLErrorBanner(reason = '') {
+    const banner = $('webgl-error-banner');
+    if (banner) {
+      banner.innerHTML = buildWebGLErrorBannerHtml(reason);
+      banner.hidden = false;
+    }
+    status('⚠️ Mapu se nepodařilo vykreslit (WebGL). Záznam procházky i uložená data jsou v bezpečí.');
+  }
 
-    map = new maplibregl.Map({
-      container: $('walk-map'),
-      style: buildMapLibreStyle(config, { showContourLayer, showHikingTrails }),
-      center: [center.lng, center.lat],
-      zoom: 16.5,
-      pitch: 0,
-      bearing: 0,
-      minZoom: 3,
-      maxZoom: 19,
-      maxPitch: 75,
-      attributionControl: false,
-    });
+  function hideWebGLErrorBanner() {
+    const banner = $('webgl-error-banner');
+    if (banner) {
+      banner.hidden = true;
+      banner.innerHTML = '';
+    }
+  }
+
+  function initializeMapLibreInstance() {
+    if (!maplibregl || disposed) return false;
+    const webglCheck = checkWebGLSupport();
+    if (!webglCheck.supported) {
+      showWebGLErrorBanner(webglCheck.reason);
+      return false;
+    }
+
+    const center = lastFix || (progress.cells.length ? cellCenter(progress.cells.at(-1)) : { lat: 49.6014, lng: 13.8644 });
+
+    try {
+      if (map) {
+        try { map.remove(); } catch {}
+        map = null;
+      }
+      const mapContainer = $('walk-map');
+      if (mapContainer) mapContainer.innerHTML = '';
+
+      map = new maplibregl.Map({
+        container: mapContainer,
+        style: buildMapLibreStyle(config, { showContourLayer, showHikingTrails }),
+        center: [center.lng, center.lat],
+        zoom: 16.5,
+        pitch: is3DMode ? 55 : 0,
+        bearing: 0,
+        minZoom: 3,
+        maxZoom: 19,
+        maxPitch: 75,
+        attributionControl: false,
+      });
+      hideWebGLErrorBanner();
+    } catch (err) {
+      map = null;
+      showWebGLErrorBanner(err?.message || 'Chyba při inicializaci WebGL mapy');
+      return false;
+    }
 
     let accCenter = { lat: center.lat, lng: center.lng };
     let accRadiusM = 0;
@@ -6347,15 +6464,15 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     playerEl.style.width = '54px';
     playerEl.style.height = '54px';
     playerEl.style.pointerEvents = 'none';
-    playerEl.style.opacity = '0';
+    playerEl.style.opacity = (active || demo || simSandboxActive || lastFix) ? '1' : '0';
     playerEl.style.zIndex = '45';
     playerEl.innerHTML = renderPlayerAvatarMarkerHtml({
       avatarId: stateObj.profile?.avatarId || 'liska',
       bearingDeg: targetBearing || 0,
-      isWalking: false,
+      isWalking: walkState === 'running',
     });
     let playerPos = { lat: center.lat, lng: center.lng };
-    let playerOpacity = 0;
+    let playerOpacity = (active || demo || simSandboxActive || lastFix) ? 1 : 0;
     const rawPlayerMarker = new maplibregl.Marker({ element: playerEl, anchor: 'center' })
       .setLngLat([center.lng, center.lat])
       .addTo(map);
@@ -6390,6 +6507,19 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       ensureCustomMapSourcesAndLayers();
       if (is3DMode) {
         try {
+          if (!map.getSource('terrain-dem')) {
+            const demUrl = config.maptilerApiKey
+              ? `https://api.maptiler.com/tiles/terrain-rgb-v2/{z}/{x}/{y}.webp?key=${encodeURIComponent(config.maptilerApiKey)}`
+              : (config.terrainDemUrl || 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png');
+            const demEnc = config.maptilerApiKey ? 'mapbox' : (config.terrainEncoding || 'terrarium');
+            map.addSource('terrain-dem', {
+              type: 'raster-dem',
+              tiles: [demUrl],
+              tileSize: 256,
+              maxzoom: 15,
+              encoding: demEnc,
+            });
+          }
           map.setTerrain({
             source: 'terrain-dem',
             exaggeration: Number(config.terrainExaggeration) || 1.25,
@@ -6409,9 +6539,31 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     map.on('load', onStyleOrMapLoad);
     ensureCustomMapSourcesAndLayers();
 
+    // Události ztráty a obnovení grafického kontextu WebGL (webglcontextlost / webglcontextrestored)
+    const mapCanvas = typeof map.getCanvas === 'function' ? map.getCanvas() : null;
+    if (mapCanvas && typeof mapCanvas.addEventListener === 'function') {
+      mapCanvas.addEventListener('webglcontextlost', (ev) => {
+        if (ev && typeof ev.preventDefault === 'function') ev.preventDefault();
+        if (disposed) return;
+        showWebGLErrorBanner('Grafický kontext WebGL byl pozastaven');
+      }, { signal: aborter.signal });
+
+      mapCanvas.addEventListener('webglcontextrestored', () => {
+        if (disposed || !map) return;
+        hideWebGLErrorBanner();
+        onStyleOrMapLoad();
+        status('✓ Grafický kontext mapy (WebGL) byl úspěšně obnoven.');
+      }, { signal: aborter.signal });
+    }
+
     let contourFallbackTriggered = false;
     map.on('error', (ev) => {
       if (disposed || !map) return;
+      const errMsg = String(ev?.error?.message || ev?.message || '');
+      if (/webgl|context lost|failed to initialize webgl/i.test(errMsg)) {
+        showWebGLErrorBanner('Chyba vykreslování WebGL');
+        return;
+      }
       const srcId = ev?.sourceId || ev?.source?.id || '';
       if (srcId === 'czekpoint-fog-source' && is3DMode) {
         setMap3DMode(false, {
@@ -6444,6 +6596,10 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         if ($('tile-status')) $('tile-status').textContent = 'Mapový podklad se nenačetl. Průzkum funguje dál.';
       }
     });
+    return true;
+  }
+
+  if (maplibregl && initializeMapLibreInstance()) {
 
     function scheduleMapPanAutoFetch() {
       if (!map) return;
@@ -6635,7 +6791,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     });
 
     loadAndRenderHikingTrails();
-  } else {
+  } else if (!maplibregl) {
     $('walk-map').innerHTML = `
       <div class="map-missing-fallback" role="alert" style="padding:24px;text-align:center">
         <strong>Mapová knihovna chybí nebo se nenačetla.</strong>
@@ -6650,6 +6806,17 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       }
     });
   }
+
+  // DÁVKA 4 (Bod 1.1): Kliknutí na tlačítko „🔄 Znovu načíst mapu“ (#btn-reload-webgl-map) při chybě WebGL
+  $('webgl-error-banner')?.addEventListener('click', (ev) => {
+    if (ev.target.closest('#btn-reload-webgl-map')) {
+      const ok = initializeMapLibreInstance();
+      if (ok) {
+        status('✓ Mapa byla úspěšně znovu načtena. Tvůj postup procházky pokračuje.');
+      }
+      playTick(stateObj.soundEnabled);
+    }
+  });
 
   // DÁVKA 1–3 (v2.0): Přepínač 2D / 3D, Sledovat směr (#btn-follow-heading), Sever nahoře a přístupná 3D tlačítka kamery
   $('btn-toggle-3d')?.addEventListener('click', () => {
@@ -7073,6 +7240,22 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
   };
   window.addEventListener('resize', handleViewportChange, { signal: aborter.signal });
   window.addEventListener('orientationchange', handleViewportChange, { signal: aborter.signal });
+
+  // DÁVKA 4 (Bod 1.2): Ošetření přerušené a obnovené sítě (offline / online) bez přerušení záznamu procházky
+  const handleNetworkOffline = () => {
+    if (disposed) return;
+    if ($('tile-status')) {
+      $('tile-status').textContent = '📡 Jsi offline (bez připojení k síti). Záznam GPS procházky, odkrývání mlhy i potvrzování míst běží normálně dál z paměti zařízení.';
+    }
+  };
+  const handleNetworkOnline = () => {
+    if (disposed) return;
+    if ($('tile-status')) {
+      $('tile-status').textContent = '';
+    }
+  };
+  window.addEventListener('offline', handleNetworkOffline, { signal: aborter.signal });
+  window.addEventListener('online', handleNetworkOnline, { signal: aborter.signal });
 
   function updateZenMode() {
     $('walk-map-wrap').classList.toggle('zen-mode', zenMode);

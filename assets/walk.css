@@ -4666,3 +4666,55 @@
   color: #f7f9ed;
   letter-spacing: 0.01em;
 }
+
+/* ==========================================================================
+   DÁVKA 4 (Verze v2.0-final):
+   Ošetření nedostupného WebGL / ztráty grafického kontextu (#webgl-error-banner)
+   ========================================================================== */
+
+.webgl-error-banner {
+  position: absolute;
+  top: 64px;
+  left: 12px;
+  right: 12px;
+  z-index: 1260;
+  background: rgba(25, 42, 33, 0.96);
+  color: #f9faf5;
+  border: 2px solid #f59e0b;
+  border-radius: 16px;
+  padding: 14px 16px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.webgl-error-banner[hidden] {
+  display: none !important;
+}
+
+.webgl-error-banner strong {
+  color: #fde68a;
+  font-size: 0.96rem;
+}
+
+.webgl-error-banner p {
+  margin: 0;
+  font-size: 0.84rem;
+  line-height: 1.4;
+  color: #e2e8f0;
+}
+
+.webgl-error-banner .webgl-reload-btn {
+  align-self: flex-start;
+  min-height: 44px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  font-weight: 800;
+  font-size: 0.86rem;
+  background: #f59e0b;
+  color: #1c1917;
+  border: none;
+  cursor: pointer;
+}
+

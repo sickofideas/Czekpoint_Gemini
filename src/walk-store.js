@@ -602,17 +602,41 @@ export function clearState() {
   } catch {}
 }
 
+const FORBIDDEN_SECRET_KEYS = new Set([
+  'apiKey',
+  'maptilerApiKey',
+  'secret',
+  'secretKey',
+  'token',
+  'accessToken',
+  'privateKey',
+  'password',
+]);
+
+function stripSecretKeysDeep(val) {
+  if (!val || typeof val !== 'object') return val;
+  if (Array.isArray(val)) return val.map(stripSecretKeysDeep);
+  const clean = {};
+  for (const [k, v] of Object.entries(val)) {
+    if (FORBIDDEN_SECRET_KEYS.has(k) || /apikey|secret|token|password/i.test(k)) {
+      continue;
+    }
+    clean[k] = stripSecretKeysDeep(v);
+  }
+  return clean;
+}
+
 /**
- * Exports personal exploration state as a formatted JSON string.
+ * Exports personal exploration state as a formatted JSON string (without any secret keys).
  */
 export function exportStateJson(passedState) {
   const state = passedState || loadState();
   const exportPayload = {
     exportedAt: new Date().toISOString(),
     appName: 'czekpoint',
-    appVersion: '1.5.0',
+    appVersion: '2.0-final',
     schemaVersion: 2,
-    data: {
+    data: stripSecretKeysDeep({
       profile: state.profile,
       cells: state.cells,
       meters: state.meters,
@@ -639,7 +663,7 @@ export function exportStateJson(passedState) {
       appSettings: state.appSettings || { ...DEFAULT_APP_SETTINGS },
       pointsLedger: state.pointsLedger || {},
       stickCustomization: validateStickCustomization(state.stickCustomization),
-    },
+    }),
   };
   return JSON.stringify(exportPayload, null, 2);
 }

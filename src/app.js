@@ -556,12 +556,14 @@ function openPassportPostcardModal(exp) {
   if (!slot || !exp) return;
 
   let currentTheme = exp.postcardTheme || exp.gameMode || 'gamified';
-  // DÁVKA 3 (Bod 2.2): Ve výchozím stavu zapnutý přepínač ochrany soukromí domova (±150 m)
+  // DÁVKA 3 & 4: Ve výchozím stavu zapnutý přepínač ochrany soukromí domova (±150 m) + možnost Maximální soukromí (Bez mapy)
   let privacyTrimEnabled = true;
+  let hideMapEnabled = Boolean(exp.hideMap);
 
   let dataUrl = generatePostcardDataUrl(exp, {
     theme: currentTheme,
     privacyTrim: privacyTrimEnabled,
+    hideMap: hideMapEnabled,
   });
 
   const distStr = exp.distanceMeters >= 1000
@@ -575,13 +577,20 @@ function openPassportPostcardModal(exp) {
         <div class="eyebrow" style="margin-bottom:4px">🔒 Náhled soukromí před sdílením (Domov v bezpečí)</div>
         <h2 id="passport-privacy-title" style="padding-right:36px;margin:0 0 8px">Vzpomínka na procházku (${e(distStr)})</h2>
 
-        <!-- Přepínač ochrany soukromí domova (ve výchozím stavu zapnutý) -->
-        <div class="privacy-preview-box" style="margin-bottom:12px">
+        <!-- Přepínače ochrany soukromí domova (±150 m) a Maximální soukromí (Bez mapy) -->
+        <div class="privacy-preview-box" style="margin-bottom:12px;display:flex;flex-direction:column;gap:8px">
           <label class="privacy-preview-toggle" for="chk-passport-privacy-trim">
             <input type="checkbox" id="chk-passport-privacy-trim" checked>
             <span>
               <strong>🔒 Skrýt začátek a konec trasy (ochrana soukromí domova)</strong>
               <small>Ořízne z mapy na pohlednici prvních a posledních 150 metrů trasy a skryje přesné časy průchodu.</small>
+            </span>
+          </label>
+          <label class="privacy-preview-toggle" for="chk-passport-no-map" style="padding-top:6px;border-top:1px solid rgba(16,185,129,0.28)">
+            <input type="checkbox" id="chk-passport-no-map" ${hideMapEnabled ? 'checked' : ''}>
+            <span>
+              <strong>🛡️ Maximální soukromí (Bez mapy)</strong>
+              <small>Zcela skryje zákres trasy i souřadnice na pohlednici — zůstane jen koláž míst, statistiky a počet dílků.</small>
             </span>
           </label>
         </div>
@@ -615,6 +624,7 @@ function openPassportPostcardModal(exp) {
     dataUrl = generatePostcardDataUrl(exp, {
       theme: currentTheme,
       privacyTrim: privacyTrimEnabled,
+      hideMap: hideMapEnabled,
     });
     const img = slot.querySelector('#passport-modal-pc-img');
     if (img) img.src = dataUrl;
@@ -631,6 +641,12 @@ function openPassportPostcardModal(exp) {
 
   slot.querySelector('#chk-passport-privacy-trim')?.addEventListener('change', ev => {
     privacyTrimEnabled = Boolean(ev.target.checked);
+    updatePreview();
+    playTick();
+  });
+
+  slot.querySelector('#chk-passport-no-map')?.addEventListener('change', ev => {
+    hideMapEnabled = Boolean(ev.target.checked);
     updatePreview();
     playTick();
   });
@@ -664,6 +680,7 @@ function openPassportPostcardModal(exp) {
       const blob = await generatePostcardBlob(exp, {
         theme: currentTheme,
         privacyTrim: privacyTrimEnabled,
+        hideMap: hideMapEnabled,
       });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -685,6 +702,7 @@ function openPassportPostcardModal(exp) {
       const blob = await generatePostcardBlob(exp, {
         theme: currentTheme,
         privacyTrim: privacyTrimEnabled,
+        hideMap: hideMapEnabled,
       });
       const file = new File([blob], `pohlednice-${exp.id}.png`, { type: 'image/png' });
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -1009,23 +1027,88 @@ function renderPassport() {
 }
 
 function renderAbout() {
-  main.innerHTML = `<div class="about-intro"><div class="eyebrow">${icon('leaf')}Osobní atlas procházek</div><h1 tabindex="-1">Dobrá cesta začíná<br>dobrou informací.</h1><p>Czekpoint je osobní atlas procházek: vyjdi ven, odkrývej své okolí, objev skutečné místo a odnes si ověřené GPS razítko a ilustrovanou pohlednici.</p></div>
-    <div class="about-grid"><section class="panel">${icon('route')}<h2>Vyber. Podívej se. Vyraz.</h2><p>Na kartě najdeš známé údaje o cestě, její omezení a odkaz na původní zdroj. Navigaci otevřeš ve stávající mapové službě. Po návratu si místo můžeš uložit do pasu.</p></section>
+  main.innerHTML = `<div class="about-intro"><div class="eyebrow">${icon('leaf')}Osobní atlas procházek · v2.0-final</div><h1 tabindex="-1">Dobrá cesta začíná<br>dobrou informací.</h1><p>Czekpoint je osobní atlas procházek: vyjdi ven, odkrývej své okolí na 2D i 3D mapě, objev skutečné místo a odnes si ověřené GPS razítko a ilustrovanou pohlednici.</p></div>
+    <div class="about-grid"><section class="panel">${icon('route')}<h2>Vyber. Podívej se. Vyraz.</h2><p>Na kartě najdeš známé údaje o cestě, její omezení a odkaz na původní zdroj. Navigaci otevřeš přímo v interaktivní mapě (MapLibre GL JS 4.7.1) nebo ve stávající mapové službě. Po návratu si místo můžeš uložit do pasu.</p></section>
     <section class="panel">${icon('shield')}<h2>Neznámé přiznáváme.</h2><p>Úvodní karty vycházejí z veřejných zdrojů. Terénní ověření probíhá postupně. Ilustrace nejsou fotografie skutečného stavu. Když chybí čas, převýšení nebo ověřená poloha, zobrazíme to jako neověřený údaj.</p></section>
     <section class="panel">${icon('pin')}<h2>Jedno GPS razítko místa (+30 b.).</h2><p>Razítko získáš osobní návštěvou u ověřeného místa (pod 20 m při opakovaném přesném měření GPS ≤ 40 m). Začátky okruhů razítka neudělují.</p></section>
-    <section class="panel">${icon('lock')}<h2>Tvoje data, soukromí a externí služby</h2>
-      <p>Tvůj výletový pas, historie chůze, profil i odkrytá mapa jsou uloženy <strong>lokálně v prohlížeči</strong>. Při zobrazení mapy a výpočtu trasy se vybrané souřadnice odesílají těmto veřejným službám:</p>
-      <ul style="margin:8px 0 0 18px;padding:0;font-size:0.95rem;line-height:1.5">
-        <li><strong>OpenStreetMap (tile.openstreetmap.org):</strong> načítá dlaždice mapového podkladu pro právě zobrazenou oblast.</li>
-        <li><strong>OSRM (router.project-osrm.org):</strong> při plánování výpravy přijímá souřadnice startu a zastávek pro výpočet pěší trasy. Při nedostupnosti se zobrazí přímé orientační spojnice.</li>
-        <li><strong>Open-Meteo (api.open-meteo.com):</strong> na vyžádání („Načíst převýšení“) přijímá souřadnice bodů trasy pro výpočet nadmořské výšky. Během výpravy navíc načítá krátkodobou předpověď počasí na příštích 60 minut (odesílají se zaokrouhlené souřadnice s přesností přibližně na 1 km, nejvýše jednou za 15 minut nebo při posunu o více než 3 km; data pod licencí CC BY 4.0).</li>
-        <li><strong>Overpass API (overpass-api.de):</strong> při načítání bodů zájmu a značených tras v okolí přijímá souřadnice středu oblasti a poloměr hledání.</li>
+    <section class="panel">${icon('lock')}<h2>Tvoje data, soukromí a dvoustupňová ochrana pohlednice</h2>
+      <p>Tvůj výletový pas, avatar, historie chůze, vlastní vzpomínky (<code>personalMemories</code>), buňky mlhy (<code>cells</code>) i prošlé segmenty (<code>walkSegments</code>) jsou uloženy <strong>výhradně lokálně v prohlížeči</strong> (<code>localStorage</code> klíč <code>czekpoint.state.v2</code>).</p>
+      <ul style="margin:8px 0 0 18px;padding:0;font-size:0.94rem;line-height:1.5">
+        <li><strong>🔒 Skrýt začátek a konec trasy (±150 m):</strong> ve výchozím stavu zapnuto; ořízne z mini-mapy na pohlednici prvních a posledních 150 m trasy a skryje přesný čas průchodu.</li>
+        <li><strong>🛡️ Maximální soukromí (Bez mapy):</strong> zcela skryje zákres trasy i souřadnice na pohlednici — zůstane pouze koláž míst, statistiky a počet nově odkrytých dílků.</li>
+        <li><strong>💾 JSON záloha bez tajných klíčů:</strong> exportovaná záloha obsahuje výhradně tvůj osobní postup a před obnovou vždy zobrazí kontrolní náhled.</li>
       </ul>
-      <p style="margin-top:8px;font-size:0.92rem"><strong>Sdílený kód trasy (CZK1-…):</strong> obsahuje zakódované souřadnice startu, seznam zastávek (názvy a souřadnice), zvolený poloměr, kategorie, doprovod a herní režim. Neobsahuje tvé jméno ani historii chůze.</p>
+      <p style="margin-top:8px;font-size:0.92rem"><strong>Sdílený kód trasy (CZK1-…):</strong> obsahuje zakódované souřadnice startu, seznam zastávek, zvolený poloměr, kategorie, doprovod a herní režim. Neobsahuje tvé jméno ani historii chůze.</p>
       <p style="margin-top:6px;font-size:0.92rem"><strong>Ukázkoví poutníci v pasu:</strong> postavy poutníků v sekci „Ukázkoví poutníci v okolí“ jsou generované lokální ukázkové postavy pro atmosféru revíru, nikoli skuteční uživatelé připojení přes síť.</p>
     </section></div>
+
+    <section class="panel" style="margin-top:20px" id="about-providers-licenses">
+      <h2>🗺️ Přehled poskytovatelů mapových dat, licencí, limitů a nasazení</h2>
+      <p style="margin-top:4px;font-size:0.94rem">Níže je úplný přehled všech reálně použitých externích služeb, jejich přesných URL adres, povinného uvedení autorů (attribution), limitů bezplatného provozu a pravidel pro offline či případné komerční nasazení:</p>
+      <div style="overflow-x:auto;margin-top:12px">
+        <table style="width:100%;border-collapse:collapse;font-size:0.88rem;line-height:1.45">
+          <thead>
+            <tr style="border-bottom:2px solid rgba(25,62,50,0.25);text-align:left">
+              <th style="padding:8px">Služba a konkrétní URL zdroje</th>
+              <th style="padding:8px">Licence a povinná atribuce v mapě</th>
+              <th style="padding:8px">Limity bezplatného provozu, komerční nasazení a offline pravidla</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr style="border-bottom:1px solid rgba(25,62,50,0.12)">
+              <td style="padding:8px"><strong>OpenStreetMap podklad</strong><br><code>https://tile.openstreetmap.org/{z}/{x}/{y}.png</code><br><em>(Volitelné vrstevnice OpenTopoMap: <code>https://tile.opentopomap.org/{z}/{x}/{y}.png</code>)</em></td>
+              <td style="padding:8px"><strong>ODbL 1.0</strong> (OpenTopoMap: <strong>CC-BY-SA 3.0</strong>).<br>Povinné viditelné uvedení: <code>© přispěvatelé OpenStreetMap (ODbL)</code>.</td>
+              <td style="padding:8px">Veřejný tile server OSM je určen pro nekomerční projekty s nízkou zátěží (platí <em>OSM Tile Usage Policy</em> — zákaz hromadného stahování velkých oblastí). Offline ukládání v aplikaci je omezeno na malou výseč aktuální procházky (max. 45 dlaždic). Pro vyšší návštěvnost nebo komerční nasazení nastavte v <code>config.js</code> komerční/freemium tile server (např. MapTiler).</td>
+            </tr>
+            <tr style="border-bottom:1px solid rgba(25,62,50,0.12)">
+              <td style="padding:8px"><strong>Waymarked Trails (turistické trasy KČT / OSM)</strong><br><code>https://tile.waymarkedtrails.org/hiking/{z}/{x}/{y}.png</code></td>
+              <td style="padding:8px"><strong>CC-BY-SA 3.0 / ODbL</strong>.<br>Povinné uvedení: <code>Trasy: © Waymarked Trails, © OpenStreetMap (ODbL)</code>.</td>
+              <td style="padding:8px">Bezplatné pro osobní a nekomerční využití s přiměřeným počtem dotazů. Pro komerční provoz vygenerujte vlastní vrstvu značených tras z OSM dat.</td>
+            </tr>
+            <tr style="border-bottom:1px solid rgba(25,62,50,0.12)">
+              <td style="padding:8px"><strong>Výškový 3D model terénu (DEM)</strong><br><code>https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png</code><br><em>(nebo MapTiler <code>terrain-rgb-v2</code> s vlastním klíčem)</em></td>
+              <td style="padding:8px">Veřejná datová sada <strong>AWS Terrain Tiles (Mapzen Terrarium)</strong> — zdroje SRTM, GMTED, NED, ETOPO1.</td>
+              <td style="padding:8px">Bezplatné čtení dlaždic (zoom 0–15). Při výpadku nebo chybě DEM aplikace automaticky přepne do přehledného 2D pohledu shora s českým vysvětlením. Pro MapTiler 3D terén lze v <code>config.js</code> vyplnit <code>maptilerApiKey</code>.</td>
+            </tr>
+            <tr style="border-bottom:1px solid rgba(25,62,50,0.12)">
+              <td style="padding:8px"><strong>OSRM pěší router</strong><br><code>https://router.project-osrm.org/route/v1/foot</code></td>
+              <td style="padding:8px">Software <strong>BSD 2-Clause</strong>, mapová data <strong>© OpenStreetMap (ODbL)</strong>.</td>
+              <td style="padding:8px">Veřejný demo server bez garance SLA (~1 požadavek/s). Při nedostupnosti se automaticky použijí přímé orientační spojnice. Pro komerční provoz nastavte v <code>config.js</code> vlastní instanci OSRM, GraphHopper nebo MapTiler Routing.</td>
+            </tr>
+            <tr style="border-bottom:1px solid rgba(25,62,50,0.12)">
+              <td style="padding:8px"><strong>Wikipedie a Wikimedia Commons</strong><br><code>https://cs.wikipedia.org/w/api.php</code><br><code>https://commons.wikimedia.org/w/api.php</code></td>
+              <td style="padding:8px">Texty <strong>CC BY-SA 4.0</strong>, fotografie dle licence u snímku (<strong>CC BY / CC BY-SA / Public Domain</strong>) se zobrazením autora a zdroje.</td>
+              <td style="padding:8px">Veřejné API nadace Wikimedia. V nastavení aplikace lze načítání externích fotografií kdykoliv vypnout (pak se zobrazují pouze lokální vektorové ilustrace).</td>
+            </tr>
+            <tr>
+              <td style="padding:8px"><strong>Open-Meteo &amp; Overpass API &amp; Nominatim</strong><br><code>https://api.open-meteo.com/v1/forecast</code><br><code>https://api.open-meteo.com/v1/elevation</code><br><code>https://overpass-api.de/api/interpreter</code><br><code>https://nominatim.openstreetmap.org/search</code></td>
+              <td style="padding:8px">Open-Meteo: <strong>CC BY 4.0</strong> (Copernicus DEM).<br>Overpass &amp; Nominatim: <strong>© OpenStreetMap (ODbL)</strong>.</td>
+              <td style="padding:8px">Open-Meteo je bezplatné pro nekomerční provoz (do 10 000 dotazů/den; pro komerční nasazení nutný placený tarif; počasí dotazováno max. 1× za 15 min se zaokrouhlením na ~1 km). Overpass a Nominatim mají fair-use limity (debounce 700 ms a lokální cache v <code>localStorage</code>).</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div style="margin-top:14px;display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))">
+        <div style="background:rgba(25,62,50,0.05);padding:12px;border-radius:12px;border:1px solid rgba(25,62,50,0.15)">
+          <h3 style="margin:0 0 6px;font-size:1rem">🔑 Jak v <code>config.js</code> nastavit vlastní klíč (např. MapTiler)</h3>
+          <p style="margin:0;font-size:0.88rem;line-height:1.45">
+            Ve výchozím stavu je <code>maptilerApiKey: ''</code> prázdný (aplikace funguje ihned bez registrace). Chcete-li zapnout vlastní dlaždice a 3D terén <strong>MapTiler</strong>, otevřete soubor <code>config.js</code> a vyplňte:<br>
+            <code>maptilerApiKey: 'VAS_KLIC'</code> a případně upravte <code>tileUrl</code>. V administraci MapTileru vždy omezte klíč na svou doménu (HTTP Referer).
+          </p>
+        </div>
+        <div style="background:rgba(25,62,50,0.05);padding:12px;border-radius:12px;border:1px solid rgba(25,62,50,0.15)">
+          <h3 style="margin:0 0 6px;font-size:1rem">🚀 Které soubory nahrát na GitHub Pages</h3>
+          <p style="margin:0;font-size:0.88rem;line-height:1.45">
+            Pro statické nasazení na <strong>GitHub Pages</strong> nahrajte do kořene repozitáře (nebo ze složky <code>dist/</code> po <code>npm run build</code>):<br>
+            <code>index.html</code>, <code>config.js</code>, <code>manifest.webmanifest</code>, <code>sw.js</code>, celou složku <code>src/</code> (všechny ES moduly) a složku <code>assets/</code> (včetně <code>assets/vendor/maplibre-gl/</code> a <code>assets/routes.json</code>).
+          </p>
+        </div>
+      </div>
+    </section>
+
     <div class="about-foot">
-      <p class="small-note">Bez sledovacích reklam a bez analytických měřicích skriptů. Toto je verze v1.4-part3.</p>
+      <p class="small-note">Bez sledovacích reklam a bez analytických měřicích skriptů. Toto je verze v2.0-final.</p>
       <div class="data-actions">
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
           <button type="button" class="button small" data-action="export-state">${icon('arrow')}📥 Stáhnout zálohu do souboru (.json)</button>

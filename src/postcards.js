@@ -308,7 +308,27 @@ export function buildMiniMapPathSvg(
 ) {
   const theme = POSTCARD_THEMES[options.theme] || POSTCARD_THEMES.gamified;
   const privacyTrim = Boolean(options.privacyTrim);
+  const hideMap = Boolean(options.hideMap || options.privacyMode === 'no_map');
   const newCellsCount = Math.max(0, Math.round(Number(options.newCellsCount) || 0));
+
+  const cellsBadgeText = `+${newCellsCount} dílků (${newCellsCount === 1 ? 'nový dílek' : newCellsCount >= 2 && newCellsCount <= 4 ? 'nové dílky' : 'nových dílků'} mapy)`;
+
+  if (hideMap) {
+    const cx = boxX + boxW / 2;
+    const cy = boxY + boxH / 2 - 6;
+    return `
+      <g class="postcard-minimap" data-privacy-no-map="true" data-segment-count="0">
+        <rect x="${boxX}" y="${boxY}" width="${boxW}" height="${boxH}" rx="16" fill="${theme.mapFill}" stroke="${theme.mapStroke}" stroke-width="2.5"/>
+        <rect x="${boxX + 14}" y="${boxY + 10}" width="${boxW - 28}" height="24" rx="8" fill="rgba(255,255,255,0.86)"/>
+        <text x="${cx}" y="${boxY + 26}" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11.5" font-weight="800" fill="${theme.headerInk}">🛡️ MAXIMÁLNÍ SOUKROMÍ (BEZ MAPY)</text>
+        <circle cx="${cx}" cy="${cy - 8}" r="28" fill="rgba(255,255,255,0.75)" stroke="${theme.mapStroke}" stroke-width="2"/>
+        <text x="${cx}" y="${cy + 1}" text-anchor="middle" font-family="system-ui, sans-serif" font-size="26">🛡️</text>
+        <text x="${cx}" y="${boxY + boxH - 42}" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" font-weight="800" fill="${theme.headerInk}">🗺️ ODKRYTÁ OBLAST: ${escapeXml(cellsBadgeText)}</text>
+        <text x="${cx}" y="${boxY + boxH - 25}" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11.5" font-weight="700" fill="${theme.subInk}">Trasa a souřadnice jsou skryty</text>
+        <text x="${cx}" y="${boxY + boxH - 9}" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" font-weight="700" fill="${theme.headerInk}">🔒 Režim: Bez mapy (soukromí)</text>
+      </g>
+    `;
+  }
 
   const rawSegments = normalizeWalkSegments(segmentsOrCoords);
   const trimResult = privacyTrim
@@ -322,7 +342,6 @@ export function buildMiniMapPathSvg(
   const innerW = boxW - pad * 2;
   const innerH = boxH - pad * 2 - 34;
 
-  const cellsBadgeText = `+${newCellsCount} dílků (${newCellsCount === 1 ? 'nový dílek' : newCellsCount >= 2 && newCellsCount <= 4 ? 'nové dílky' : 'nových dílků'} mapy)`;
   const privacyCaption = privacyTrim ? '🔒 Ochrana soukromí domova (±150 m)' : '🟢 Start · 🏁 Konec · Skutečná trasa';
 
   if (flatPts.length < 2) {
@@ -467,6 +486,9 @@ export function renderPostcardSvg(summary = {}, options = {}) {
   const privacyTrim = options.privacyTrim !== undefined
     ? Boolean(options.privacyTrim)
     : Boolean(summary.privacyTrimmed);
+  const hideMap = options.hideMap !== undefined
+    ? Boolean(options.hideMap)
+    : Boolean(options.privacyMode === 'no_map' || summary.hideMap);
 
   const rawPlaces = Array.isArray(summary.visitedPlacesWithPhotos)
     ? summary.visitedPlacesWithPhotos.filter(Boolean)
@@ -499,7 +521,7 @@ export function renderPostcardSvg(summary = {}, options = {}) {
 
   const dateObj = summary.date ? new Date(summary.date) : new Date();
   const dateOnlyStr = dateObj.toLocaleDateString('cs-CZ', { day: 'numeric', month: 'long', year: 'numeric' });
-  const timeStr = !privacyTrim && summary.date
+  const timeStr = !privacyTrim && !hideMap && summary.date
     ? ` · ${dateObj.toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit' })}`
     : '';
 
@@ -624,11 +646,18 @@ export function renderPostcardSvg(summary = {}, options = {}) {
     {
       theme: theme.id,
       privacyTrim,
+      hideMap,
       newCellsCount,
     }
   );
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" data-postcard-theme="${escapeXml(theme.id)}" data-privacy-trim="${privacyTrim}">
+  const footerPrivacyNote = hideMap
+    ? '🛡️ Maximální soukromí (Bez mapy) zapnuto: trasa, souřadnice i přesné časy jsou skryty.'
+    : (privacyTrim
+        ? '🔒 Ochrana soukromí domova zapnuta: začátek a konec trasy (±150 m) i přesné časy jsou skryty.'
+        : 'Czekpoint · Osobní atlas procházek a objevování krajiny');
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" data-postcard-theme="${escapeXml(theme.id)}" data-privacy-trim="${privacyTrim}" data-privacy-no-map="${hideMap}">
     <defs>
       <linearGradient id="pcBg" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%" stop-color="${theme.bgStart}"/>
@@ -693,12 +722,12 @@ export function renderPostcardSvg(summary = {}, options = {}) {
       <circle cx="0" cy="0" r="52" fill="none" stroke="${theme.stampInk}" stroke-width="2"/>
       <text x="0" y="-18" text-anchor="middle" font-family="system-ui, sans-serif" font-size="13" font-weight="800" fill="${theme.stampInk}" letter-spacing="2">CZEKPOINT</text>
       <text x="0" y="5" text-anchor="middle" font-family="Georgia, serif" font-size="16" font-weight="700" fill="${theme.stampInk}">OSOBNÍ ATLAS</text>
-      <text x="0" y="25" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11.5" font-weight="700" fill="${theme.stampInk}">v1.4 · ČR</text>
+      <text x="0" y="25" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11.5" font-weight="700" fill="${theme.stampInk}">v2.0 · ČR</text>
     </g>
 
     <text x="290" y="1206" font-family="Georgia, serif" font-style="italic" font-size="26" fill="${theme.headerInk}">„Každý krok zanechá stopu v paměti.“</text>
-    <text x="290" y="1238" font-family="system-ui, sans-serif" font-size="16" font-weight="600" fill="${theme.subInk}">${privacyTrim ? '🔒 Ochrana soukromí domova zapnuta: začátek a konec trasy (±150 m) i přesné časy jsou skryty.' : 'Czekpoint · Osobní atlas procházek a objevování krajiny'}</text>
-    <text x="290" y="1266" font-family="monospace" font-size="14" fill="${theme.subInk}">ID výpravy: ${escapeXml(String(summary.id || summary.expeditionId || 'exp_v1.4').slice(0, 24))}</text>
+    <text x="290" y="1238" font-family="system-ui, sans-serif" font-size="16" font-weight="600" fill="${theme.subInk}">${escapeXml(footerPrivacyNote)}</text>
+    <text x="290" y="1266" font-family="monospace" font-size="14" fill="${theme.subInk}">ID výpravy: ${escapeXml(String(summary.id || summary.expeditionId || 'exp_v2.0').slice(0, 24))}</text>
   </svg>`;
 }
 
