@@ -4557,3 +4557,112 @@
   padding: 10px 12px;
 }
 
+/* ==========================================================================
+   DÁVKA 3 (Verze v2.0-part3):
+   1. Tlačítko „🧭 Sledovat směr“ (#btn-follow-heading, min-height: 44px)
+   2. Stavový štítek režimu kompasu / směru chůze z GPS (#heading-mode-banner)
+   3. Okrajový ukazatel cíle mimo obrazovku (#offscreen-target-indicator)
+   ========================================================================== */
+
+#btn-follow-heading,
+.map-follow-heading-btn {
+  min-height: 44px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1.5px solid #2b5444;
+  background: rgba(255, 255, 255, 0.96);
+  color: #142f26;
+  font-size: 0.84rem;
+  font-weight: 750;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  box-shadow: 0 3px 10px rgba(20, 47, 38, 0.16);
+  transition: background-color 0.16s ease, color 0.16s ease, border-color 0.16s ease, transform 0.12s ease;
+}
+
+#btn-follow-heading:hover,
+.map-follow-heading-btn:hover {
+  border-color: #1f6b45;
+  background: #f1f8ec;
+}
+
+#btn-follow-heading.is-active,
+#btn-follow-heading[aria-pressed="true"],
+.map-follow-heading-btn.is-active,
+.map-follow-heading-btn[aria-pressed="true"] {
+  background: #2a6a4a !important;
+  color: #ffffff !important;
+  border-color: #ffd46b !important;
+  box-shadow: 0 4px 14px rgba(20, 47, 38, 0.34);
+}
+
+.heading-mode-banner {
+  position: absolute;
+  top: 58px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 640;
+  max-width: min(92vw, 480px);
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: rgba(20, 47, 38, 0.94);
+  color: #f7f9ed;
+  border: 1.5px solid #ffd46b;
+  font-size: 0.78rem;
+  font-weight: 750;
+  line-height: 1.3;
+  text-align: center;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.32);
+  pointer-events: none;
+}
+
+.heading-mode-banner.is-compass {
+  border-color: #a8e05f;
+}
+
+.heading-mode-banner.is-gps-course {
+  background: rgba(34, 59, 44, 0.96);
+  border-color: #ffd46b;
+  color: #fff8dc;
+}
+
+.heading-mode-banner.is-notice {
+  background: rgba(66, 46, 17, 0.95);
+  border-color: #f5b82e;
+  color: #fff4d2;
+}
+
+.offscreen-target-indicator {
+  position: absolute;
+  z-index: 635;
+  transform: translate(-50%, -50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: rgba(20, 47, 38, 0.94);
+  color: #ffffff;
+  border: 2px solid #ffd46b;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.38);
+  font-size: 0.76rem;
+  font-weight: 800;
+  white-space: nowrap;
+  pointer-events: none;
+  transition: left 0.12s ease-out, top 0.12s ease-out;
+}
+
+.offscreen-target-arrow {
+  display: inline-block;
+  color: #ffd46b;
+  font-size: 0.88rem;
+  line-height: 1;
+  transform-origin: 50% 50%;
+}
+
+.offscreen-target-dist {
+  color: #f7f9ed;
+  letter-spacing: 0.01em;
+}

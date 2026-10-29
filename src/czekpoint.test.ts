@@ -140,6 +140,11 @@ import {
   projectLngLatToFogPixels,
   metersToFogPixels,
   renderFogTextureToCanvas,
+  computeGeodesicBearingDeg,
+  computeScreenRelativeAngleDeg,
+  extractAbsoluteCompassHeadingDeg,
+  computeGpsWalkingCourseDeg,
+  computeOffscreenIndicatorPlacement,
 } from './walk.js';
 import { config as appConfig } from '../config.js';
 import {
@@ -2016,7 +2021,92 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
     assert.equal(memEntry.symbolId, 'tree');
     assert.ok(!memEntry.note.includes('<script>'), 'Poznámka vzpomínky je bezpečně escapována');
   });
+
+  it('DÁVKA 3 (v2.0-part3): Tlačítko „🧭 Sledovat směr“, přepočet šipky u Avatara při bearing 0°/90°/180°/270° a poctivý fallback kompasu', () => {
+    // 1. Výpočet skutečného geografického azimutu z polohy hráče k dalšímu bodu trasy (0° = sever, 90° = východ, 180° = jih, 270° = západ)
+    const playerPos = { lat: 49.6014, lng: 13.8644 };
+    const targetNorth = { lat: 49.6100, lng: 13.8644 };
+    const targetEast = { lat: 49.6014, lng: 13.8800 };
+    const targetSouth = { lat: 49.5900, lng: 13.8644 };
+    const targetWest = { lat: 49.6014, lng: 13.8500 };
+
+    const azNorth = computeGeodesicBearingDeg(playerPos, targetNorth);
+    const azEast = computeGeodesicBearingDeg(playerPos, targetEast);
+    const azSouth = computeGeodesicBearingDeg(playerPos, targetSouth);
+    const azWest = computeGeodesicBearingDeg(playerPos, targetWest);
+
+    assert.ok(azNorth != null && (azNorth < 1 || azNorth > 359), `Severní cíl má azimut ~0° (${azNorth})`);
+    assert.ok(azEast != null && Math.abs(azEast - 90) < 1, `Východní cíl má azimut ~90° (${azEast})`);
+    assert.ok(azSouth != null && Math.abs(azSouth - 180) < 1, `Jižní cíl má azimut ~180° (${azSouth})`);
+    assert.ok(azWest != null && Math.abs(azWest - 270) < 1, `Západní cíl má azimut ~270° (${azWest})`);
+
+    // 2. Přepočet úhlu směrové šipky u Avatara pro otočenou mapu:
+    // screenRelativeAngleDeg = (targetBearingDeg - currentMapBearingDeg + 360) % 360
+    // Test pro východní cíl (targetBearingDeg = 90°) při natočení mapy 0°, 90°, 180°, 270°:
+    assert.equal(computeScreenRelativeAngleDeg(90, 0), 90, 'Při bearing=0° ukazuje šipka k východnímu cíli doprava (90°)');
+    assert.equal(computeScreenRelativeAngleDeg(90, 90), 0, 'Když uživatel míří telefonem přímo k cíli (bearing=90° === target=90°), šipka ukazuje přímo nahoru (0°)');
+    assert.equal(computeScreenRelativeAngleDeg(90, 180), 270, 'Při bearing=180° ukazuje šipka k východnímu cíli doleva (270°)');
+    assert.equal(computeScreenRelativeAngleDeg(90, 270), 180, 'Při bearing=270° ukazuje šipka k východnímu cíli dolů (180°)');
+
+    // Test shody targetBearingDeg === currentMapBearingDeg pro všechny 4 světové strany (0°, 90°, 180°, 270°) + záporný MapLibre bearing (-90° = 270°)
+    for (const bearing of [0, 90, 180, 270]) {
+      assert.equal(
+        computeScreenRelativeAngleDeg(bearing, bearing),
+        0,
+        `Při targetBearing=${bearing}° a currentMapBearing=${bearing}° musí šipka u Avatara ukazovat přesně nahoru (0°)`
+      );
+    }
+    assert.equal(computeScreenRelativeAngleDeg(270, -90), 0, 'MapLibre záporný bearing -90° odpovídá 270°, šipka ukazuje nahoru (0°)');
+
+    // 3. Ukazatel pro cíl mimo obrazovku (#offscreen-target-indicator) ve směru screenRelativeAngleDeg
+    const viewport = { width: 400, height: 600 };
+    const topEdge = computeOffscreenIndicatorPlacement(0, viewport, 44);
+    const rightEdge = computeOffscreenIndicatorPlacement(90, viewport, 44);
+    const bottomEdge = computeOffscreenIndicatorPlacement(180, viewport, 44);
+    const leftEdge = computeOffscreenIndicatorPlacement(270, viewport, 44);
+
+    assert.equal(topEdge.x, 200, 'Směr 0° umístí štítek doprostřed horního okraje');
+    assert.ok(topEdge.y <= 60, 'Směr 0° je u horního okraje');
+    assert.ok(rightEdge.x >= 340 && rightEdge.y === 300, 'Směr 90° je u pravého okraje');
+    assert.equal(bottomEdge.x, 200, 'Směr 180° je uprostřed dolního okraje');
+    assert.ok(bottomEdge.y >= 520, 'Směr 180° je u dolního okraje');
+    assert.ok(leftEdge.x <= 60 && leftEdge.y === 300, 'Směr 270° je u levého okraje');
+
+    // 4. Poctivý fallback kompasu — žádné vymyšlené hodnoty kompasu!
+    assert.equal(extractAbsoluteCompassHeadingDeg(null), null);
+    assert.equal(extractAbsoluteCompassHeadingDeg({ alpha: null, absolute: false }), null, 'Prázdný senzor bez kompasu musí vrátit null');
+    assert.equal(extractAbsoluteCompassHeadingDeg({ alpha: 125, absolute: false, type: 'deviceorientation' }), null, 'Relativní alpha bez absolute===true se nesmí vydávat za kompas');
+    assert.equal(extractAbsoluteCompassHeadingDeg({ webkitCompassHeading: 45, webkitCompassAccuracy: 12 }), 45, 'Platný iOS webkitCompassHeading vrátí 45°');
+    assert.equal(extractAbsoluteCompassHeadingDeg({ alpha: 90, absolute: true, type: 'deviceorientationabsolute' }), 270, 'Absolutní Android alpha=90° odpovídá azimutu 270° (360 - alpha)');
+
+    // 5. Pravdivě označená náhrada směrem chůze z GPS (pouze při rychlosti >= 1.0 m/s a přesnosti <= 25 m)
+    const standingFix = { lat: 49.6014, lng: 13.8644, accuracy: 8, speed: 0.2, heading: 90, timestamp: 2000 };
+    const prevStanding = { lat: 49.6014, lng: 13.8644, accuracy: 8, speed: 0.2, timestamp: 1000 };
+    const noCourseStanding = computeGpsWalkingCourseDeg(prevStanding, standingFix);
+    assert.equal(noCourseStanding.valid, false, 'Při stání na místě (< 1.0 m/s) se GPS směr nesmí použít');
+
+    const poorAccFix = { lat: 49.6020, lng: 13.8644, accuracy: 35, speed: 1.6, heading: 0, timestamp: 6000 };
+    assert.equal(computeGpsWalkingCourseDeg(prevStanding, poorAccFix).valid, false, 'Při přesnosti GPS > 25 m se směr chůze nepoužije');
+
+    // Prokazatelný pohyb na východ (~14 m za 8 s => ~1.75 m/s, přesnost 8 m)
+    const walkingFixEast = { lat: 49.6014, lng: 13.8646, accuracy: 8, timestamp: 9000 };
+    const validCourse = computeGpsWalkingCourseDeg(prevStanding, walkingFixEast);
+    assert.equal(validCourse.valid, true, 'Při prokazatelné chůzi (>= 1.0 m/s, <= 25 m) je GPS směr platný');
+    assert.ok(validCourse.headingDeg != null && Math.abs(validCourse.headingDeg - 90) < 5);
+    assert.equal(validCourse.label, '🧭 Směr podle chůze (GPS) — telefon neposkytuje kompas');
+
+    // 6. Ověření přítomnosti #btn-follow-heading, #heading-mode-banner a #offscreen-target-indicator v src/walk.js
+    const walkJs = fs.readFileSync('src/walk.js', 'utf-8');
+    const walkCss = fs.readFileSync('assets/walk.css', 'utf-8');
+    assert.ok(walkJs.includes('id="btn-follow-heading"'), 'Tlačítko #btn-follow-heading musí existovat');
+    assert.ok(walkJs.includes('🧭 Sledovat směr'), 'Tlačítko má popisek 🧭 Sledovat směr');
+    assert.ok(walkJs.includes('id="heading-mode-banner"'), 'Stavový banner #heading-mode-banner musí existovat');
+    assert.ok(walkJs.includes('id="offscreen-target-indicator"'), 'Indikátor cíle mimo obrazovku #offscreen-target-indicator musí existovat');
+    assert.ok(walkJs.includes('🧭 Směr podle chůze (GPS) — telefon neposkytuje kompas'), 'Přesný text pro GPS fallback směru chůze musí být v src/walk.js');
+    assert.ok(walkCss.includes('#btn-follow-heading'), 'Styl pro #btn-follow-heading musí být v assets/walk.css');
+  });
 });
+
 
 
 

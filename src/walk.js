@@ -364,6 +364,171 @@ export function buildHikingTrailsGeoJson(trails = []) {
 export const EMPTY_TRANSPARENT_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
 
 /**
+ * DÁVKA 3 (Bod 2.1): Spočítá skutečný geografický azimut z polohy hráče k cíli v rozsahu [0, 360),
+ * kde 0° = geografický sever, 90° = východ, 180° = jih, 270° = západ.
+ */
+export function computeGeodesicBearingDeg(fromPt, toPt) {
+  const lat1Num = Number(fromPt?.lat ?? fromPt?.[0]);
+  const lng1Num = Number(fromPt?.lng ?? fromPt?.[1]);
+  const lat2Num = Number(toPt?.lat ?? toPt?.[0]);
+  const lng2Num = Number(toPt?.lng ?? toPt?.[1]);
+  if (![lat1Num, lng1Num, lat2Num, lng2Num].every(Number.isFinite)) return null;
+  if (Math.abs(lat1Num - lat2Num) < 1e-9 && Math.abs(lng1Num - lng2Num) < 1e-9) return 0;
+
+  const dLng = ((lng2Num - lng1Num) * Math.PI) / 180;
+  const lat1 = (lat1Num * Math.PI) / 180;
+  const lat2 = (lat2Num * Math.PI) / 180;
+  const y = Math.sin(dLng) * Math.cos(lat2);
+  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+  return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+}
+
+/**
+ * DÁVKA 3 (Bod 2.1): Přepočet úhlu směrové šipky u Avatara pro otočenou mapu:
+ * screenRelativeAngleDeg = (targetBearingDeg - currentMapBearingDeg + 360) % 360
+ * Když uživatel míří telefonem přímo k cíli (targetBearingDeg === currentMapBearingDeg),
+ * šipka u Avatara ukazuje přímo nahoru (0°).
+ */
+export function computeScreenRelativeAngleDeg(targetBearingDeg, currentMapBearingDeg = 0) {
+  const t = Number(targetBearingDeg);
+  const b = Number(currentMapBearingDeg) || 0;
+  if (!Number.isFinite(t)) return 0;
+  const screenRelativeAngleDeg = (((t - b) % 360) + 360) % 360;
+  return screenRelativeAngleDeg;
+}
+
+/**
+ * DÁVKA 3 (Bod 3.1): Extrahuje skutečný azimut vůči geografickému severu ze senzoru zařízení.
+ * Nikdy si nevymýšlí náhradní hodnoty kompasu — pokud událost neobsahuje absolutní azimut, vrátí null.
+ */
+export function extractAbsoluteCompassHeadingDeg(event) {
+  if (!event || typeof event !== 'object') return null;
+
+  // 1. iOS Safari: webkitCompassHeading (0° = sever, po směru hodinových ručiček)
+  if (event.webkitCompassHeading != null && Number.isFinite(Number(event.webkitCompassHeading))) {
+    const acc = event.webkitCompassAccuracy != null ? Number(event.webkitCompassAccuracy) : 15;
+    if (acc < 0 || acc > 65) return null;
+    const h = Number(event.webkitCompassHeading);
+    if (h >= 0) {
+      return ((h % 360) + 360) % 360;
+    }
+  }
+
+  // 2. Android / standardní absolutní orientace: musí být explicitně absolute === true nebo deviceorientationabsolute
+  const isAbsolute = event.absolute === true || event.type === 'deviceorientationabsolute';
+  if (isAbsolute && event.alpha != null && Number.isFinite(Number(event.alpha))) {
+    const alpha = Number(event.alpha);
+    return (((360 - alpha) % 360) + 360) % 360;
+  }
+
+  return null;
+}
+
+/**
+ * DÁVKA 3 (Bod 3.2): Pravdivě označená náhrada směrem chůze z GPS, když telefon neposkytuje kompas.
+ * Použije se POUZE tehdy, když se uživatel prokazatelně a spolehlivě pohybuje
+ * (rychlost chůze >= 1.0 m/s a přesnost GPS <= 25 m).
+ */
+export function computeGpsWalkingCourseDeg(prevFix, currentFix) {
+  const GPS_COURSE_FALLBACK_LABEL = '🧭 Směr podle chůze (GPS) — telefon neposkytuje kompas';
+  if (!currentFix || !Number.isFinite(Number(currentFix.lat)) || !Number.isFinite(Number(currentFix.lng))) {
+    return { valid: false, headingDeg: null, source: 'none', label: null };
+  }
+
+  const acc = Number(currentFix.accuracy);
+  if (!Number.isFinite(acc) || acc <= 0 || acc > 25) {
+    return { valid: false, headingDeg: null, source: 'none', label: null };
+  }
+
+  let effectiveSpeedMs = Number.isFinite(Number(currentFix.speed)) && Number(currentFix.speed) >= 0
+    ? Number(currentFix.speed)
+    : null;
+
+  let vectorBearing = null;
+  if (
+    prevFix &&
+    Number.isFinite(Number(prevFix.lat)) &&
+    Number.isFinite(Number(prevFix.lng)) &&
+    Number(prevFix.accuracy ?? 15) <= 25
+  ) {
+    const distM = haversineMeters(prevFix, currentFix);
+    const dtSec = ((Number(currentFix.timestamp) || 0) - (Number(prevFix.timestamp) || 0)) / 1000;
+    if (distM != null && distM >= 2.0) {
+      vectorBearing = computeGeodesicBearingDeg(prevFix, currentFix);
+      if (effectiveSpeedMs == null && dtSec > 0 && dtSec <= 120) {
+        effectiveSpeedMs = distM / dtSec;
+      }
+    }
+  }
+
+  if (effectiveSpeedMs == null || effectiveSpeedMs < 1.0 || effectiveSpeedMs > 12.0) {
+    return { valid: false, headingDeg: null, source: 'none', label: null };
+  }
+
+  const rawGpsHeading = Number.isFinite(Number(currentFix.heading)) && Number(currentFix.heading) >= 0
+    ? ((Number(currentFix.heading) % 360) + 360) % 360
+    : vectorBearing;
+
+  if (rawGpsHeading == null || !Number.isFinite(rawGpsHeading)) {
+    return { valid: false, headingDeg: null, source: 'none', label: null };
+  }
+
+  return {
+    valid: true,
+    headingDeg: Number(rawGpsHeading.toFixed(1)),
+    speedMs: Number(effectiveSpeedMs.toFixed(2)),
+    source: 'gps_course',
+    label: GPS_COURSE_FALLBACK_LABEL,
+  };
+}
+
+/**
+ * DÁVKA 3 (Bod 2.2): Vypočítá pozici štítku u okraje mapy ve směru screenRelativeAngleDeg,
+ * když další cíl trasy leží mimo aktuálně viditelnou výseč obrazovky.
+ */
+export function computeOffscreenIndicatorPlacement(
+  screenRelativeAngleDeg,
+  viewport = { width: 390, height: 600 },
+  marginPx = 44
+) {
+  const w = Math.max(200, Number(viewport?.width || viewport?.x) || 390);
+  const h = Math.max(200, Number(viewport?.height || viewport?.y) || 600);
+  const angleDeg = computeScreenRelativeAngleDeg(screenRelativeAngleDeg, 0);
+  const rad = (angleDeg * Math.PI) / 180;
+
+  // Směrový vektor na obrazovce: 0° = nahoru (dy = -1), 90° = doprava (dx = +1)
+  const dx = Math.sin(rad);
+  const dy = -Math.cos(rad);
+
+  const cx = w / 2;
+  const cy = h / 2;
+  const minX = Math.min(cx - 20, Math.max(28, marginPx));
+  const maxX = Math.max(cx + 20, w - Math.max(28, marginPx));
+  const minY = Math.min(cy - 20, Math.max(54, marginPx + 12));
+  const maxY = Math.max(cy + 20, h - Math.max(64, marginPx + 22));
+
+  let tMin = Infinity;
+  if (Math.abs(dx) > 1e-6) {
+    const tx = dx > 0 ? (maxX - cx) / dx : (minX - cx) / dx;
+    if (tx > 0) tMin = Math.min(tMin, tx);
+  }
+  if (Math.abs(dy) > 1e-6) {
+    const ty = dy > 0 ? (maxY - cy) / dy : (minY - cy) / dy;
+    if (ty > 0) tMin = Math.min(tMin, ty);
+  }
+  if (!Number.isFinite(tMin)) tMin = Math.min(cx - minX, cy - minY);
+
+  const x = Math.round(Math.max(minX, Math.min(maxX, cx + dx * tMin)));
+  const y = Math.round(Math.max(minY, Math.min(maxY, cy + dy * tMin)));
+
+  return {
+    x,
+    y,
+    angleDeg: Math.round(angleDeg),
+  };
+}
+
+/**
  * Vypočítá geografický obdélník pokrývající oblast pohledu a prošlé trasy.
  * Vrátí { west, north, east, south, coordinates } pro MapLibre zdroj typu image.
  * coordinates: [[west, north], [east, north], [east, south], [west, south]]
@@ -756,6 +921,16 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
   let fakeGpsSim = null;
 
   const compassStabilizer = createCompassStabilizer({ alpha: 0.12, deadbandDeg: 2.5, minIntervalMs: 80 });
+  const headingFollowStabilizer = createCompassStabilizer({ alpha: 0.14, deadbandDeg: 2.5, minIntervalMs: 85 });
+  let followHeadingMode = false;
+  let compassSensorState = 'unknown'; // 'unknown' | 'active' | 'denied' | 'unavailable'
+  let lastAbsoluteCompassAt = 0;
+  let compassCheckTimer = null;
+  let lastGpsCourseHeading = null;
+  let prevAcceptedFixForCourse = null;
+  let currentTargetPlace = null;
+  let currentTargetDist = Infinity;
+  let orientationListenersBound = false;
   const keepAliveCtrl = createKeepAliveController();
   let lastSampledFix = null;
   const alertedProximityStopIds = new Set();
@@ -912,7 +1087,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     });
 
   root.innerHTML = `
-    <h1 tabindex="-1" class="visually-hidden">Mapa objevování a procházka · Czekpoint v2.0-part2</h1>
+    <h1 tabindex="-1" class="visually-hidden">Mapa objevování a procházka · Czekpoint v2.0-part3</h1>
 
     <!-- Horní přehledový panel trasy: zobrazí se AŽ ve chvíli, kdy má uživatel vybraný alespoň 1 bod v trase -->
     <section class="phase1-top-bar" id="phase1-top-bar" hidden aria-label="Souhrn trasy, plán zastávek a spuštění výpravy">
@@ -1225,13 +1400,21 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         <span class="zen-fab-label" id="zen-follow-label">Sleduji polohu</span>
       </button>
 
-      <!-- DÁVKA 1 v2.0-part1 (Bod 2): Sjednocená ovládací tlačítka mapy (>= 44 × 44 px) včetně přepínače 2D/3D terénu a Severu nahoře -->
+      <!-- DÁVKA 3 (Bod 2.2 & 3.2): Stavový štítek režimu Sledovat směr a okrajový ukazatel cíle mimo obrazovku -->
+      <div id="heading-mode-banner" class="heading-mode-banner" hidden role="status" aria-live="polite"></div>
+      <div id="offscreen-target-indicator" class="offscreen-target-indicator" hidden role="status" aria-live="polite"></div>
+
+      <!-- DÁVKA 1–3 (v2.0): Sjednocená ovládací tlačítka mapy (>= 44 × 44 px) včetně 2D/3D, Sledovat směr a Severu nahoře -->
       <div class="walk-map-toolbar map-right-toolbar" role="toolbar" aria-label="Ovládání mapy">
         <button type="button" class="map-right-btn" id="walk-zoom-in" title="Přiblížit mapu (+)" aria-label="Přiblížit mapu">➕</button>
         <button type="button" class="map-right-btn" id="walk-zoom-out" title="Oddálit mapu (−)" aria-label="Oddálit mapu">➖</button>
         <button type="button" class="map-right-btn map-3d-toggle-btn" id="btn-toggle-3d" aria-pressed="false" title="Přepnout 2D a 3D zobrazení se skutečným terénem" aria-label="Přepnout 2D a 3D terén">
           <span class="btn-3d-icon" id="btn-toggle-3d-icon" aria-hidden="true">🗺️</span>
           <span class="btn-3d-label" id="btn-toggle-3d-label">2D</span>
+        </button>
+        <button type="button" class="map-right-btn map-follow-heading-btn" id="btn-follow-heading" aria-pressed="false" title="Sledovat směr — otáčet mapu kolem Avatara podle natočení telefonu" aria-label="🧭 Sledovat směr">
+          <span class="btn-follow-heading-icon" aria-hidden="true">🧭</span>
+          <span class="btn-follow-heading-label">Sledovat směr</span>
         </button>
         <button type="button" class="map-right-btn map-north-btn" id="btn-north-up" title="Sever nahoře (srovnat natočení mapy)" aria-label="Sever nahoře">⬆️</button>
         <div class="map-3d-camera-controls" id="map-3d-camera-controls" role="group" aria-label="Ovládání náklonu a otočení 3D kamery" hidden>
@@ -1907,7 +2090,11 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
   function updatePlayerAvatarIcon(isWalking = Boolean(active || demo)) {
     if (!player) return;
     const avatarId = stateObj.profile?.avatarId || 'liska';
-    const bearingDeg = Number.isFinite(targetBearing) ? targetBearing : 0;
+    const currentMapBearingDeg = map && typeof map.getBearing === 'function' ? Number(map.getBearing()) || 0 : 0;
+    const screenRelativeAngleDeg = computeScreenRelativeAngleDeg(
+      Number.isFinite(targetBearing) ? targetBearing : 0,
+      currentMapBearingDeg
+    );
     const el = typeof player.getElement === 'function' ? player.getElement() : null;
     if (el) {
       const wrap = el.querySelector('.player-avatar-marker');
@@ -1917,16 +2104,23 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         if (pointer) {
           const showArrow = appSettings.orbitalArrow !== false;
           pointer.style.display = showArrow ? '' : 'none';
-          pointer.style.transform = `rotate(${Math.round(bearingDeg)}deg)`;
+          pointer.style.transform = `rotate(${Math.round(screenRelativeAngleDeg)}deg)`;
+          pointer.dataset.screenAngle = String(Math.round(screenRelativeAngleDeg));
+          pointer.dataset.targetBearing = String(Math.round(Number.isFinite(targetBearing) ? targetBearing : 0));
         }
         return;
       }
       el.innerHTML = renderPlayerAvatarMarkerHtml({
         avatarId,
-        bearingDeg,
+        bearingDeg: screenRelativeAngleDeg,
         isWalking,
         orbitalArrow: appSettings.orbitalArrow !== false,
       });
+      const newPointer = el.querySelector('.avatar-direction-pointer');
+      if (newPointer) {
+        newPointer.dataset.screenAngle = String(Math.round(screenRelativeAngleDeg));
+        newPointer.dataset.targetBearing = String(Math.round(Number.isFinite(targetBearing) ? targetBearing : 0));
+      }
     }
   }
 
@@ -2289,9 +2483,150 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
   let currentDeviceHeading = null;
   let targetBearing = 0;
 
-  function updateCompassRotation(heading) {
-    currentDeviceHeading = heading;
-    const stab = compassStabilizer.update(heading, Date.now());
+  function updateHeadingModeBannerUi() {
+    const btn = $('btn-follow-heading');
+    if (btn) {
+      btn.setAttribute('aria-pressed', String(Boolean(followHeadingMode)));
+      btn.classList.toggle('active', Boolean(followHeadingMode));
+      btn.innerHTML = followHeadingMode
+        ? `<span class="btn-follow-heading-icon" aria-hidden="true">🧭</span><span class="btn-follow-heading-label">Sledovat směr: ZAP</span>`
+        : `<span class="btn-follow-heading-icon" aria-hidden="true">🧭</span><span class="btn-follow-heading-label">Sledovat směr</span>`;
+    }
+    const banner = $('heading-mode-banner');
+    if (!banner) return;
+    if (!followHeadingMode) {
+      banner.hidden = true;
+      banner.textContent = '';
+      banner.className = 'heading-mode-banner';
+      return;
+    }
+
+    if (compassSensorState === 'active') {
+      banner.hidden = false;
+      banner.className = 'heading-mode-banner is-compass-active';
+      banner.textContent = '🧭 Sledování směru podle kompasu telefonu (směr před tebou je nahoře)';
+    } else if (compassSensorState === 'denied') {
+      banner.hidden = false;
+      banner.className = 'heading-mode-banner is-compass-fallback';
+      banner.textContent = lastGpsCourseHeading != null
+        ? '🧭 Směr podle chůze (GPS) — telefon neposkytuje kompas'
+        : '⚠️ Přístup ke kompasu zamítnut — sleduji polohu GPS (při chůzi ≥ 1,0 m/s se použije směr z GPS)';
+    } else if (compassSensorState === 'unavailable') {
+      banner.hidden = false;
+      banner.className = 'heading-mode-banner is-compass-fallback';
+      banner.textContent = '🧭 Směr podle chůze (GPS) — telefon neposkytuje kompas';
+    } else {
+      banner.hidden = false;
+      banner.className = 'heading-mode-banner';
+      banner.textContent = '🧭 Sledovat směr aktivní — ověřuji kompas zařízení…';
+    }
+  }
+
+  function updateOffscreenTargetIndicator() {
+    const ind = $('offscreen-target-indicator');
+    if (!ind) return;
+    if (!map || !currentTargetPlace || !Number.isFinite(currentTargetDist)) {
+      ind.hidden = true;
+      return;
+    }
+
+    const pxSize = getMapPixelSize();
+    const width = Math.max(200, pxSize.x || 390);
+    const height = Math.max(200, pxSize.y || 600);
+    const pt = projectLatLngToContainerPoint(currentTargetPlace.lat, currentTargetPlace.lng);
+
+    const isInsideScreen =
+      pt.x >= 32 &&
+      pt.x <= width - 32 &&
+      pt.y >= 52 &&
+      pt.y <= height - 64;
+
+    const currentMapBearingDeg = typeof map.getBearing === 'function' ? Number(map.getBearing()) || 0 : 0;
+    const screenRelativeAngleDeg = computeScreenRelativeAngleDeg(targetBearing, currentMapBearingDeg);
+
+    if (isInsideScreen) {
+      ind.hidden = true;
+      ind.dataset.screenAngle = String(Math.round(screenRelativeAngleDeg));
+      return;
+    }
+
+    const placement = computeOffscreenIndicatorPlacement(screenRelativeAngleDeg, { width, height }, 46);
+    const distLabel = formatDistanceLabel(currentTargetDist);
+    ind.hidden = false;
+    ind.style.left = `${placement.x}px`;
+    ind.style.top = `${placement.y}px`;
+    ind.dataset.screenAngle = String(placement.angleDeg);
+    ind.innerHTML = `
+      <span class="offscreen-target-arrow" style="transform: rotate(${placement.angleDeg}deg)" aria-hidden="true">▲</span>
+      <span class="offscreen-target-text">
+        <strong>${e(distLabel)}</strong> · ${e(currentTargetPlace.title)}
+      </span>
+    `;
+  }
+
+  function updateDirectionalIndicators() {
+    const currentMapBearingDeg = map && typeof map.getBearing === 'function' ? Number(map.getBearing()) || 0 : 0;
+    const screenRelativeAngleDeg = computeScreenRelativeAngleDeg(targetBearing, currentMapBearingDeg);
+
+    updatePlayerAvatarIcon(Boolean(active || demo));
+    updateOffscreenTargetIndicator();
+
+    const dial = $('compass-dial');
+    const targetArrow = $('compass-target-arrow');
+    if (currentDeviceHeading == null) {
+      if (dial) {
+        dial.style.transition = 'transform 0.2s ease-out';
+        dial.style.transform = `rotate(${(-currentMapBearingDeg).toFixed(1)}deg)`;
+      }
+      if (targetArrow) {
+        targetArrow.style.transition = 'transform 0.2s ease-out';
+        targetArrow.style.transform = `rotate(${screenRelativeAngleDeg.toFixed(1)}deg)`;
+      }
+    }
+  }
+
+  function applyHeadingToMapCamera(rawHeadingDeg, source = 'compass') {
+    if (!followHeadingMode || !follow || !map || disposed) return;
+    const stab = headingFollowStabilizer.update(rawHeadingDeg, Date.now());
+    if (!stab.updated) return;
+
+    const activePos = lastFix || telemetry.lastKnownPosition || getRouteOriginPoint();
+    const pxSize = getMapPixelSize();
+    const width = zenMode ? window.innerWidth : pxSize.x;
+    const height = zenMode ? window.innerHeight : pxSize.y;
+    const bottomObsPx = zenMode ? 0 : getBottomSheetOverlapPx();
+    const currentZoom = (typeof map.getZoom === 'function' ? map.getZoom() : null) || 16.5;
+
+    const targetCenter = activePos && Number.isFinite(activePos.lat) && Number.isFinite(activePos.lng)
+      ? computeVisibleMapCenterForPlayer(activePos, { width, height }, bottomObsPx, 0, currentZoom)
+      : null;
+
+    try {
+      const easeOpts = {
+        bearing: stab.smoothedHeading,
+        duration: source === 'gps_course' ? 280 : 115,
+        easing: t => t,
+      };
+      if (targetCenter && Number.isFinite(targetCenter.lat) && Number.isFinite(targetCenter.lng)) {
+        easeOpts.center = [targetCenter.lng, targetCenter.lat];
+      }
+      map.easeTo(easeOpts);
+    } catch {}
+  }
+
+  function updateCompassRotation(heading, isGenuineSensor = false) {
+    if (!Number.isFinite(Number(heading))) return;
+    const normHeading = ((Number(heading) % 360) + 360) % 360;
+    if (isGenuineSensor) {
+      lastAbsoluteCompassAt = Date.now();
+      if (compassSensorState !== 'active') {
+        compassSensorState = 'active';
+        updateHeadingModeBannerUi();
+      }
+    }
+
+    currentDeviceHeading = normHeading;
+    const stab = compassStabilizer.update(normHeading, Date.now());
     currentDeviceHeading = stab.smoothedHeading;
     const dial = $('compass-dial');
     const targetArrow = $('compass-target-arrow');
@@ -2303,23 +2638,126 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       targetArrow.style.transition = 'transform 0.25s ease-out';
       targetArrow.style.transform = `rotate(${(targetBearing - stab.continuousAngle).toFixed(1)}deg)`;
     }
+
+    if (followHeadingMode && follow) {
+      applyHeadingToMapCamera(normHeading, 'compass');
+    }
+    updatePlayerAvatarIcon(Boolean(active || demo));
+    updateOffscreenTargetIndicator();
   }
 
   function handleDeviceOrientation(event) {
     if (disposed) return;
-    let heading = null;
-    if (event.webkitCompassHeading != null) {
-      heading = event.webkitCompassHeading;
-    } else if (event.alpha != null) {
-      heading = (360 - event.alpha) % 360;
-    }
+    // DÁVKA 3 (Bod 3.1): Pouze ověřený absolutní azimut vůči severu (žádné vymyšlené hodnoty)
+    const heading = extractAbsoluteCompassHeadingDeg(event);
     if (heading != null && Number.isFinite(heading)) {
-      updateCompassRotation(heading);
+      updateCompassRotation(heading, true);
     }
   }
 
-  window.addEventListener('deviceorientationabsolute', handleDeviceOrientation, { capture: true, signal: aborter.signal });
-  window.addEventListener('deviceorientation', handleDeviceOrientation, { capture: true, signal: aborter.signal });
+  function unbindOrientationListeners() {
+    if (typeof window === 'undefined') return;
+    window.removeEventListener('deviceorientationabsolute', handleDeviceOrientation, true);
+    window.removeEventListener('deviceorientation', handleDeviceOrientation, true);
+    orientationListenersBound = false;
+  }
+
+  function bindOrientationListeners() {
+    if (typeof window === 'undefined' || disposed) return;
+    unbindOrientationListeners();
+    window.addEventListener('deviceorientationabsolute', handleDeviceOrientation, { capture: true });
+    window.addEventListener('deviceorientation', handleDeviceOrientation, { capture: true });
+    orientationListenersBound = true;
+  }
+
+  bindOrientationListeners();
+
+  async function setFollowHeadingMode(enable) {
+    if (disposed) return;
+    const nextState = Boolean(enable);
+    if (compassCheckTimer) {
+      clearTimeout(compassCheckTimer);
+      compassCheckTimer = null;
+    }
+
+    if (!nextState) {
+      followHeadingMode = false;
+      updateHeadingModeBannerUi();
+      if (map) {
+        try {
+          map.easeTo({ bearing: 0, duration: 450 });
+        } catch {}
+      }
+      updateDirectionalIndicators();
+      status('⬆️ Režim Sledovat směr vypnut — mapa vrácena severem nahoru.');
+      return;
+    }
+
+    followHeadingMode = true;
+    follow = true;
+    updateFollowUi();
+    updateHeadingModeBannerUi();
+    headingFollowStabilizer.reset();
+
+    // Vycentrujeme mapu na Avatara a ujistíme se, že je viditelný uprostřed obrazovky
+    const activePos = lastFix || telemetry.lastKnownPosition || getRouteOriginPoint();
+    if (map && player && activePos && Number.isFinite(activePos.lat) && Number.isFinite(activePos.lng)) {
+      if (player.getOpacity() === 0) {
+        player.setLatLng([activePos.lat, activePos.lng]);
+        setPlayerMarkerVisible(true);
+      }
+      centerMapOnPlayer(activePos, false);
+    }
+
+    // DÁVKA 3 (Bod 3.1): Na iOS vyžádáme oprávnění DeviceOrientationEvent.requestPermission()
+    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+      try {
+        const perm = await DeviceOrientationEvent.requestPermission();
+        if (perm !== 'granted') {
+          compassSensorState = 'denied';
+          updateHeadingModeBannerUi();
+          status('⚠️ Přístup ke kompasu byl zamítnut — sledování polohy GPS běží dál bez otáčení podle telefonu.');
+          return;
+        }
+      } catch {
+        compassSensorState = 'denied';
+        updateHeadingModeBannerUi();
+        status('⚠️ Kompas telefonu nebyl povolen — sledování polohy GPS běží dál bez otáčení podle telefonu.');
+        return;
+      }
+    }
+
+    bindOrientationListeners();
+
+    if (lastAbsoluteCompassAt > 0 && Date.now() - lastAbsoluteCompassAt < 5000) {
+      compassSensorState = 'active';
+      updateHeadingModeBannerUi();
+      if (currentDeviceHeading != null) {
+        applyHeadingToMapCamera(currentDeviceHeading, 'compass');
+      }
+      status('🧭 Sledovat směr zapnuto — mapa se otáčí kolem Avatara podle natočení telefonu.');
+      return;
+    }
+
+    compassSensorState = 'unknown';
+    updateHeadingModeBannerUi();
+
+    compassCheckTimer = setTimeout(() => {
+      compassCheckTimer = null;
+      if (disposed || !followHeadingMode) return;
+      if (lastAbsoluteCompassAt === 0 || Date.now() - lastAbsoluteCompassAt > 3000) {
+        // Zařízení neposkytuje absolutní kompas — nikdy si nevymýšlíme hodnoty kompasu!
+        compassSensorState = 'unavailable';
+        updateHeadingModeBannerUi();
+        if (lastGpsCourseHeading != null && follow) {
+          applyHeadingToMapCamera(lastGpsCourseHeading, 'gps_course');
+          status('🧭 Směr podle chůze (GPS) — telefon neposkytuje kompas.');
+        } else {
+          status('🧭 Směr podle chůze (GPS) — telefon neposkytuje kompas. Sledování polohy GPS je aktivní (otáčení mapy se zapne při chůzi ≥ 1,0 m/s).');
+        }
+      }
+    }, 650);
+  }
 
   function getCompanionSpeedKmH() {
     // ZADÁNÍ #09 (Bod 1): Výchozí tempo je pohodových 4,0 km/h.
@@ -2570,12 +3008,10 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     }
 
     if (targetPlace && Number.isFinite(targetDist)) {
-      const dLng = (targetPlace.lng - origin.lng) * Math.PI / 180;
-      const lat1 = origin.lat * Math.PI / 180;
-      const lat2 = targetPlace.lat * Math.PI / 180;
-      const y = Math.sin(dLng) * Math.cos(lat2);
-      const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
-      targetBearing = (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+      currentTargetPlace = targetPlace;
+      currentTargetDist = targetDist;
+      const computedBrg = computeGeodesicBearingDeg(origin, targetPlace);
+      targetBearing = computedBrg != null ? computedBrg : 0;
 
       const directions = [
         { name: 'sever', arrow: '↑' },
@@ -2598,18 +3034,18 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         $('compass-dist-badge').textContent = formatDistanceLabel(targetDist);
       }
 
-      if (currentDeviceHeading == null) {
-        const targetArrow = $('compass-target-arrow');
-        if (targetArrow) targetArrow.style.transform = `rotate(${targetBearing}deg)`;
+      if (currentDeviceHeading != null && compassSensorState === 'active') {
+        updateCompassRotation(currentDeviceHeading, false);
       } else {
-        updateCompassRotation(currentDeviceHeading);
+        updateDirectionalIndicators();
       }
-      updatePlayerAvatarIcon(Boolean(active || demo));
     } else {
+      currentTargetPlace = null;
+      currentTargetDist = Infinity;
       const widget = $('active-compass-widget');
       if (widget) widget.title = 'Všechny zastávky navštíveny! Výborně.';
       if ($('compass-dist-badge')) $('compass-dist-badge').textContent = 'Hotovo ✓';
-      updatePlayerAvatarIcon(Boolean(active || demo));
+      updateDirectionalIndicators();
     }
     updateTurnNavPill(origin);
   }
@@ -4936,9 +5372,27 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       return;
     }
 
-    // Vzorek prošel všemi 4 kritérii -> uložíme do lastAcceptedFix
+    // Vzorek prošel všemi 4 kritérii -> vyhodnotíme případný kurz chůze z GPS (DÁVKA 3 Bod 3.2) a uložíme do lastAcceptedFix
+    const gpsCourseRes = computeGpsWalkingCourseDeg(prevAcceptedFixForCourse || lastAcceptedFix, {
+      ...cleanFix,
+      heading: Number.isFinite(Number(coords.heading)) ? Number(coords.heading) : null,
+    });
+    prevAcceptedFixForCourse = cleanFix;
     lastAcceptedFix = cleanFix;
     lastFix = cleanFix;
+
+    if (gpsCourseRes.valid) {
+      lastGpsCourseHeading = gpsCourseRes.headingDeg;
+      if (followHeadingMode && compassSensorState !== 'active') {
+        if (compassSensorState === 'unknown') {
+          compassSensorState = 'unavailable';
+        }
+        updateHeadingModeBannerUi();
+        if (follow) {
+          applyHeadingToMapCamera(gpsCourseRes.headingDeg, 'gps_course');
+        }
+      }
+    }
 
     // Pokud jsme byli ve stavu 'locating' (čekání na první platnou GPS polohu),
     // TEPRVE NYNÍ přecházíme do stavu 'running' a spouštíme záznam času a metrů!
@@ -6029,15 +6483,26 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       renderTrail();
       renderPlaces({ skipListRebuild: true });
     });
-    // Bod 25: Ruční posun mapy dočasně přepne do prohlížení a zobrazí výrazné „Zpět na mou polohu“
-    map.on('dragstart', () => {
-      follow = false;
-      updateFollowUi();
+    // DÁVKA 3 (Bod 1.3): Při ručním posunutí mapy uživatelem (dragstart vyvolaný dotykem/myší, e.originalEvent)
+    // okamžitě pozastavíme automatické sledování a zobrazíme výrazné tlačítko „🎯 Zpět ke mně“
+    map.on('dragstart', (ev) => {
+      if (!ev || ev.originalEvent !== undefined) {
+        follow = false;
+        updateFollowUi();
+      }
+    });
+    // DÁVKA 3 (Bod 2.2): Při otočení mapy (ve 2D, 3D i při ručním otočení) okamžitě přepočítáme směrovou šipku u Avatara a okrajový štítek
+    map.on('rotate', () => {
+      updateDirectionalIndicators();
+    });
+    map.on('pitch', () => {
+      updateOffscreenTargetIndicator();
     });
     map.on('moveend', () => {
       renderPlaces({ skipListRebuild: true });
       updateScanMapAreaButtonState();
       scheduleMapPanAutoFetch();
+      updateDirectionalIndicators();
       const c = map.getCenter();
       if (c && !isPointInsideFogSafeBounds(c.lat, c.lng, fogGeographicBounds, 0.65)) {
         scheduleFog(50);
@@ -6177,7 +6642,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         <p style="margin:8px 0 0">Zobrazení interaktivní mapy a mapových vrstev není v tuto chvíli dostupné. Plánování zastávek, seznam míst a záznam GPS procházky zůstávají funkční.</p>
       </div>
     `;
-    ['walk-center', 'walk-fog-toggle', 'walk-trails-toggle', 'walk-zen-toggle', 'btn-toggle-3d', 'btn-north-up', 'draft-btn-origin-map', 'walk-fake-gps-toggle'].forEach(btnId => {
+    ['walk-center', 'walk-fog-toggle', 'walk-trails-toggle', 'walk-zen-toggle', 'btn-toggle-3d', 'btn-follow-heading', 'btn-north-up', 'draft-btn-origin-map', 'walk-fake-gps-toggle'].forEach(btnId => {
       const btn = $(btnId);
       if (btn) {
         btn.disabled = true;
@@ -6186,15 +6651,25 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     });
   }
 
-  // DÁVKA 1 (v2.0-part1, Bod 2): Přepínač 2D / 3D, Sever nahoře a přístupná 3D tlačítka náklonu/otočení kamery
+  // DÁVKA 1–3 (v2.0): Přepínač 2D / 3D, Sledovat směr (#btn-follow-heading), Sever nahoře a přístupná 3D tlačítka kamery
   $('btn-toggle-3d')?.addEventListener('click', () => {
     terrainFallbackTriggered = false;
     setMap3DMode(!is3DMode);
+    updateDirectionalIndicators();
+    playTick(stateObj.soundEnabled);
+  });
+
+  $('btn-follow-heading')?.addEventListener('click', () => {
+    setFollowHeadingMode(!followHeadingMode);
     playTick(stateObj.soundEnabled);
   });
 
   $('btn-north-up')?.addEventListener('click', () => {
     if (!map) return;
+    if (followHeadingMode) {
+      followHeadingMode = false;
+      updateHeadingModeBannerUi();
+    }
     try {
       map.easeTo({ bearing: 0, duration: 450 });
       status('⬆️ Mapa srovnána severem nahoru.');
@@ -8195,13 +8670,21 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     playTick(stateObj.soundEnabled);
   });
 
-  // Bod 25: Tlačítka „Zpět na mou polohu“ a „◎ Moje poloha“ obnoví sledování a zachovají uživatelem zvolený zoom
+  // Bod 25 & DÁVKA 3 (Bod 1.3): Tlačítka „🎯 Zpět ke mně“ a „◎ Moje poloha“ obnoví sledování polohy i případné sledování směru
   const restoreFollowOnPlayer = () => {
     follow = true;
     updateFollowUi();
     const targetPos = lastFix || telemetry.lastKnownPosition;
     if (targetPos && map) {
       centerMapOnPlayer(targetPos, false);
+      if (followHeadingMode) {
+        const headingToApply = (compassSensorState === 'active' && currentDeviceHeading != null)
+          ? currentDeviceHeading
+          : lastGpsCourseHeading;
+        if (headingToApply != null) {
+          applyHeadingToMapCamera(headingToApply, compassSensorState === 'active' ? 'compass' : 'gps_course');
+        }
+      }
       status('Sledování tvé polohy bylo obnoveno (zvolené přiblížení zachováno).');
     } else if (map && plannedRoute.origin) {
       centerMapOnPlayer(plannedRoute.origin, false);
@@ -8844,6 +9327,11 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
   });
 
   const visibility = () => {
+    if (!document.hidden && !disposed) {
+      // DÁVKA 3 (Bod 3.3): Po návratu do aplikace z pozadí čistě obnovíme odběr senzoru orientace bez duplicitních listenerů
+      bindOrientationListeners();
+      updateDirectionalIndicators();
+    }
     if (!document.hidden && active && !disposed && !simSandboxActive) {
       restartGpsWatch();
       holdWake();
@@ -8911,6 +9399,10 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     clearAllMapTasks();
     keepAliveCtrl.stop();
     stopBackgroundTracking();
+    if (compassCheckTimer) {
+      clearTimeout(compassCheckTimer);
+      compassCheckTimer = null;
+    }
     if (playerLerpRafId) {
       cancelAnimationFrame(playerLerpRafId);
       playerLerpRafId = null;
@@ -8923,8 +9415,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     window.removeEventListener('resize', handleViewportChange);
     window.removeEventListener('orientationchange', handleViewportChange);
     document.removeEventListener('visibilitychange', visibility);
-    window.removeEventListener('deviceorientationabsolute', handleDeviceOrientation, true);
-    window.removeEventListener('deviceorientation', handleDeviceOrientation, true);
+    unbindOrientationListeners();
     window.removeEventListener('pagehide', pagehide);
     window.removeEventListener('storage', storageChanged);
     if (frame) cancelAnimationFrame(frame);
