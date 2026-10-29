@@ -1788,6 +1788,7 @@ export function buildLocalRoutedGeometry(waypoints, options = {}) {
       steps: [],
       stopTargets: [],
       mode: 'empty',
+      routeStatus: 'empty',
       isFallback: false,
       canSimulate: false,
     };
@@ -1817,8 +1818,20 @@ export function buildLocalRoutedGeometry(waypoints, options = {}) {
     });
   }
 
+  const useGraph = Boolean(options.useLocalFootpathGraph);
+
   for (let i = 0; i < valid.length - 1; i++) {
-    const leg = computeLocalWalkingLeg(valid[i], valid[i + 1], options);
+    const fromPt = { lat: stopTargets[i].lat, lng: stopTargets[i].lng };
+    const toPt = { lat: stopTargets[i + 1].lat, lng: stopTargets[i + 1].lng };
+    const leg = useGraph
+      ? computeLocalWalkingLeg(valid[i], valid[i + 1], options)
+      : {
+          coordinates: [
+            [fromPt.lat, fromPt.lng],
+            [toPt.lat, toPt.lng],
+          ],
+          distanceM: Math.round(haversineMeters(fromPt, toPt) || 0),
+        };
     const legCoords = enrichLegWithStreetCorners(leg.coordinates, leg.distanceM);
     const startCoordIdx = Math.max(0, coordinates.length - 1);
     for (const c of legCoords) {
@@ -1845,7 +1858,8 @@ export function buildLocalRoutedGeometry(waypoints, options = {}) {
     totalDistanceM += leg.distanceM;
   }
 
-  const steps = buildTurnStepsFromCoordinates(coordinates, stopTargets);
+  const isFallback = options.isFallback !== undefined ? Boolean(options.isFallback) : !useGraph;
+  const steps = isFallback ? [] : buildTurnStepsFromCoordinates(coordinates, stopTargets);
 
   return {
     coordinates,
@@ -1853,19 +1867,20 @@ export function buildLocalRoutedGeometry(waypoints, options = {}) {
     legs,
     steps,
     stopTargets,
-    mode: 'routed',
-    routeStatus: 'routed_foot',
-    routeStatusLabel: '🥾 Vypočteno pěším routerem (nezaručuje schůdnost ani bezpečný přístup)',
+    mode: isFallback ? 'fallback_direct' : 'routed',
+    routeStatus: isFallback ? 'fallback_direct' : 'routed_foot',
+    routeStatusLabel: isFallback
+      ? '⚠️ Orientační přímá spojnice (offline fallback)'
+      : '🥾 Vypočteno pěším routerem (nezaručuje schůdnost ani bezpečný přístup)',
     roadTypeSummary: 'Údaje o typu cesty nejsou k dispozici',
-    isFallback: false,
-    canSimulate: coordinates.length >= 2,
+    isFallback,
+    canSimulate: !isFallback && coordinates.length >= 2,
   };
 }
 
 /**
  * Fetches actual walking route geometry along footpaths using OSRM Foot Routing (`steps=true`),
- * or computes an obstacle-aware walking route around ponds and over bridges.
- * Explicitly distinguishes calculated footpath ('routed_foot' / 'routed') from straight-line fallback ('fallback_direct' / 'air_fallback') (DÁVKA 2 Bod 3.1).
+ * or returns a clean direct fallback (`isFallback: true`, `routeStatus: 'fallback_direct'`) when offline.
  */
 export async function fetchWalkingGeometry(waypoints, fetchImpl = typeof fetch !== 'undefined' ? fetch : null, options = {}) {
   if (!Array.isArray(waypoints) || waypoints.length === 0) {
@@ -1894,40 +1909,12 @@ export async function fetchWalkingGeometry(waypoints, fetchImpl = typeof fetch !
     return acc ? { ...w, lat: acc.lat, lng: acc.lng, originalLat: w.lat, originalLng: w.lng, isShoreAccess: acc.isShoreAccess } : w;
   });
 
-  // Fallback direct polyline & haversine air distance — explicitly marked as fallback (`isFallback: true`, `routeStatus: 'fallback_direct'`)!
-  const fallback = () => {
-    let dist = 0;
-    for (let i = 0; i < accessibleWaypoints.length - 1; i++) {
-      const seg = haversineMeters(accessibleWaypoints[i], accessibleWaypoints[i + 1]);
-      if (seg != null) dist += seg;
-    }
-    const stopTargets = accessibleWaypoints.map((w, idx) => ({
-      id: w.id || `wp_${idx}`,
-      title: w.title || w.label || `Bod ${idx + 1}`,
-      lat: w.lat,
-      lng: w.lng,
-      waypointIndex: idx,
-      coordIndex: idx,
-    }));
-    const coords = accessibleWaypoints.map(p => [p.lat, p.lng]);
-    return {
-      coordinates: coords,
-      distanceM: Math.round(dist),
-      legs: [],
-      steps: [],
-      stopTargets,
-      mode: 'air_fallback',
-      routeStatus: 'fallback_direct',
-      routeStatusLabel: '⚠️ Orientační vzdušná spojnice',
-      roadTypeSummary: 'Údaje o typu cesty nejsou k dispozici',
-      isFallback: true,
-      canSimulate: false,
-    };
-  };
+  // Fallback direct polyline — čistá spojnice předaných bodů s příznakem isFallback: true a routeStatus: 'fallback_direct'
+  const fallback = () => buildLocalRoutedGeometry(accessibleWaypoints, { ...options, isFallback: true, useLocalFootpathGraph: false });
 
-  // Pokud volající explicitně požaduje lokální síť cest (např. s definovanými mosty a rybníky)
+  // Pokud volající explicitně požaduje lokální síť cest (např. v unit testech s definovanými mosty a rybníky)
   if (options.useLocalFootpathGraph) {
-    return buildLocalRoutedGeometry(accessibleWaypoints, options);
+    return buildLocalRoutedGeometry(accessibleWaypoints, { ...options, isFallback: false, useLocalFootpathGraph: true });
   }
 
   const cacheKey = accessibleWaypoints.map(p => `${Number(p.lat).toFixed(4)},${Number(p.lng).toFixed(4)}`).join(';');
@@ -1941,33 +1928,32 @@ export async function fetchWalkingGeometry(waypoints, fetchImpl = typeof fetch !
 
   try {
     const coordsStr = accessibleWaypoints.map(p => `${Number(p.lng).toFixed(5)},${Number(p.lat).toFixed(5)}`).join(';');
-    // Priorita 1: OpenStreetMap Germany Foot & Hiking routing engine (pěší stezky, KČT trasy, nulová tolerance k dálnicím a silnicím bez chodníků)
-    // Priorita 2: OSRM Project Foot router jako záložní server
+    // 1. Primární pěší router: OpenStreetMap Germany Foot router (timeout 8000 ms)
+    // 2. Sekundární pěší router: OpenStreetMap Germany HikeBike / OSRM Foot router (timeout 8000 ms)
     const primaryUrl = `https://routing.openstreetmap.de/routed-foot/route/v1/foot/${coordsStr}?overview=full&geometries=geojson&steps=true`;
-    const secondaryUrl = `https://router.project-osrm.org/route/v1/foot/${coordsStr}?overview=full&geometries=geojson&steps=true`;
+    const secondaryUrl = `https://routing.openstreetmap.de/routed-HikeBike/route/v1/driving/${coordsStr}?overview=full&geometries=geojson&steps=true`;
+    const tertiaryUrl = `https://router.project-osrm.org/route/v1/foot/${coordsStr}?overview=full&geometries=geojson&steps=true`;
 
-    let data = null;
     let route = null;
 
-    for (const url of [primaryUrl, secondaryUrl]) {
+    for (const url of [primaryUrl, secondaryUrl, tertiaryUrl]) {
       let timeoutId;
       const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
       const signal = controller ? controller.signal : undefined;
       if (controller) {
-        timeoutId = setTimeout(() => controller.abort(), 3500);
+        timeoutId = setTimeout(() => controller.abort(), 8000);
       }
       try {
         const res = await fetchImpl(url, { signal });
         if (res && res.ok) {
           const json = await res.json();
           if (json?.routes?.[0]?.geometry?.coordinates?.length >= 2) {
-            data = json;
             route = json.routes[0];
             break;
           }
         }
       } catch {
-        // Try next router
+        // Zkusíme další záložní pěší router
       } finally {
         if (timeoutId) clearTimeout(timeoutId);
       }
@@ -1976,99 +1962,97 @@ export async function fetchWalkingGeometry(waypoints, fetchImpl = typeof fetch !
     if (!route) {
       return fallback();
     }
-      if (route?.geometry?.coordinates && Array.isArray(route.geometry.coordinates) && route.geometry.coordinates.length >= 2) {
-        const rawCoords = route.geometry.coordinates
-          .map(pt => normalizePointLatLng(Array.isArray(pt) ? [pt[1], pt[0]] : pt))
-          .filter(Boolean)
-          .map(norm => [norm.lat, norm.lng]);
-        // Ověříme, že vrácená trasa nevede přímou čarou přes rybník nebo řeku bez mostu;
-        // pokud OSRM vrátilo jen 2 body přes vodní plochu, zpřesníme ji lokální břehovou/mostní geometrií
-        const localCheck = buildLocalRoutedGeometry(accessibleWaypoints, options);
-        const coordinates = rawCoords.length <= accessibleWaypoints.length && localCheck.coordinates.length > rawCoords.length
-          ? localCheck.coordinates
-          : rawCoords;
+    if (route?.geometry?.coordinates && Array.isArray(route.geometry.coordinates) && route.geometry.coordinates.length >= 2) {
+      const coordinates = route.geometry.coordinates
+        .map(pt => normalizePointLatLng(Array.isArray(pt) ? [pt[1], pt[0]] : pt))
+        .filter(Boolean)
+        .map(norm => [norm.lat, norm.lng]);
 
-        // Namapujeme indexy zastávek na nejbližší vrcholy geometrie trasy
-        const stopTargets = accessibleWaypoints.map((w, wIdx) => {
-          let bestCoordIdx = 0;
-          let minD = Infinity;
-          for (let cIdx = 0; cIdx < coordinates.length; cIdx++) {
-            const d = haversineMeters(w, { lat: coordinates[cIdx][0], lng: coordinates[cIdx][1] }) ?? Infinity;
-            if (d < minD) {
-              minD = d;
-              bestCoordIdx = cIdx;
-            }
+      if (coordinates.length < 2) {
+        return fallback();
+      }
+
+      // Namapujeme indexy zastávek na nejbližší vrcholy geometrie trasy
+      const stopTargets = accessibleWaypoints.map((w, wIdx) => {
+        let bestCoordIdx = 0;
+        let minD = Infinity;
+        for (let cIdx = 0; cIdx < coordinates.length; cIdx++) {
+          const d = haversineMeters(w, { lat: coordinates[cIdx][0], lng: coordinates[cIdx][1] }) ?? Infinity;
+          if (d < minD) {
+            minD = d;
+            bestCoordIdx = cIdx;
           }
-          return {
-            id: w.id || `wp_${wIdx}`,
-            title: w.title || w.label || `Bod ${wIdx + 1}`,
-            lat: w.lat,
-            lng: w.lng,
-            isShoreAccess: Boolean(w.isShoreAccess),
-            waypointIndex: wIdx,
-            coordIndex: bestCoordIdx,
-          };
-        });
-
-        const osrmLegs = Array.isArray(route.legs) ? route.legs : [];
-        const legs = [];
-        for (let i = 0; i < accessibleWaypoints.length - 1; i++) {
-          const sIdx = stopTargets[i].coordIndex;
-          const eIdx = Math.max(sIdx, stopTargets[i + 1].coordIndex);
-          const legCoords = coordinates.slice(sIdx, eIdx + 1);
-          const legDist = osrmLegs[i]?.distance != null
-            ? Math.round(Number(osrmLegs[i].distance))
-            : computePolylineLengthM(legCoords);
-          legs.push({
-            fromIndex: i,
-            toIndex: i + 1,
-            fromId: accessibleWaypoints[i].id || `wp_${i}`,
-            toId: accessibleWaypoints[i + 1].id || `wp_${i + 1}`,
-            distanceM: legDist,
-            coordinates: legCoords.length >= 2 ? legCoords : [[accessibleWaypoints[i].lat, accessibleWaypoints[i].lng], [accessibleWaypoints[i + 1].lat, accessibleWaypoints[i + 1].lng]],
-            startCoordIdx: sIdx,
-            endCoordIdx: eIdx,
-          });
         }
+        return {
+          id: w.id || `wp_${wIdx}`,
+          title: w.title || w.label || `Bod ${wIdx + 1}`,
+          lat: w.lat,
+          lng: w.lng,
+          isShoreAccess: Boolean(w.isShoreAccess),
+          waypointIndex: wIdx,
+          coordIndex: bestCoordIdx,
+        };
+      });
 
-        const steps = extractStepsFromOsrmRoute(route, coordinates, stopTargets);
-        const distanceM = Math.round(Number(route.distance) || computePolylineLengthM(coordinates));
-        const structuredRoadClasses = [];
-        for (const legItem of osrmLegs) {
-          for (const st of legItem?.steps || []) {
-            if (Array.isArray(st?.intersections)) {
-              for (const inter of st.intersections) {
-                if (Array.isArray(inter?.classes)) {
-                  for (const cls of inter.classes) {
-                    if (typeof cls === 'string' && cls.trim()) structuredRoadClasses.push(cls.trim());
-                  }
+      const osrmLegs = Array.isArray(route.legs) ? route.legs : [];
+      const legs = [];
+      for (let i = 0; i < accessibleWaypoints.length - 1; i++) {
+        const sIdx = stopTargets[i].coordIndex;
+        const eIdx = Math.max(sIdx, stopTargets[i + 1].coordIndex);
+        const legCoords = coordinates.slice(sIdx, eIdx + 1);
+        const legDist = osrmLegs[i]?.distance != null
+          ? Math.round(Number(osrmLegs[i].distance))
+          : computePolylineLengthM(legCoords);
+        legs.push({
+          fromIndex: i,
+          toIndex: i + 1,
+          fromId: accessibleWaypoints[i].id || `wp_${i}`,
+          toId: accessibleWaypoints[i + 1].id || `wp_${i + 1}`,
+          distanceM: legDist,
+          coordinates: legCoords.length >= 2 ? legCoords : [[accessibleWaypoints[i].lat, accessibleWaypoints[i].lng], [accessibleWaypoints[i + 1].lat, accessibleWaypoints[i + 1].lng]],
+          startCoordIdx: sIdx,
+          endCoordIdx: eIdx,
+        });
+      }
+
+      const steps = extractStepsFromOsrmRoute(route, coordinates, stopTargets);
+      const distanceM = Math.round(Number(route.distance) || computePolylineLengthM(coordinates));
+      const structuredRoadClasses = [];
+      for (const legItem of osrmLegs) {
+        for (const st of legItem?.steps || []) {
+          if (Array.isArray(st?.intersections)) {
+            for (const inter of st.intersections) {
+              if (Array.isArray(inter?.classes)) {
+                for (const cls of inter.classes) {
+                  if (typeof cls === 'string' && cls.trim()) structuredRoadClasses.push(cls.trim());
                 }
               }
             }
           }
         }
-        const roadTypeSummary = structuredRoadClasses.length > 0
-          ? `Třídy cest z routeru: ${[...new Set(structuredRoadClasses)].join(', ')}`
-          : 'Údaje o typu cesty nejsou k dispozici';
-        const result = {
-          coordinates,
-          distanceM,
-          legs,
-          steps,
-          stopTargets,
-          mode: 'routed',
-          routeStatus: 'routed_foot',
-          routeStatusLabel: '🥾 Vypočteno pěším routerem (nezaručuje schůdnost ani bezpečný přístup)',
-          roadTypeSummary,
-          structuredRoadClasses: [...new Set(structuredRoadClasses)],
-          isFallback: false,
-          canSimulate: true,
-        };
-        if (fetchImpl === (typeof fetch !== 'undefined' ? fetch : null)) {
-          walkingGeometryCache.set(cacheKey, result);
-        }
-        return result;
       }
+      const roadTypeSummary = structuredRoadClasses.length > 0
+        ? `Třídy cest z routeru: ${[...new Set(structuredRoadClasses)].join(', ')}`
+        : 'Údaje o typu cesty nejsou k dispozici';
+      const result = {
+        coordinates,
+        distanceM,
+        legs,
+        steps,
+        stopTargets,
+        mode: 'routed',
+        routeStatus: 'routed_foot',
+        routeStatusLabel: '🥾 Vypočteno pěším routerem (nezaručuje schůdnost ani bezpečný přístup)',
+        roadTypeSummary,
+        structuredRoadClasses: [...new Set(structuredRoadClasses)],
+        isFallback: false,
+        canSimulate: true,
+      };
+      if (fetchImpl === (typeof fetch !== 'undefined' ? fetch : null)) {
+        walkingGeometryCache.set(cacheKey, result);
+      }
+      return result;
+    }
   } catch {
     // Return fallback on network error or timeout
   }

@@ -946,6 +946,8 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
   let lastFogPlayerPos = null;
   let lastFogRenderedMode = null;
   let lastFogCellsCount = -1;
+  let lastFogStateKey = '';
+  let isUserTouchingMap = false;
   let is3DMode = false;
   let is3dMode = false;
   let appliedTerrain3D = false;
@@ -1099,12 +1101,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
   let phase1DurationKm = Number(plannedRoute.targetKm) === 3 || Number(plannedRoute.targetKm) === 9 ? Number(plannedRoute.targetKm) : 6;
   let phase1EndMode = plannedRoute.routeType === 'oneway' ? 'custom' : 'loop';
 
-  let userExplicitlyPickedOrigin = Boolean(
-    plannedRoute.origin &&
-    plannedRoute.origin.id !== 'namesti' &&
-    plannedRoute.origin.id !== 'my-gps' &&
-    plannedRoute.origin.custom
-  );
+  let userExplicitlyPickedOrigin = false;
   let lockedExpeditionOrigin = null;
   let expeditionStartPoint = null;
 
@@ -1141,7 +1138,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     });
 
   root.innerHTML = `
-    <h1 tabindex="-1" class="visually-hidden">Mapa objevování a procházka · Czekpoint v2.0-part3</h1>
+    <h1 tabindex="-1" class="visually-hidden">Mapa objevování a procházka · Czekpoint v2.1</h1>
 
     <!-- Horní přehledový panel trasy: zobrazí se AŽ ve chvíli, kdy má uživatel vybraný alespoň 1 bod v trase -->
     <section class="phase1-top-bar" id="phase1-top-bar" hidden aria-label="Souhrn trasy, plán zastávek a spuštění výpravy">
@@ -2004,24 +2001,20 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
   let lastUserZoomAt = 0;
 
   function centerMapOnPlayer(pos = lastFix || telemetry.lastKnownPosition, animate = false) {
-    if (!follow) return;
+    if (!follow || isUserTouchingMap) return;
     if (!map || !pos || !Number.isFinite(pos.lat) || !Number.isFinite(pos.lng)) return;
-    if (typeof map.isMoving === 'function' && map.isMoving() && !animate) return;
-    const pxSize = getMapPixelSize();
-    const width = zenMode ? window.innerWidth : pxSize.x;
-    const height = zenMode ? window.innerHeight : pxSize.y;
-    const bottomObsPx = zenMode ? 0 : getBottomSheetOverlapPx();
-    const currentZoom = (typeof map.getZoom === 'function' ? map.getZoom() : null) || 16.5;
-
-    const targetCenter = computeVisibleMapCenterForPlayer(
-      pos,
-      { width, height },
-      bottomObsPx,
-      0,
-      currentZoom
-    );
-
-    setMapView(targetCenter.lat, targetCenter.lng, currentZoom, animate);
+    const bottomPad = zenMode ? 0 : Math.min(180, Math.round(getBottomSheetOverlapPx() * 0.6));
+    const opts = {
+      center: [Number(pos.lng), Number(pos.lat)],
+      padding: { top: 20, bottom: bottomPad, left: 0, right: 0 },
+    };
+    if (animate && typeof map.easeTo === 'function') {
+      map.easeTo({ ...opts, duration: 350 });
+    } else if (typeof map.jumpTo === 'function') {
+      map.jumpTo(opts);
+    } else if (typeof map.setCenter === 'function') {
+      map.setCenter(opts.center);
+    }
   }
 
   function getAvatarReferencePosition() {
@@ -2167,6 +2160,9 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     plannedRouteRenderKey = null;
     updateMapActionBar();
     renderPersonalMemoriesUi();
+    renderPlaces();
+    scheduleFog(50, true);
+    renderTrail();
     stats();
     renderQuestHud(plannedRoute.origin);
     status('Simulátor ukončen. Obnoven tvůj skutečný nedotčený pas a mapa.');
@@ -2236,7 +2232,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     const startLatLng = typeof player.getLatLng === 'function' ? player.getLatLng() : null;
     const distM = startLatLng ? (haversineMeters({ lat: startLatLng.lat, lng: startLatLng.lng }, { lat: targetLat, lng: targetLng }) ?? 999) : 999;
 
-    if (follow) {
+    if (follow && !isUserTouchingMap) {
       const nowMs = Date.now();
       const mapBusy = (typeof map.isMoving === 'function' && map.isMoving()) || (typeof map.isEasing === 'function' && map.isEasing());
       if (!mapBusy && nowMs - lastCameraEaseAt >= 250) {
@@ -2309,7 +2305,19 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     const curCenter = (typeof map.getCenter === 'function' ? map.getCenter() : null) || lastFix || getRouteOriginPoint();
     const outOfSafeBounds = !fogGeographicBounds || !isPointInsideFogSafeBounds(curCenter.lat, curCenter.lng, fogGeographicBounds, 0.65);
 
+    if (force || outOfSafeBounds || !fogGeographicBounds) {
+      fogGeographicBounds = computeFogGeographicBounds(curCenter, {
+        walkSegments: progress.walkSegments,
+        cells: progress.cells,
+      });
+    }
+
     const activePlayerPos = (active || demo || simSandboxActive) ? lastFix : null;
+    const fogStateKey = `${fogMode}|${fogGeographicBounds?.coordinates?.join(';')}|${progress.cells.length}|${progress.walkSegments.length}|${lastFix ? Math.round(lastFix.lat * 2000) + ',' + Math.round(lastFix.lng * 2000) : 'none'}`;
+    if (fogStateKey === lastFogStateKey && force !== true) {
+      return;
+    }
+
     const movedDistM = (activePlayerPos && lastFogPlayerPos)
       ? (haversineMeters(lastFogPlayerPos, activePlayerPos) ?? Infinity)
       : (activePlayerPos && !lastFogPlayerPos ? Infinity : 0);
@@ -2333,13 +2341,6 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       fogTextureCanvas.height = 1024;
     }
 
-    if (force || outOfSafeBounds) {
-      fogGeographicBounds = computeFogGeographicBounds(curCenter, {
-        walkSegments: progress.walkSegments,
-        cells: progress.cells,
-      });
-    }
-
     const fogBounds = fogGeographicBounds.coordinates;
     const result = renderFogTextureToCanvas(fogTextureCanvas, {
       fogMode,
@@ -2354,6 +2355,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       height: 1024,
     });
 
+    lastFogStateKey = fogStateKey;
     lastFogUpdateAt = nowMs;
     lastFogRenderedMode = fogMode;
     lastFogCellsCount = progress.cells.length;
@@ -2521,20 +2523,12 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
   }
 
   /**
-   * Vykreslí vrstvu značených turistických tras z OpenStreetMap jako GeoJSON v MapLibre GL JS (Bod 24).
-   * Zachovává barvu značení ze zdroje (osmc:symbol) a vizuálně ji odlišuje od plánované výpravy.
+   * Vrstva turistických tras KČT používá výhradně přesnou rastrovou vrstvu waymarked-hiking-layer,
+   * která 100% sedí na skutečných cestách v mapě (žádné umělé vzdušné čáry mimo cesty z PILOT_HIKING_TRAILS).
    */
   async function loadAndRenderHikingTrails() {
     if (!map) return;
-    try {
-      loadedHikingTrails = await getHikingTrails({
-        overpassUrl: config?.overpassUrl,
-        signal: aborter.signal,
-        fetchLive: false,
-      });
-    } catch {
-      loadedHikingTrails = [];
-    }
+    loadedHikingTrails = [];
     renderHikingTrailsOnMap();
     renderHikingTrailsLegend();
   }
@@ -2542,52 +2536,11 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
   function renderHikingTrailsOnMap() {
     if (!map) return;
     clearHikingBlazeMarkers();
-
     try {
-      const src = typeof map.getSource === 'function' ? map.getSource('hiking-trails-source') : null;
-      if (src && typeof src.setData === 'function') {
-        src.setData(buildHikingTrailsGeoJson(showHikingTrails ? loadedHikingTrails : []));
+      if (map.getLayer('waymarked-hiking-layer')) {
+        map.setLayoutProperty('waymarked-hiking-layer', 'visibility', showHikingTrails ? 'visible' : 'none');
       }
     } catch {}
-
-    if (!showHikingTrails || !maplibregl) return;
-
-    for (const trail of loadedHikingTrails) {
-      if (!Array.isArray(trail.coordinates) || trail.coordinates.length < 2) continue;
-      const parsed = trail.parsedSymbol || parseOsmcSymbol(trail.osmcSymbol, trail.colour);
-      const badgeSvg = renderOsmcBadgeSvg(trail.osmcSymbol, trail.colour, { size: 16 });
-      const midIdx = Math.floor(trail.coordinates.length / 2);
-      const midPt = trail.coordinates[midIdx];
-      if (midPt && Number.isFinite(Number(midPt[0])) && Number.isFinite(Number(midPt[1]))) {
-        const el = document.createElement('div');
-        el.className = 'czekpoint-trail-blaze-anchor';
-        el.style.width = '22px';
-        el.style.height = '22px';
-        el.innerHTML = `<span class="czekpoint-trail-blaze" title="${e(trail.name)} (${e(parsed.labelCz)})">${badgeSvg}</span>`;
-
-        const popupHtml = `
-          <div class="hiking-trail-popup">
-            <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
-              ${badgeSvg}
-              <strong>${e(trail.name)}</strong>
-            </div>
-            <div style="font-size:11px;color:#3d4a3a">
-              <span>Značení v datech: <strong>${e(parsed.labelCz)}</strong> (${e(trail.osmcSymbol || 'neuvedeno')})</span><br>
-              <span>Správce / síť: ${e(trail.operator || 'KČT')} · ${e(trail.distance || '')}</span><br>
-              <small>Zdroj: ${e(trail.sourceLabel || '© přispěvatelé OpenStreetMap (ODbL)')}</small>
-            </div>
-          </div>
-        `;
-
-        const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
-          .setLngLat([Number(midPt[1]), Number(midPt[0])]);
-        if (typeof maplibregl.Popup === 'function') {
-          marker.setPopup(new maplibregl.Popup({ offset: 12 }).setHTML(popupHtml));
-        }
-        marker.addTo(map);
-        hikingBlazeMarkers.push(marker);
-      }
-    }
   }
 
   function renderHikingTrailsLegend() {
@@ -2716,7 +2669,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
   }
 
   function applyHeadingToMapCamera(rawHeadingDeg, source = 'compass') {
-    if (!followHeadingMode || !follow || !map || disposed) return;
+    if (!followHeadingMode || !follow || isUserTouchingMap || !map || disposed) return;
     if ((typeof map.isMoving === 'function' && map.isMoving()) || (typeof map.isEasing === 'function' && map.isEasing())) {
       return;
     }
@@ -2786,8 +2739,11 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
   function bindOrientationListeners() {
     if (typeof window === 'undefined' || disposed) return;
     unbindOrientationListeners();
-    window.addEventListener('deviceorientationabsolute', handleDeviceOrientation, { capture: true });
-    window.addEventListener('deviceorientation', handleDeviceOrientation, { capture: true });
+    if ('ondeviceorientationabsolute' in window) {
+      window.addEventListener('deviceorientationabsolute', handleDeviceOrientation, { capture: true });
+    } else {
+      window.addEventListener('deviceorientation', handleDeviceOrientation, { capture: true });
+    }
     orientationListenersBound = true;
   }
 
@@ -3444,13 +3400,16 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
    * KRITICKÁ OPRAVA 2 (Hotfix v2.0.2): Start trasy VŽDY z aktuální polohy postavičky.
    */
   function getRouteOriginPoint() {
-    // 1. Aktuální poloha hráče (reálná GPS nebo simulátor)
+    // Pokud uživatel v této relaci ručně nezvolil jiné město přes Lupu a existuje lastFix, vždy vracíme polohu hráče
+    if (!userExplicitlyPickedOrigin) {
+      if (lastFix && Number.isFinite(lastFix.lat)) return normalizePointLatLng(lastFix);
+      if (lastAcceptedFix && Number.isFinite(lastAcceptedFix.lat)) return normalizePointLatLng(lastAcceptedFix);
+      if (visualPlayerPos && Number.isFinite(visualPlayerPos.lat)) return normalizePointLatLng(visualPlayerPos);
+    }
     if (lastAcceptedFix && Number.isFinite(lastAcceptedFix.lat)) return normalizePointLatLng(lastAcceptedFix);
     if (lastFix && Number.isFinite(lastFix.lat)) return normalizePointLatLng(lastFix);
     if (visualPlayerPos && Number.isFinite(visualPlayerPos.lat)) return normalizePointLatLng(visualPlayerPos);
-    // 2. Uložený start trasy
     if (plannedRoute?.origin && Number.isFinite(plannedRoute.origin.lat)) return normalizePointLatLng(plannedRoute.origin);
-    // 3. Střed mapy jako poslední záchrana
     if (map && typeof map.getCenter === 'function') {
       const c = map.getCenter();
       if (c && Number.isFinite(c.lat) && Number.isFinite(c.lng)) {
@@ -3540,23 +3499,19 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     ensureCustomMapSourcesAndLayers();
 
     const plannedPlaces = getPlannedPlaces();
-    const currentOrigin = getRouteOriginPoint();
+    const currentOrigin = (lastFix && Number.isFinite(lastFix.lat) && !userExplicitlyPickedOrigin)
+      ? normalizePointLatLng(lastFix)
+      : getRouteOriginPoint();
     const unvisitedPlaces = plannedPlaces.filter(p => !isStopVisited(p));
-    const isOffRouteRecalc = Boolean(opts?.offRoute && (active || demo || simSandboxActive) && lastFix && Number.isFinite(lastFix.lat));
     const isLoop = plannedRoute.routeType === 'loop' && plannedPlaces.length >= 2;
-    const loopReturnOrigin = getExpeditionStartPoint() || currentOrigin;
+    const loopReturnOrigin = lockedExpeditionOrigin
+      ? normalizePointLatLng(lockedExpeditionOrigin)
+      : getRouteOriginPoint();
 
-    const activeStopsForRoute = (active || demo || simSandboxActive) && unvisitedPlaces.length > 0
-      ? unvisitedPlaces
-      : plannedPlaces;
-
-    const allWaypoints = isOffRouteRecalc
-      ? (unvisitedPlaces.length > 0
-          ? [currentOrigin, ...unvisitedPlaces, ...(isLoop ? [loopReturnOrigin] : [])]
-          : (isLoop ? [currentOrigin, loopReturnOrigin] : [currentOrigin]))
-      : (isLoop
-          ? [currentOrigin, ...activeStopsForRoute, loopReturnOrigin]
-          : [currentOrigin, ...activeStopsForRoute]);
+    const activeStopsForRoute = unvisitedPlaces.length > 0 ? unvisitedPlaces : plannedPlaces;
+    const allWaypoints = isLoop
+      ? [currentOrigin, ...activeStopsForRoute, loopReturnOrigin]
+      : [currentOrigin, ...activeStopsForRoute];
 
     const geomKey = getRouteGeometryKey(allWaypoints);
     const renderKey = `${geomKey}|r${plannedRoute.radiusKm || 10}|l${isLoop ? 1 : 0}|gm${appSettings.gameMode || 'gamified'}`;
@@ -3567,21 +3522,13 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     let coords = null;
     let isFallbackGeom = true;
     if (plannedPlaces.length > 0) {
-      // Okamžitě (0 ms) vykreslíme lokální pěší geometrii, aby uživatel ihned po kliknutí viděl fialovou trasu z místa, kde stojí
-      const instantLocal = buildLocalRoutedGeometry(allWaypoints, { isFallback: false });
-      if (instantLocal && Array.isArray(instantLocal.coordinates) && instantLocal.coordinates.length >= 2) {
-        lastRoutedGeometry = instantLocal;
-        plannedRouteCoords = instantLocal.coordinates;
-        applyPlannedRouteGeoJsonToMap(instantLocal.coordinates, false);
-      }
-
       let geomResult = null;
       const calcTaskId = beginMapTask('⏳ Počítám trasu…');
       try {
         geomResult = await getCachedWalkingGeometry(allWaypoints, geomKey);
         if (token !== plannedRouteRenderToken || disposed) return;
         if (!geomResult || !geomResult.coordinates || geomResult.coordinates.length < 2) {
-          geomResult = instantLocal || buildLocalRoutedGeometry(allWaypoints, { isFallback: true });
+          geomResult = buildLocalRoutedGeometry(allWaypoints, { isFallback: true });
         }
       } finally {
         endMapTask(calcTaskId);
@@ -4890,9 +4837,6 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     if ($('walk-demo')) $('walk-demo').textContent = demo ? 'Ukončit ukázku' : 'Ukázka pohybu';
 
     renderPlannerBasketAndXray();
-    renderPlaces();
-    scheduleFog();
-    renderTrail();
     renderNextCheckpointHero(lastFix || telemetry.lastKnownPosition);
     renderPhase1AndPhase4Ui(lastFix || telemetry.lastKnownPosition);
     updateMapActionBar();
@@ -6089,6 +6033,11 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     }
 
     stats();
+    if (stateChanged || result.accepted) {
+      renderPlaces({ skipListRebuild: true });
+      scheduleFog();
+      renderTrail();
+    }
     renderQuestHud(validFix || fix);
 
     if (!result.accepted) {
@@ -6315,45 +6264,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         });
       }
 
-      if (!map.getSource('hiking-trails-source')) {
-        map.addSource('hiking-trails-source', {
-          type: 'geojson',
-          data: { type: 'FeatureCollection', features: [] },
-        });
-      }
-      if (!map.getLayer('hiking-trails-casing')) {
-        map.addLayer({
-          id: 'hiking-trails-casing',
-          type: 'line',
-          source: 'hiking-trails-source',
-          layout: {
-            'line-cap': 'round',
-            'line-join': 'round',
-          },
-          paint: {
-            'line-color': '#ffffff',
-            'line-width': 7,
-            'line-opacity': 0.85,
-          },
-        });
-      }
-      if (!map.getLayer('hiking-trails-line')) {
-        map.addLayer({
-          id: 'hiking-trails-line',
-          type: 'line',
-          source: 'hiking-trails-source',
-          layout: {
-            'line-cap': 'round',
-            'line-join': 'round',
-          },
-          paint: {
-            'line-color': ['coalesce', ['get', 'hex'], '#d92b2b'],
-            'line-width': 4,
-            'line-opacity': 0.92,
-            'line-dasharray': [2.5, 1.5],
-          },
-        });
-      }
+      // Vrstva KČT používá výhradně přesnou rastrovou vrstvu waymarked-hiking-layer (žádné umělé čáry z PILOT_HIKING_TRAILS)
 
       if (!map.getSource('walked-segments-source')) {
         map.addSource('walked-segments-source', {
@@ -6625,8 +6536,11 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       try {
         ensureCustomMapSourcesAndLayers();
         if (appliedTerrain3D !== is3dMode) {
-          map.setTerrain({ source: 'terrain-dem', exaggeration: 1.9 });
+          map.setTerrain({ source: 'terrain-dem', exaggeration: 1.8 });
           appliedTerrain3D = true;
+        }
+        if (map.getLayer('terrain-hillshade')) {
+          map.setLayoutProperty('terrain-hillshade', 'visibility', 'visible');
         }
         if (map.getLayer('czekpoint-3d-buildings')) {
           map.setLayoutProperty('czekpoint-3d-buildings', 'visibility', 'visible');
@@ -6820,7 +6734,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       if (appliedTerrain3D !== is3dMode) {
         try {
           if (is3dMode) {
-            map.setTerrain({ source: 'terrain-dem', exaggeration: 1.9 });
+            map.setTerrain({ source: 'terrain-dem', exaggeration: 1.8 });
             appliedTerrain3D = true;
           } else {
             map.setTerrain(null);
@@ -6829,6 +6743,9 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         } catch {}
       }
       try {
+        if (map.getLayer('terrain-hillshade')) {
+          map.setLayoutProperty('terrain-hillshade', 'visibility', 'visible');
+        }
         if (map.getLayer('czekpoint-3d-buildings')) {
           map.setLayoutProperty('czekpoint-3d-buildings', 'visibility', is3dMode ? 'visible' : 'none');
         }
@@ -6946,30 +6863,46 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       renderTrail();
       renderPlaces({ skipListRebuild: true });
     });
-    // KRITICKÁ OPRAVA 1 (Hotfix v2.0.1): Okamžité uvolnění mapy při dotyku uživatele (dragstart, pitchstart, mousedown, touchstart)
+    // KRITICKÁ OPRAVA 1 & v2.1: Okamžité uvolnění mapy při dotyku uživatele (isUserTouchingMap)
     map.on('dragstart', (e) => {
       if (!e || e.originalEvent) {
+        isUserTouchingMap = true;
         follow = false;
         updateRecenterButtonVisibility();
       }
+    });
+    map.on('dragend', () => {
+      isUserTouchingMap = false;
     });
     map.on('pitchstart', (e) => {
       if (!e || e.originalEvent) {
+        isUserTouchingMap = true;
         follow = false;
         updateRecenterButtonVisibility();
       }
+    });
+    map.on('pitchend', () => {
+      isUserTouchingMap = false;
     });
     map.on('mousedown', (e) => {
       if (e && e.originalEvent) {
+        isUserTouchingMap = true;
         follow = false;
         updateRecenterButtonVisibility();
       }
     });
+    map.on('mouseup', () => {
+      isUserTouchingMap = false;
+    });
     map.on('touchstart', (e) => {
       if (e && e.originalEvent) {
+        isUserTouchingMap = true;
         follow = false;
         updateRecenterButtonVisibility();
       }
+    });
+    map.on('touchend', () => {
+      isUserTouchingMap = false;
     });
     // DÁVKA 3 (Bod 2.2): Při otočení mapy (ve 2D, 3D i při ručním otočení) okamžitě přepočítáme směrovou šipku u Avatara a okrajový štítek
     map.on('rotate', () => {
@@ -7116,6 +7049,56 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     });
 
     loadAndRenderHikingTrails();
+
+    // v2.1 (Bod 2.1): Okamžité zaměření polohy při otevření mapy
+    if (typeof navigator !== 'undefined' && navigator.geolocation && !simSandboxActive && !demo) {
+      try {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            if (disposed || simSandboxActive || demo) return;
+            const norm = normalizePointLatLng({
+              lat: pos?.coords?.latitude,
+              lng: pos?.coords?.longitude,
+            });
+            if (!norm) return;
+            const initialFix = {
+              lat: norm.lat,
+              lng: norm.lng,
+              accuracy: Number.isFinite(pos?.coords?.accuracy) ? pos.coords.accuracy : 15,
+              altitude: pos?.coords?.altitude ?? null,
+              speed: pos?.coords?.speed ?? 0,
+              timestamp: pos?.timestamp || Date.now(),
+              simulated: false,
+            };
+            lastFix = initialFix;
+            visualPlayerPos = { lat: norm.lat, lng: norm.lng };
+            if (player) {
+              player.setLatLng([norm.lat, norm.lng]);
+              setPlayerMarkerVisible(true);
+            }
+            if (!userExplicitlyPickedOrigin) {
+              plannedRoute.origin = {
+                id: 'my-gps',
+                label: 'Moje aktuální GPS poloha',
+                lat: norm.lat,
+                lng: norm.lng,
+              };
+              const origLabel = $('wiz-active-origin-label');
+              if (origLabel) origLabel.textContent = 'Moje aktuální GPS poloha';
+              if (follow) {
+                centerMapOnPlayer(norm, false);
+              }
+              plannedRouteRenderKey = null;
+              renderPlannedRouteOnMap(true);
+            }
+            renderPlaces({ skipListRebuild: true });
+            scheduleFog(100, true);
+          },
+          () => {},
+          { enableHighAccuracy: true, maximumAge: 15000, timeout: 8000 }
+        );
+      } catch {}
+    }
   } else if (!maplibregl) {
     $('walk-map').innerHTML = `
       <div class="map-missing-fallback" role="alert" style="padding:24px;text-align:center">
@@ -9257,6 +9240,9 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         progress = emptyWalk();
         currentExpedition = null;
       }
+      renderPlaces();
+      scheduleFog(50, true);
+      renderTrail();
       stats();
       status(storageError || 'Ukázka skončila.');
       if (map) {
@@ -9890,6 +9876,9 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         storageError = '';
       } catch (err) { storageError = err.message; }
       renderPersonalMemoriesUi();
+      renderPlaces();
+      scheduleFog(50, true);
+      renderTrail();
       stats();
       status(storageError || 'Průzkum se změnil v jiné kartě.');
     }
@@ -9899,6 +9888,9 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
   // ZADÁNÍ #10 (Bod 1.1): Při prvním otevření mapy NEVYBÍRÁME automaticky zastávky,
   // aby horní lišta „Půjdeš ~X hod...“ nesvítila bez kontextu hned po otevření!
   renderTripWizardUi();
+  renderPlaces();
+  scheduleFog(50, true);
+  renderTrail();
   stats();
   renderQuestHud(plannedRoute.origin);
   renderPhase1AndPhase4Ui(lastFix || plannedRoute.origin);

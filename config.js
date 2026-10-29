@@ -14,7 +14,7 @@ export const config = {
   terrainEncoding: 'terrarium',
   terrainTileSize: 256,
   terrainMaxZoom: 15,
-  terrainExaggeration: 1.9,
+  terrainExaggeration: 1.8,
   openFreeMapVectorUrl: 'https://tiles.openfreemap.org/planet',
   firebase: {
     enabled: false,
@@ -165,7 +165,7 @@ export function buildMapLibreStyle(cfg = config, options = {}) {
         type: 'raster',
         tiles: [cfg?.waymarkedTrailsUrl || 'https://tile.waymarkedtrails.org/hiking/{z}/{x}/{y}.png'],
         tileSize: 256,
-        maxzoom: 18,
+        maxzoom: 17,
         attribution: '&copy; <a href="https://hiking.waymarkedtrails.org">Waymarked Trails</a>',
       },
       'terrain-dem': terrainDemSource,
@@ -210,7 +210,7 @@ export function buildMapLibreStyle(cfg = config, options = {}) {
         type: 'raster',
         source: 'waymarked-hiking',
         minzoom: 0,
-        maxzoom: 22,
+        maxzoom: 19,
         layout: {
           visibility: showHikingTrails ? 'visible' : 'none',
         },

@@ -188,7 +188,7 @@ export function simulateWalkPlayback(waypointsOrRoute, speedKmH = 5, places = []
     });
     sharedRoute = options.sharedRoute || (
       stopList.length >= 2
-        ? buildLocalRoutedGeometry(stopList, options)
+        ? buildLocalRoutedGeometry(stopList, { useLocalFootpathGraph: true, isFallback: false, ...options })
         : {
             coordinates: [[stopList[0].lat, stopList[0].lng]],
             distanceM: 0,
@@ -564,7 +564,7 @@ export class GpsSimulator {
 
   walkTo(coords) {
     this.autopilotPauseReason = '';
-    const leg = buildLocalRoutedGeometry([this.position, coords]);
+    const leg = buildLocalRoutedGeometry([this.position, coords], { useLocalFootpathGraph: true, isFallback: false });
     if (leg.coordinates && leg.coordinates.length >= 2) {
       this.autopilotWaypoints = [{
         id: 'walk-to-target',
@@ -662,7 +662,7 @@ export class GpsSimulator {
     let activeRoute = candidateRoute;
 
     if (!activeRoute || !Array.isArray(activeRoute.coordinates) || activeRoute.coordinates.length < 2) {
-      activeRoute = buildLocalRoutedGeometry([this.position, ...this.autopilotWaypoints]);
+      activeRoute = buildLocalRoutedGeometry([this.position, ...this.autopilotWaypoints], { useLocalFootpathGraph: true, isFallback: false });
     }
 
     // Bod 26: Pokud pěší trasu nelze získat, autopilot se pozastaví a vysvětlí důvod
@@ -679,7 +679,7 @@ export class GpsSimulator {
     const firstCoord = { lat: activeRoute.coordinates[0][0], lng: activeRoute.coordinates[0][1] };
     let fullCoords = activeRoute.coordinates.map(([lat, lng]) => ({ lat, lng }));
     if ((haversineMeters(this.position, firstCoord) ?? 0) > 15) {
-      const leadIn = buildLocalRoutedGeometry([this.position, firstCoord]);
+      const leadIn = buildLocalRoutedGeometry([this.position, firstCoord], { useLocalFootpathGraph: true, isFallback: false });
       if (leadIn.coordinates && leadIn.coordinates.length >= 2) {
         const leadPts = leadIn.coordinates.slice(0, -1).map(([lat, lng]) => ({ lat, lng }));
         fullCoords = [...leadPts, ...fullCoords];
