@@ -361,6 +361,326 @@ export function buildHikingTrailsGeoJson(trails = []) {
   };
 }
 
+export const EMPTY_TRANSPARENT_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+
+/**
+ * Vypočítá geografický obdélník pokrývající oblast pohledu a prošlé trasy.
+ * Vrátí { west, north, east, south, coordinates } pro MapLibre zdroj typu image.
+ * coordinates: [[west, north], [east, north], [east, south], [west, south]]
+ */
+export function computeFogGeographicBounds(center, options = {}) {
+  const cLat = Number.isFinite(Number(center?.lat)) ? Number(center.lat) : 49.6014;
+  const cLng = Number.isFinite(Number(center?.lng)) ? Number(center.lng) : 13.8644;
+  let minLat = cLat, maxLat = cLat, minLng = cLng, maxLng = cLng;
+
+  const maxLocalDeltaLat = 0.04;
+  const maxLocalDeltaLng = 0.06;
+
+  const segs = Array.isArray(options.walkSegments) ? options.walkSegments : [];
+  for (const seg of segs) {
+    if (!Array.isArray(seg)) continue;
+    for (const pt of seg) {
+      const lat = Number(pt?.lat ?? pt?.[0]);
+      const lng = Number(pt?.lng ?? pt?.[1]);
+      if (
+        Number.isFinite(lat) &&
+        Number.isFinite(lng) &&
+        Math.abs(lat - cLat) <= maxLocalDeltaLat &&
+        Math.abs(lng - cLng) <= maxLocalDeltaLng
+      ) {
+        minLat = Math.min(minLat, lat);
+        maxLat = Math.max(maxLat, lat);
+        minLng = Math.min(minLng, lng);
+        maxLng = Math.max(maxLng, lng);
+      }
+    }
+  }
+
+  const cells = Array.isArray(options.cells) ? options.cells : [];
+  for (const cid of cells) {
+    try {
+      const c = cellCenter(cid);
+      if (
+        c &&
+        Number.isFinite(c.lat) &&
+        Number.isFinite(c.lng) &&
+        Math.abs(c.lat - cLat) <= maxLocalDeltaLat &&
+        Math.abs(c.lng - cLng) <= maxLocalDeltaLng
+      ) {
+        minLat = Math.min(minLat, c.lat);
+        maxLat = Math.max(maxLat, c.lat);
+        minLng = Math.min(minLng, c.lng);
+        maxLng = Math.max(maxLng, c.lng);
+      }
+    } catch {}
+  }
+
+  const padLat = Math.max(0.045, Number(options.padLat || 0.045));
+  const padLng = Math.max(0.065, Number(options.padLng || 0.065));
+
+  let west = minLng - padLng;
+  let east = maxLng + padLng;
+  let south = minLat - padLat;
+  let north = maxLat + padLat;
+
+  const minSpanLat = Math.max(0.08, Number(options.minSpanLat || 0.10));
+  const minSpanLng = Math.max(0.12, Number(options.minSpanLng || 0.15));
+
+  if (north - south < minSpanLat) {
+    const mid = (north + south) / 2;
+    north = mid + minSpanLat / 2;
+    south = mid - minSpanLat / 2;
+  }
+  if (east - west < minSpanLng) {
+    const mid = (east + west) / 2;
+    east = mid + minSpanLng / 2;
+    west = mid - minSpanLng / 2;
+  }
+
+  west = Number(west.toFixed(6));
+  east = Number(east.toFixed(6));
+  south = Number(south.toFixed(6));
+  north = Number(north.toFixed(6));
+
+  const coordinates = [
+    [west, north],
+    [east, north],
+    [east, south],
+    [west, south],
+  ];
+
+  return {
+    west,
+    north,
+    east,
+    south,
+    coordinates,
+  };
+}
+
+/**
+ * Zjistí, zda se zadaný bod nachází uvnitř vnitřního bezpečnostního okraje fogBounds.
+ */
+export function isPointInsideFogSafeBounds(lat, lng, bounds, marginRatio = 0.65) {
+  if (!bounds || !Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) return false;
+  const nLat = Number(lat);
+  const nLng = Number(lng);
+  const latSpan = bounds.north - bounds.south;
+  const lngSpan = bounds.east - bounds.west;
+  if (latSpan <= 0 || lngSpan <= 0) return false;
+  const latMargin = latSpan * (1 - marginRatio) / 2;
+  const lngMargin = lngSpan * (1 - marginRatio) / 2;
+  return (
+    nLat >= bounds.south + latMargin &&
+    nLat <= bounds.north - latMargin &&
+    nLng >= bounds.west + lngMargin &&
+    nLng <= bounds.east - lngMargin
+  );
+}
+
+/**
+ * Převod z geografických souřadnic [lng, lat] do pixelových souřadnic offscreen textury mlhy.
+ */
+export function projectLngLatToFogPixels(lng, lat, bounds, width = 1024, height = 1024) {
+  if (!bounds) return { x: width / 2, y: height / 2 };
+  const lngSpan = Math.max(1e-6, bounds.east - bounds.west);
+  const latSpan = Math.max(1e-6, bounds.north - bounds.south);
+  const x = ((Number(lng) - bounds.west) / lngSpan) * width;
+  const y = ((bounds.north - Number(lat)) / latSpan) * height;
+  return { x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 };
+}
+
+/**
+ * Převod poloměru v metrech na poloměr v pixelech textury mlhy.
+ */
+export function metersToFogPixels(radiusMeters, bounds, midLat = 49.6, width = 1024, height = 1024) {
+  const r = Math.max(1, Number(radiusMeters) || FOG_REVEAL_RADIUS_M);
+  if (!bounds) return 8;
+  const latRad = (Number(midLat) * Math.PI) / 180;
+  const degLatPerMeter = 1 / 111320;
+  const degLngPerMeter = 1 / Math.max(1e-6, 111320 * Math.cos(latRad));
+  const latSpan = Math.max(1e-6, bounds.north - bounds.south);
+  const lngSpan = Math.max(1e-6, bounds.east - bounds.west);
+  const py = (r * degLatPerMeter / latSpan) * height;
+  const px = (r * degLngPerMeter / lngSpan) * width;
+  return Math.max(4, Math.round((px + py) / 2));
+}
+
+/**
+ * Vykreslí geografickou texturu mlhy do canvasu.
+ * Zachovává mezery mezi segmenty (nepřemosťuje výpadky GPS).
+ */
+export function renderFogTextureToCanvas(canvas, options = {}) {
+  if (!canvas) return null;
+  const {
+    walkSegments = [],
+    cells = [],
+    revealedFeatures = [],
+    activeLocalReveals = [],
+    lastFix = null,
+    revealRadiusM = options.fogRevealRadiusM ?? FOG_REVEAL_RADIUS_M,
+    width = canvas.width || 1024,
+    height = canvas.height || 1024,
+  } = options;
+  const fogMode = options.fogMode || options.mode || 'explore';
+  const fogBounds = options.fogBounds || options.bounds;
+
+  if (canvas.width !== width) canvas.width = width;
+  if (canvas.height !== height) canvas.height = height;
+
+  const ctx = typeof canvas.getContext === 'function' ? canvas.getContext('2d') : null;
+  if (!ctx) {
+    return { dataUrl: canvas.toDataURL ? canvas.toDataURL() : '', bounds: fogBounds, isEmpty: true };
+  }
+
+  ctx.clearRect(0, 0, width, height);
+
+  if (fogMode === 'none' || fogMode === 'clean') {
+    return {
+      dataUrl: canvas.toDataURL ? canvas.toDataURL('image/png') : EMPTY_TRANSPARENT_PNG,
+      bounds: fogBounds,
+      isEmpty: true,
+    };
+  }
+
+  // 1. Podklad pergamenu
+  if (fogMode === 'full') {
+    ctx.fillStyle = 'rgba(235, 224, 202, 0.98)';
+    ctx.fillRect(0, 0, width, height);
+  } else {
+    // 'explore'
+    ctx.fillStyle = 'rgba(224, 210, 178, 0.86)';
+    ctx.fillRect(0, 0, width, height);
+
+    if (typeof ctx.createRadialGradient === 'function') {
+      const vignette = ctx.createRadialGradient(width / 2, height / 2, width * 0.25, width / 2, height / 2, width * 0.72);
+      vignette.addColorStop(0, 'rgba(252, 246, 232, 0.05)');
+      vignette.addColorStop(1, 'rgba(148, 116, 72, 0.16)');
+      ctx.fillStyle = vignette;
+      ctx.fillRect(0, 0, width, height);
+    }
+  }
+
+  // 2. Vykrojení odkrytých oblastí přes destination-out
+  ctx.save();
+  ctx.globalCompositeOperation = 'destination-out';
+
+  const midLat = fogBounds ? (fogBounds.north + fogBounds.south) / 2 : 49.6;
+  const radPx = metersToFogPixels(revealRadiusM, fogBounds, midLat, width, height);
+
+  const drawShapes = (expandPx = 0, alpha = 1.0) => {
+    ctx.fillStyle = `rgba(0, 0, 0, ${alpha})`;
+    ctx.strokeStyle = `rgba(0, 0, 0, ${alpha})`;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = Math.max(4, (radPx + expandPx) * 2);
+
+    // a) Prošlé segmenty chůze — KAŽDÝ ZVLÁŠŤ (výpadky GPS zanechávají skutečnou mezeru)
+    if (Array.isArray(walkSegments)) {
+      for (const seg of walkSegments) {
+        if (!Array.isArray(seg) || seg.length === 0) continue;
+        if (seg.length === 1) {
+          const pt = Array.isArray(seg[0]) ? { lat: seg[0][0], lng: seg[0][1] } : seg[0];
+          const px = projectLngLatToFogPixels(pt.lng, pt.lat, fogBounds, width, height);
+          ctx.beginPath();
+          ctx.arc(px.x, px.y, Math.max(4, radPx + expandPx), 0, Math.PI * 2);
+          ctx.fill();
+        } else {
+          ctx.beginPath();
+          for (let i = 0; i < seg.length; i++) {
+            const pt = Array.isArray(seg[i]) ? { lat: seg[i][0], lng: seg[i][1] } : seg[i];
+            const px = projectLngLatToFogPixels(pt.lng, pt.lat, fogBounds, width, height);
+            if (i === 0) ctx.moveTo(px.x, px.y);
+            else ctx.lineTo(px.x, px.y);
+          }
+          ctx.stroke();
+        }
+      }
+    }
+
+    // b) Odkryté buňky
+    if (Array.isArray(cells) && cells.length > 0) {
+      ctx.beginPath();
+      for (const cid of cells) {
+        try {
+          const cCenter = cellCenter(cid);
+          if (cCenter) {
+            const px = projectLngLatToFogPixels(cCenter.lng, cCenter.lat, fogBounds, width, height);
+            ctx.moveTo(px.x + radPx + expandPx, px.y);
+            ctx.arc(px.x, px.y, Math.max(4, radPx + expandPx), 0, Math.PI * 2);
+          }
+        } catch {}
+      }
+      ctx.fill();
+    }
+
+    // c) Ověřené odhalené polygony přírodních objektů (např. rybníky)
+    if (Array.isArray(revealedFeatures)) {
+      for (const fid of revealedFeatures) {
+        const feat = BUILTIN_NATURAL_FEATURES.find(f => f.id === fid);
+        if (!feat || !Array.isArray(feat.polygon) || feat.polygon.length < 3) continue;
+        ctx.beginPath();
+        for (let i = 0; i < feat.polygon.length; i++) {
+          const v = feat.polygon[i];
+          const px = projectLngLatToFogPixels(v[1], v[0], fogBounds, width, height);
+          if (i === 0) ctx.moveTo(px.x, px.y);
+          else ctx.lineTo(px.x, px.y);
+        }
+        ctx.closePath();
+        ctx.fill();
+        if (expandPx > 0) {
+          ctx.lineWidth = expandPx * 2;
+          ctx.stroke();
+        }
+      }
+    }
+
+    // d) Lokální rozšířená odkrytí (lesy, velké vody)
+    if (Array.isArray(activeLocalReveals)) {
+      for (const locRev of activeLocalReveals) {
+        if (!locRev || !Array.isArray(locRev.polygon) || locRev.polygon.length < 3 || !locRev.center) continue;
+        ctx.save();
+        ctx.beginPath();
+        for (let i = 0; i < locRev.polygon.length; i++) {
+          const v = locRev.polygon[i];
+          const px = projectLngLatToFogPixels(v[1], v[0], fogBounds, width, height);
+          if (i === 0) ctx.moveTo(px.x, px.y);
+          else ctx.lineTo(px.x, px.y);
+        }
+        ctx.closePath();
+        ctx.clip();
+        const centerPx = projectLngLatToFogPixels(locRev.center.lng, locRev.center.lat, fogBounds, width, height);
+        const locRadPx = metersToFogPixels(locRev.radiusM || 130, fogBounds, locRev.center.lat, width, height) + expandPx;
+        ctx.beginPath();
+        ctx.arc(centerPx.x, centerPx.y, Math.max(6, locRadPx), 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+
+    // e) Okamžitá poloha uživatele
+    if (lastFix && Number.isFinite(lastFix.lat) && Number.isFinite(lastFix.lng)) {
+      const px = projectLngLatToFogPixels(lastFix.lng, lastFix.lat, fogBounds, width, height);
+      ctx.beginPath();
+      ctx.arc(px.x, px.y, Math.max(4, radPx + expandPx), 0, Math.PI * 2);
+      ctx.fill();
+    }
+  };
+
+  // Jemnější přechodový lem a plné jádro
+  drawShapes(Math.max(2, Math.round(radPx * 0.3)), 0.45);
+  drawShapes(0, 1.0);
+
+  ctx.restore();
+
+  const dataUrl = canvas.toDataURL ? canvas.toDataURL('image/png') : EMPTY_TRANSPARENT_PNG;
+  return {
+    dataUrl,
+    bounds: fogBounds,
+    isEmpty: false,
+  };
+}
+
 export function mountWalk(root, routes, config = defaultAppConfig, actions = {}) {
   const maplibregl = typeof window !== 'undefined' ? window.maplibregl : null;
   const { onAddVisit } = actions;
@@ -407,9 +727,10 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
   let editDraft = null;
   let editModalOpen = false;
 
-  let map = null, fog = null, player = null, accuracyRing = null;
-  let fogMaskCanvas = null;
-  let fogInnerCanvas = null;
+  let map = null, player = null, accuracyRing = null;
+  let fogTextureCanvas = null;
+  let fogGeographicBounds = null;
+  let fogRenderTimer = null;
   let is3DMode = false;
   let terrainFallbackTriggered = false;
   let footprintMarkers = [];
@@ -591,7 +912,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     });
 
   root.innerHTML = `
-    <h1 tabindex="-1" class="visually-hidden">Mapa objevování a procházka · Czekpoint v2.0-part1</h1>
+    <h1 tabindex="-1" class="visually-hidden">Mapa objevování a procházka · Czekpoint v2.0-part2</h1>
 
     <!-- Horní přehledový panel trasy: zobrazí se AŽ ve chvíli, kdy má uživatel vybraný alespoň 1 bod v trase -->
     <section class="phase1-top-bar" id="phase1-top-bar" hidden aria-label="Souhrn trasy, plán zastávek a spuštění výpravy">
@@ -1206,21 +1527,21 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
               <button type="button" class="wizard-mode-btn ${appSettings.gameMode === 'explorer' ? 'active' : ''}" data-modal-game-mode="explorer">
                 <span class="wmode-icon">🧭</span>
                 <span class="wmode-text">
-                  <strong>🧭 Objevování</strong>
+                  <strong>🧭 1. Objevování</strong>
                   <small>Zahalená mapa, bez čáry na zemi, jen kompas a orientace v terénu.</small>
                 </span>
               </button>
               <button type="button" class="wizard-mode-btn ${appSettings.gameMode === 'gamified' ? 'active' : ''}" data-modal-game-mode="gamified">
                 <span class="wmode-icon">📜</span>
                 <span class="wmode-text">
-                  <strong>📜 Výprava s pergamenem</strong>
+                  <strong>📜 2. Výprava s pergamenem</strong>
                   <small>Doporučeno: poloprůhledný pergamen, stopy pohorek, KČT značky a razítka.</small>
                 </span>
               </button>
               <button type="button" class="wizard-mode-btn ${appSettings.gameMode === 'casual' ? 'active' : ''}" data-modal-game-mode="casual">
                 <span class="wmode-icon">🗺️</span>
                 <span class="wmode-text">
-                  <strong>🗺️ Turistická mapa</strong>
+                  <strong>🗺️ 3. Turistická mapa</strong>
                   <small>Čistá otevřená turistická mapa bez mlhy, vše viditelné od začátku.</small>
                 </span>
               </button>
@@ -1676,270 +1997,77 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
   }
 
   /**
-   * Vykreslí Mapu objevování (pergamen) nad instancí MapLibre GL JS pomocí map.project([lng, lat]):
-   * - Souvislý pás chůze (`progress.walkSegments`) s poloměrem `FOG_REVEAL_RADIUS_M` (65 m) a jedním jemným vnějším okrajem.
-   * - Malé rybníky v `progress.revealedFeatures` se odkryjí v celém svém přirozeném polygonu břehu.
-   * - Aktivní lesy a velké vodní plochy v `activeLocalReveals` odhalí pouze lokální výsek oříznutý polygonem objektu.
+   * Vykreslí geograficky ukotvenou texturu mlhy (MapLibre raster vrstva `czekpoint-fog-layer`).
+   * Textura pokrývá geografický obdélník fogGeographicBounds a MapLibre ji automaticky promítá
+   * přímo na 3D síť terénu (terrain-dem). Odkrytá místa proto 100% lícují ve 2D i 3D pohledu!
    */
-  function drawFog() {
-    if (!map || disposed || !fog) return;
-    const canvas = fog;
-    const size = getMapPixelSize();
-    if (size.x <= 0 || size.y <= 0) return;
-    const ratio = Math.min(window.devicePixelRatio || 1, 2);
+  function drawFog(force = false) {
+    if (!map || disposed) return;
+    if (typeof document === 'undefined') return;
 
-    if (canvas.width !== Math.round(size.x * ratio) || canvas.height !== Math.round(size.y * ratio)) {
-      canvas.width = Math.round(size.x * ratio);
-      canvas.height = Math.round(size.y * ratio);
-      canvas.style.width = `${size.x}px`;
-      canvas.style.height = `${size.y}px`;
+    if (!fogTextureCanvas) {
+      fogTextureCanvas = document.createElement('canvas');
+      fogTextureCanvas.width = 1024;
+      fogTextureCanvas.height = 1024;
     }
 
-    const ctx = canvas.getContext('2d');
-    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-    ctx.clearRect(0, 0, size.x, size.y);
-
-    if (fogMode === 'none') {
-      canvas.style.display = 'none';
-      return;
-    }
-    canvas.style.display = 'block';
-
-    const anchorScreen = projectLatLngToContainerPoint(49.6018, 13.8644);
-    const ox = -anchorScreen.x;
-    const oy = -anchorScreen.y;
-    const mod = (v, m) => ((v % m) + m) % m;
-
-    if (fogMode === 'full') {
-      ctx.fillStyle = 'rgba(232, 221, 197, 0.98)';
-      ctx.fillRect(0, 0, size.x, size.y);
-    } else {
-      // 'explore' -> Mapa objevování: teplý pergamen (0.86), pod kterým jemně (~14–18 %) prosvítají značky KČT a vrstevnice
-      ctx.fillStyle = 'rgba(224, 210, 178, 0.86)';
-      ctx.fillRect(0, 0, size.x, size.y);
-
-      const vignette = ctx.createRadialGradient(
-        size.x / 2,
-        size.y / 2,
-        Math.min(size.x, size.y) * 0.25,
-        size.x / 2,
-        size.y / 2,
-        Math.max(size.x, size.y) * 0.78
-      );
-      vignette.addColorStop(0, 'rgba(252, 246, 232, 0.08)');
-      vignette.addColorStop(1, 'rgba(148, 116, 72, 0.18)');
-      ctx.fillStyle = vignette;
-      ctx.fillRect(0, 0, size.x, size.y);
-
-      ctx.strokeStyle = 'rgba(128, 98, 58, 0.11)';
-      ctx.lineWidth = 1;
-      const contourGap = 44;
-      for (let y = -mod(oy, contourGap) - contourGap; y < size.y + contourGap; y += contourGap) {
-        const worldRow = Math.round((y + oy) / contourGap);
-        ctx.beginPath();
-        for (let x = -12; x <= size.x + 12; x += 14) {
-          const wx = x + ox;
-          const yy = y + Math.sin(wx / 110 + worldRow * 0.85) * 6.5 + Math.cos(wx / 46 + worldRow) * 2.2;
-          if (x === -12) ctx.moveTo(x, yy);
-          else ctx.lineTo(x, yy);
-        }
-        ctx.stroke();
-      }
-
-      ctx.fillStyle = 'rgba(136, 104, 62, 0.07)';
-      const grainStep = 64;
-      for (let gx = -mod(ox, grainStep); gx < size.x; gx += grainStep) {
-        for (let gy = -mod(oy, grainStep); gy < size.y; gy += grainStep) {
-          const wx = Math.round((gx + ox) / grainStep);
-          const wy = Math.round((gy + oy) / grainStep);
-          const hash = Math.abs(Math.sin(wx * 12.9898 + wy * 78.233) * 43758.5453) % 1;
-          const px = gx + hash * 42;
-          const py = gy + ((hash * 17) % 1) * 42;
-          ctx.fillRect(px, py, 1.5, 1.5);
-        }
-      }
+    const curCenter = (typeof map.getCenter === 'function' ? map.getCenter() : null) || lastFix || getRouteOriginPoint();
+    if (
+      force ||
+      !fogGeographicBounds ||
+      !isPointInsideFogSafeBounds(curCenter.lat, curCenter.lng, fogGeographicBounds, 0.65)
+    ) {
+      fogGeographicBounds = computeFogGeographicBounds(curCenter, {
+        walkSegments: progress.walkSegments,
+        cells: progress.cells,
+      });
     }
 
-    const hasRevealedContent =
-      progress.cells.length > 0 ||
-      (Array.isArray(progress.walkSegments) && progress.walkSegments.length > 0) ||
-      (Array.isArray(progress.revealedFeatures) && progress.revealedFeatures.length > 0) ||
-      activeLocalReveals.length > 0;
+    const result = renderFogTextureToCanvas(fogTextureCanvas, {
+      fogMode,
+      fogBounds: fogGeographicBounds,
+      walkSegments: progress.walkSegments,
+      cells: progress.cells,
+      revealedFeatures: progress.revealedFeatures,
+      activeLocalReveals,
+      lastFix: (active || demo || simSandboxActive) ? lastFix : null,
+      revealRadiusM: FOG_REVEAL_RADIUS_M,
+      width: 1024,
+      height: 1024,
+    });
 
-    if (!hasRevealedContent) return;
-
-    if (!fogMaskCanvas && typeof document !== 'undefined') {
-      fogMaskCanvas = document.createElement('canvas');
-    }
-    if (!fogInnerCanvas && typeof document !== 'undefined') {
-      fogInnerCanvas = document.createElement('canvas');
-    }
-
-    if (fogMaskCanvas && fogInnerCanvas) {
-      if (fogMaskCanvas.width !== canvas.width || fogMaskCanvas.height !== canvas.height) {
-        fogMaskCanvas.width = canvas.width;
-        fogMaskCanvas.height = canvas.height;
+    try {
+      if (map.getLayer('czekpoint-fog-layer')) {
+        map.setLayoutProperty('czekpoint-fog-layer', 'visibility', fogMode === 'none' ? 'none' : 'visible');
       }
-      if (fogInnerCanvas.width !== canvas.width || fogInnerCanvas.height !== canvas.height) {
-        fogInnerCanvas.width = canvas.width;
-        fogInnerCanvas.height = canvas.height;
+      const src = map.getSource('czekpoint-fog-source');
+      if (src && result?.dataUrl) {
+        if (typeof src.updateImage === 'function') {
+          src.updateImage({
+            url: result.dataUrl,
+            coordinates: fogGeographicBounds.coordinates,
+          });
+        }
+        if (typeof src.setCoordinates === 'function') {
+          src.setCoordinates(fogGeographicBounds.coordinates);
+        }
       }
-
-      const mctx = fogMaskCanvas.getContext('2d');
-      mctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-      mctx.clearRect(0, 0, size.x, size.y);
-
-      const ictx = fogInnerCanvas.getContext('2d');
-      ictx.setTransform(ratio, 0, 0, ratio, 0, 0);
-      ictx.clearRect(0, 0, size.x, size.y);
-
-      const refCenter = (typeof map.getCenter === 'function' ? map.getCenter() : null) || { lat: 49.6018, lng: 13.8644 };
-      const refLat = refCenter.lat || 49.6018;
-      const curPos = lastFix || telemetry.lastKnownPosition || refCenter;
-      const nearbyPoiCount = getAllAvailablePlaces().filter(p => (haversineMeters(curPos, p) ?? Infinity) <= 1500).length;
-      const effectiveRevealRadiusM = nearbyPoiCount <= 2 ? 85 : FOG_REVEAL_RADIUS_M;
-      const radPx = metersToPx(refLat, effectiveRevealRadiusM);
-
-      const drawUnifiedShapes = (targetCtx, expandPx = 0) => {
-        targetCtx.lineCap = 'round';
-        targetCtx.lineJoin = 'round';
-        targetCtx.fillStyle = '#000000';
-        targetCtx.strokeStyle = '#000000';
-
-        // 1. Souvislé pásy chůze (`walkSegments`)
-        const segments = Array.isArray(progress.walkSegments) ? progress.walkSegments : [];
-        targetCtx.lineWidth = Math.max(8, (radPx + expandPx) * 2);
-        for (const seg of segments) {
-          if (!Array.isArray(seg) || seg.length === 0) continue;
-          if (seg.length === 1) {
-            const pt = Array.isArray(seg[0]) ? seg[0] : [seg[0].lat, seg[0].lng];
-            const cp = projectLatLngToContainerPoint(pt[0], pt[1]);
-            targetCtx.beginPath();
-            targetCtx.arc(cp.x, cp.y, Math.max(4, radPx + expandPx), 0, Math.PI * 2);
-            targetCtx.fill();
-          } else {
-            targetCtx.beginPath();
-            for (let i = 0; i < seg.length; i++) {
-              const pt = Array.isArray(seg[i]) ? seg[i] : [seg[i].lat, seg[i].lng];
-              const cp = projectLatLngToContainerPoint(pt[0], pt[1]);
-              if (i === 0) targetCtx.moveTo(cp.x, cp.y);
-              else targetCtx.lineTo(cp.x, cp.y);
-            }
-            targetCtx.stroke();
-          }
-        }
-
-        // 2. Uložené buňky průzkumu (`progress.cells`)
-        if (progress.cells.length > 0) {
-          targetCtx.beginPath();
-          for (const id of progress.cells) {
-            const center = cellCenter(id);
-            const cp = projectLatLngToContainerPoint(center.lat, center.lng);
-            const cellRad = Math.max(4, radPx + expandPx);
-            if (cp.x + cellRad < -30 || cp.x - cellRad > size.x + 30 || cp.y + cellRad < -30 || cp.y - cellRad > size.y + 30) {
-              continue;
-            }
-            targetCtx.moveTo(cp.x + cellRad, cp.y);
-            targetCtx.arc(cp.x, cp.y, cellRad, 0, Math.PI * 2);
-          }
-          targetCtx.fill();
-        }
-
-        // 3. Odhalené přírodní objekty podle jejich tvaru (`progress.revealedFeatures`)
-        const revealedIds = Array.isArray(progress.revealedFeatures) ? progress.revealedFeatures : [];
-        for (const fid of revealedIds) {
-          const feat = BUILTIN_NATURAL_FEATURES.find(f => f.id === fid);
-          if (!feat || !Array.isArray(feat.polygon) || feat.polygon.length < 3) continue;
-          targetCtx.beginPath();
-          for (let i = 0; i < feat.polygon.length; i++) {
-            const v = feat.polygon[i];
-            const cp = projectLatLngToContainerPoint(v[0], v[1]);
-            if (i === 0) targetCtx.moveTo(cp.x, cp.y);
-            else targetCtx.lineTo(cp.x, cp.y);
-          }
-          targetCtx.closePath();
-          targetCtx.fill();
-          if (expandPx > 0) {
-            targetCtx.lineWidth = expandPx * 2;
-            targetCtx.stroke();
-          }
-        }
-
-        // 4. Lokální rozšířené odkrytí v lese nebo u velké vodní plochy
-        for (const locRev of activeLocalReveals) {
-          if (!locRev || !Array.isArray(locRev.polygon) || locRev.polygon.length < 3 || !locRev.center) continue;
-          targetCtx.save();
-          targetCtx.beginPath();
-          for (let i = 0; i < locRev.polygon.length; i++) {
-            const v = locRev.polygon[i];
-            const cp = projectLatLngToContainerPoint(v[0], v[1]);
-            if (i === 0) targetCtx.moveTo(cp.x, cp.y);
-            else targetCtx.lineTo(cp.x, cp.y);
-          }
-          targetCtx.closePath();
-          targetCtx.clip();
-
-          const centerPx = projectLatLngToContainerPoint(locRev.center.lat, locRev.center.lng);
-          const localRadPx = metersToPx(locRev.center.lat, locRev.radiusM || 130) + expandPx;
-          targetCtx.beginPath();
-          targetCtx.arc(centerPx.x, centerPx.y, Math.max(8, localRadPx), 0, Math.PI * 2);
-          targetCtx.fill();
-          targetCtx.restore();
-        }
-      };
-
-      const drawSoftRadialStamp = (targetCtx, x, y, radiusPx) => {
-        const softRad = Math.max(8, radiusPx * 1.35);
-        if (x + softRad < -40 || x - softRad > size.x + 40 || y + softRad < -40 || y - softRad > size.y + 40) {
-          return;
-        }
-        const grad = targetCtx.createRadialGradient(x, y, 0, x, y, softRad);
-        grad.addColorStop(0.0, 'rgba(0, 0, 0, 1)');
-        grad.addColorStop(0.5, 'rgba(0, 0, 0, 0.92)');
-        grad.addColorStop(0.75, 'rgba(0, 0, 0, 0.45)');
-        grad.addColorStop(1.0, 'rgba(0, 0, 0, 0)');
-        targetCtx.fillStyle = grad;
-        targetCtx.beginPath();
-        targetCtx.arc(x, y, softRad, 0, Math.PI * 2);
-        targetCtx.fill();
-      };
-
-      ictx.save();
-      drawUnifiedShapes(ictx, -Math.min(10, radPx * 0.24));
-      ictx.restore();
-
-      mctx.save();
-      for (const id of progress.cells) {
-        const center = cellCenter(id);
-        const cp = projectLatLngToContainerPoint(center.lat, center.lng);
-        drawSoftRadialStamp(mctx, cp.x, cp.y, radPx);
+    } catch {
+      if (is3DMode) {
+        setMap3DMode(false, {
+          fallbackMessage: '3D vrstva mlhy není na tomto zařízení dostupná, pokračuji ve 2D zobrazení.',
+        });
       }
-      if (lastFix && Number.isFinite(lastFix.lat) && Number.isFinite(lastFix.lng)) {
-        const cp = projectLatLngToContainerPoint(lastFix.lat, lastFix.lng);
-        drawSoftRadialStamp(mctx, cp.x, cp.y, radPx);
-      }
-      mctx.globalAlpha = 0.22;
-      drawUnifiedShapes(mctx, radPx * 0.35);
-      mctx.globalAlpha = 0.45;
-      drawUnifiedShapes(mctx, radPx * 0.16);
-      mctx.globalAlpha = 0.75;
-      drawUnifiedShapes(mctx, 0);
-      mctx.globalAlpha = 1.0;
-      mctx.setTransform(1, 0, 0, 1, 0, 0);
-      mctx.drawImage(fogInnerCanvas, 0, 0);
-      mctx.restore();
-
-      ctx.save();
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.globalCompositeOperation = 'destination-out';
-      ctx.drawImage(fogMaskCanvas, 0, 0);
-      ctx.restore();
     }
   }
 
-  function scheduleFog() {
-    if (frame) cancelAnimationFrame(frame);
-    frame = requestAnimationFrame(() => { frame = null; drawFog(); });
+  function scheduleFog(delayMs = 40) {
+    if (disposed) return;
+    if (fogRenderTimer) clearTimeout(fogRenderTimer);
+    fogRenderTimer = setTimeout(() => {
+      fogRenderTimer = null;
+      drawFog();
+    }, delayMs);
   }
 
   function clearFootprintMarkers() {
@@ -5600,6 +5728,42 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
           },
         });
       }
+
+      if (!map.getSource('czekpoint-fog-source')) {
+        const initCenter = lastFix || telemetry.lastKnownPosition || getRouteOriginPoint() || { lat: 49.6014, lng: 13.8644 };
+        fogGeographicBounds = computeFogGeographicBounds(initCenter, {
+          walkSegments: progress.walkSegments,
+          cells: progress.cells,
+        });
+        map.addSource('czekpoint-fog-source', {
+          type: 'image',
+          url: EMPTY_TRANSPARENT_PNG,
+          coordinates: fogGeographicBounds.coordinates,
+        });
+      }
+      if (!map.getLayer('czekpoint-fog-layer')) {
+        const beforeLayerId = map.getLayer('planned-route-casing')
+          ? 'planned-route-casing'
+          : map.getLayer('hiking-trails-casing')
+          ? 'hiking-trails-casing'
+          : map.getLayer('walked-segments-casing')
+          ? 'walked-segments-casing'
+          : undefined;
+
+        map.addLayer(
+          {
+            id: 'czekpoint-fog-layer',
+            type: 'raster',
+            source: 'czekpoint-fog-source',
+            paint: {
+              'raster-opacity': 1.0,
+              'raster-fade-duration': 0,
+              'raster-resampling': 'linear',
+            },
+          },
+          beforeLayerId
+        );
+      }
     } catch {}
   }
 
@@ -5674,19 +5838,10 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         status(opts.fallbackMessage || '🗺️ Přepnuto na přehledné 2D zobrazení mapy shora.');
       }
     }
-    scheduleFog();
   }
 
   if (maplibregl) {
     const center = progress.cells.length ? cellCenter(progress.cells.at(-1)) : { lat: 49.6014, lng: 13.8644 };
-
-    fog = document.createElement('canvas');
-    fog.className = 'walk-fog';
-    fog.setAttribute('aria-hidden', 'true');
-    const mapEl = $('walk-map');
-    if (mapEl && mapEl.parentNode) {
-      mapEl.parentNode.insertBefore(fog, mapEl.nextSibling);
-    }
 
     map = new maplibregl.Map({
       container: $('walk-map'),
@@ -5804,6 +5959,12 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     map.on('error', (ev) => {
       if (disposed || !map) return;
       const srcId = ev?.sourceId || ev?.source?.id || '';
+      if (srcId === 'czekpoint-fog-source' && is3DMode) {
+        setMap3DMode(false, {
+          fallbackMessage: '3D vrstva mlhy není na tomto zařízení dostupná, pokračuji ve 2D zobrazení.',
+        });
+        return;
+      }
       if (srcId === 'terrain-dem' && is3DMode && !terrainFallbackTriggered) {
         terrainFallbackTriggered = true;
         setMap3DMode(false, {
@@ -5859,11 +6020,6 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       }, 700);
     }
 
-    map.on('move', scheduleFog);
-    map.on('zoom', scheduleFog);
-    map.on('pitch', scheduleFog);
-    map.on('rotate', scheduleFog);
-    map.on('resize', scheduleFog);
     map.on('zoomstart', () => {
       userZoomLocked = true;
       lastUserZoomAt = Date.now();
@@ -5882,6 +6038,10 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       renderPlaces({ skipListRebuild: true });
       updateScanMapAreaButtonState();
       scheduleMapPanAutoFetch();
+      const c = map.getCenter();
+      if (c && !isPointInsideFogSafeBounds(c.lat, c.lng, fogGeographicBounds, 0.65)) {
+        scheduleFog(50);
+      }
     });
 
     map.on('click', ev => {
@@ -8776,7 +8936,12 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     }
     placeMarkersById.clear();
     try { player?.remove?.(); } catch {}
-    try { fog?.remove?.(); } catch {}
+    if (fogRenderTimer) clearTimeout(fogRenderTimer);
+    if (fogTextureCanvas) {
+      fogTextureCanvas.width = 0;
+      fogTextureCanvas.height = 0;
+      fogTextureCanvas = null;
+    }
     fakeGpsSim?.destroy();
     try { map?.remove?.(); } catch {}
     map = null;

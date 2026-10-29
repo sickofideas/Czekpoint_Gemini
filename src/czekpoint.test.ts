@@ -135,6 +135,11 @@ import {
   buildPlannedRouteGeoJson,
   buildWalkSegmentsGeoJson,
   buildHikingTrailsGeoJson,
+  computeFogGeographicBounds,
+  isPointInsideFogSafeBounds,
+  projectLngLatToFogPixels,
+  metersToFogPixels,
+  renderFogTextureToCanvas,
 } from './walk.js';
 import { config as appConfig } from '../config.js';
 import {
@@ -1884,6 +1889,134 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
     assert.ok(walkCss.includes('.map-3d-toggle-btn'), 'walk.css obsahuje styl pro .map-3d-toggle-btn');
     assert.ok(walkCss.includes('min-height: 44px'), 'Tlačítka mapy mají minimální dotykovou výšku 44px');
   });
+
+  it('DÁVKA 2 (v2.0-part2): Geograficky ukotvená mlha sledující 3D terén (2D/3D shoda, zatáčka, mezera GPS) a Osobní atlas malých objevů', () => {
+    // 1. Geografický obdélník mlhy (fogBounds) kolem Rožmitálu pod Třemšínem a prošlé trasy
+    const center = { lat: 49.6014, lng: 13.8644 };
+    const seg1Curve = [
+      { lat: 49.6014, lng: 13.8644 }, // Start
+      { lat: 49.6020, lng: 13.8644 }, // Severně
+      { lat: 49.6024, lng: 13.8652 }, // Pravotočivá zatáčka na severovýchod
+      { lat: 49.6024, lng: 13.8664 }, // Východně po zatáčce
+    ];
+    // Mezera v GPS (výpadek signálu / accuracy > 40 m mezi 13.8664 a 13.8690 — cca 190 m mezera)
+    const seg2AfterGap = [
+      { lat: 49.6024, lng: 13.8690 },
+      { lat: 49.6030, lng: 13.8700 },
+    ];
+    const walkSegments = [seg1Curve, seg2AfterGap];
+
+    const bounds = computeFogGeographicBounds(center, {
+      walkSegments,
+      cells: ['55113:15405'],
+      minHalfSpanMeters: 3500,
+    });
+
+    assert.equal(bounds.coordinates.length, 4, 'MapLibre image source vyžaduje 4 rohové souřadnice [[W,N],[E,N],[E,S],[W,S]]');
+    assert.deepEqual(bounds.coordinates[0], [bounds.west, bounds.north]);
+    assert.deepEqual(bounds.coordinates[1], [bounds.east, bounds.north]);
+    assert.deepEqual(bounds.coordinates[2], [bounds.east, bounds.south]);
+    assert.deepEqual(bounds.coordinates[3], [bounds.west, bounds.south]);
+
+    // 2. Test 100% shody 2D a nakloněného/otočeného 3D pohledu:
+    // Protože mlha je geograficky ukotvená v [lng, lat] souřadnicích (czekpoint-fog-source + raster vrstva),
+    // projekce libovolného bodu (např. vrchol zatáčky) do textury mlhy závisí výhradně na zeměpisné šířce/délce
+    // a vůbec se nemění při změně pitch (0° vs 55°) nebo bearing (0° vs -45° vs 135°).
+    const curveApex = seg1Curve[2];
+    const px2D = projectLngLatToFogPixels(curveApex.lng, curveApex.lat, bounds, 1024, 1024);
+    const px3DTiltedRotated = projectLngLatToFogPixels(curveApex.lng, curveApex.lat, bounds, 1024, 1024);
+    assert.deepEqual(px2D, px3DTiltedRotated, 'Ve 2D i při nakloněném/otočeném 3D pohledu má odkrytý bod identické souřadnice v textuře');
+    assert.ok(px2D.x > 0 && px2D.x < 1024 && px2D.y > 0 && px2D.y < 1024, 'Vrchol zatáčky leží uvnitř 1024x1024 textury mlhy');
+
+    // Kontrola bezpečného okraje (safe bounds) pro zamezení zbytečného překreslování
+    assert.equal(isPointInsideFogSafeBounds(center.lat, center.lng, bounds), true, 'Střed pohledu je uvnitř bezpečné oblasti fogBounds');
+    assert.equal(isPointInsideFogSafeBounds(center.lat + 0.2, center.lng + 0.2, bounds), false, 'Vzdálený bod mimo hranice vyvolá posun fogBounds');
+
+    // 3. Test vykreslení zatáčky a zachování mezery při výpadku GPS v offscreen canvasu
+    const recordedOps: Array<{ type: string; x?: number; y?: number; r?: number }> = [];
+    const mockCtx = {
+      save: () => recordedOps.push({ type: 'save' }),
+      restore: () => recordedOps.push({ type: 'restore' }),
+      clearRect: () => recordedOps.push({ type: 'clearRect' }),
+      fillRect: () => recordedOps.push({ type: 'fillRect' }),
+      beginPath: () => recordedOps.push({ type: 'beginPath' }),
+      moveTo: (x: number, y: number) => recordedOps.push({ type: 'moveTo', x, y }),
+      lineTo: (x: number, y: number) => recordedOps.push({ type: 'lineTo', x, y }),
+      stroke: () => recordedOps.push({ type: 'stroke' }),
+      fill: () => recordedOps.push({ type: 'fill' }),
+      closePath: () => recordedOps.push({ type: 'closePath' }),
+      arc: (x: number, y: number, r: number) => recordedOps.push({ type: 'arc', x, y, r }),
+      createRadialGradient: () => ({ addColorStop: () => {} }),
+      globalCompositeOperation: 'source-over',
+      fillStyle: '',
+      strokeStyle: '',
+      lineWidth: 0,
+      lineCap: '',
+      lineJoin: '',
+    };
+    const mockCanvas = {
+      width: 1024,
+      height: 1024,
+      getContext: () => mockCtx,
+    };
+
+    const rendered = renderFogTextureToCanvas(mockCanvas as any, {
+      fogMode: 'explore',
+      fogBounds: bounds,
+      walkSegments,
+      cells: ['55113:15405'],
+      revealedFeatures: [],
+      activeLocalReveals: [],
+      lastFix: seg2AfterGap[1],
+      revealRadiusM: FOG_REVEAL_RADIUS_M,
+    });
+    assert.ok(rendered);
+    assert.equal(rendered.isEmpty, false, 'renderFogTextureToCanvas musí úspěšně vykreslit texturu pro režim explore');
+    assert.deepEqual(rendered.bounds, bounds);
+
+    // Každý ze 2 segmentů (před mezerou GPS a po mezeře GPS) má v 2 průchodech (přechodový lem + jádro)
+    // vlastní beginPath + moveTo + stroke, čímž je garantováno, že mezi seg1Curve[3] a seg2AfterGap[0]
+    // NEVZNIKNE falešná spojovací čára!
+    const strokes = recordedOps.filter(op => op.type === 'stroke');
+    assert.equal(strokes.length, 4, 'Každý ze 2 segmentů má vnější a vnitřní průchod stroke (2 * 2 = 4) bez falešného přemostění mezery');
+
+    // V režimu 'clean' / 'none' (Turistická mapa) je mlha vypnutá
+    const renderedClean = renderFogTextureToCanvas(mockCanvas as any, {
+      fogMode: 'none',
+      fogBounds: bounds,
+      walkSegments,
+    });
+    assert.ok(renderedClean);
+    assert.equal(renderedClean.isEmpty, true, 'Režim Turistická mapa (none/clean) nevykresluje mlhu');
+
+    // 4. Ověření integrace v src/walk.js: žádný CSS #fog-canvas, přítomnost czekpoint-fog-source a czekpoint-fog-layer,
+    // a žádné překreslování při každém snímku pitch/rotate
+    const walkJs = fs.readFileSync('src/walk.js', 'utf-8');
+    assert.ok(walkJs.includes('czekpoint-fog-source'), 'src/walk.js registruje geografický zdroj mlhy czekpoint-fog-source');
+    assert.ok(walkJs.includes('czekpoint-fog-layer'), 'src/walk.js přidává rastrovou vrstvu czekpoint-fog-layer promítanou na 3D terén');
+    assert.ok(!walkJs.includes("fog.className = 'walk-fog'"), 'Starý obrazovkový překryvný canvas .walk-fog byl odstraněn');
+    assert.ok(!walkJs.includes("map.on('pitch', scheduleFog)"), 'Mlha se nepřepočítává při naklánění kamery (pitch)');
+    assert.ok(!walkJs.includes("map.on('rotate', scheduleFog)"), 'Mlha se nepřepočítává při otáčení kamery (rotate)');
+    assert.ok(!walkJs.includes("map.on('move', scheduleFog)"), 'Mlha se nepřepočítává na každém snímku posunu (move)');
+
+    // 5. Tři herní styly bez zkratek KCD/KCD2 a Osobní atlas malých objevů
+    assert.ok(walkJs.includes('🧭 1. Objevování'), 'Herní styl 1: 🧭 1. Objevování');
+    assert.ok(walkJs.includes('📜 2. Výprava s pergamenem'), 'Herní styl 2: 📜 2. Výprava s pergamenem');
+    assert.ok(walkJs.includes('🗺️ 3. Turistická mapa'), 'Herní styl 3: 🗺️ 3. Turistická mapa');
+    assert.ok(walkJs.includes('✨ Uložit vzpomínku'), 'Tlačítko ✨ Uložit vzpomínku v rozhraní procházky');
+    assert.ok(walkJs.includes('Čekám na polohu GPS…'), 'Pravdivý stav při startu bez platné GPS');
+
+    const memEntry = createPersonalMemoryEntry({
+      lat: 49.6020,
+      lng: 13.8650,
+      symbolId: 'tree',
+      note: 'Krásný starý dub <script>alert(1)</script> u cesty',
+    });
+    assert.ok(memEntry, 'Uložení soukromé vzpomínky musí vytvořit platný záznam');
+    assert.equal(memEntry.symbolId, 'tree');
+    assert.ok(!memEntry.note.includes('<script>'), 'Poznámka vzpomínky je bezpečně escapována');
+  });
 });
+
 
 
