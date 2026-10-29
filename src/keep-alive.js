@@ -134,10 +134,26 @@ export function interpolateBackgroundGap({
     return { recovered: false, points: [], distanceM: 0, elapsedSec };
   }
 
-  const directDistM = distanceMeters(
-    { lat: prevFix.lat, lng: prevFix.lng },
-    { lat: nextFix.lat, lng: nextFix.lng }
-  );
+  const normPt = (pt) => {
+    if (!pt) return null;
+    let lat = Array.isArray(pt) ? Number(pt[0]) : Number(pt.lat ?? pt.latitude);
+    let lng = Array.isArray(pt) ? Number(pt[1]) : Number(pt.lng ?? pt.lon ?? pt.longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    if (lat < 25 && lng > 45) {
+      const tmp = lat;
+      lat = lng;
+      lng = tmp;
+    }
+    return { lat, lng };
+  };
+
+  const pPrev = normPt(prevFix);
+  const pNext = normPt(nextFix);
+  if (!pPrev || !pNext) {
+    return { recovered: false, points: [], distanceM: 0, elapsedSec };
+  }
+
+  const directDistM = distanceMeters(pPrev, pNext);
 
   if (directDistM < 18 || directDistM > maxDistM) {
     return { recovered: false, points: [], distanceM: directDistM, elapsedSec };
@@ -151,17 +167,16 @@ export function interpolateBackgroundGap({
   // Zkusíme najít úsek na naplánované trase mezi prevFix a nextFix
   let pathVertices = [];
   if (Array.isArray(plannedCoords) && plannedCoords.length >= 2) {
+    const normPlanned = plannedCoords.map(normPt).filter(Boolean);
     let idxStart = -1;
     let idxEnd = -1;
     let bestStartDist = Infinity;
     let bestEndDist = Infinity;
 
-    for (let i = 0; i < plannedCoords.length; i++) {
-      const c = plannedCoords[i];
-      const lat = Array.isArray(c) ? c[0] : c.lat;
-      const lng = Array.isArray(c) ? c[1] : c.lng;
-      const dStart = distanceMeters({ lat: prevFix.lat, lng: prevFix.lng }, { lat, lng });
-      const dEnd = distanceMeters({ lat: nextFix.lat, lng: nextFix.lng }, { lat, lng });
+    for (let i = 0; i < normPlanned.length; i++) {
+      const c = normPlanned[i];
+      const dStart = distanceMeters(pPrev, c);
+      const dEnd = distanceMeters(pNext, c);
       if (dStart < bestStartDist) {
         bestStartDist = dStart;
         idxStart = i;
@@ -175,21 +190,19 @@ export function interpolateBackgroundGap({
     // Pokud byl hráč blízko naplánované trasy (< 160 m), vedeme interpolaci po ní
     if (bestStartDist <= 160 && bestEndDist <= 160 && idxStart !== -1 && idxEnd !== -1 && idxStart !== idxEnd) {
       const step = idxStart <= idxEnd ? 1 : -1;
-      pathVertices.push({ lat: prevFix.lat, lng: prevFix.lng });
+      pathVertices.push({ lat: pPrev.lat, lng: pPrev.lng });
       for (let i = idxStart; i !== idxEnd + step; i += step) {
-        const c = plannedCoords[i];
-        const lat = Array.isArray(c) ? c[0] : c.lat;
-        const lng = Array.isArray(c) ? c[1] : c.lng;
-        pathVertices.push({ lat, lng });
+        const c = normPlanned[i];
+        pathVertices.push({ lat: c.lat, lng: c.lng });
       }
-      pathVertices.push({ lat: nextFix.lat, lng: nextFix.lng });
+      pathVertices.push({ lat: pNext.lat, lng: pNext.lng });
     }
   }
 
   if (pathVertices.length < 2) {
     pathVertices = [
-      { lat: prevFix.lat, lng: prevFix.lng },
-      { lat: nextFix.lat, lng: nextFix.lng },
+      { lat: pPrev.lat, lng: pPrev.lng },
+      { lat: pNext.lat, lng: pNext.lng },
     ];
   }
 

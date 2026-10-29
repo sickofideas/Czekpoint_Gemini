@@ -429,26 +429,29 @@ export class GpsSimulator {
       this.mode = this.pausedModeBackup;
     }
     this.pausedModeBackup = null;
-    this.lastWallTickMs = Date.now();
+    this.lastTickAt = Date.now();
+    this.lastWallTickMs = this.lastTickAt;
     this.statusMessage = '▶ Simulátor pokračuje.';
     this.updateStatusUi?.();
   }
 
   triggerLoopTick(now = Date.now()) {
     if (!this.isOpen || this.isPaused) return;
-    if (this.lastWallTickMs && now - this.lastWallTickMs < 480) {
+    const prevTickAt = this.lastTickAt || this.lastWallTickMs || 0;
+    if (prevTickAt && now - prevTickAt < 480) {
       return;
     }
-    const elapsedSec = this.lastWallTickMs
-      ? Math.min(20, Math.max(0.2, (now - this.lastWallTickMs) / 1000))
-      : 1;
+    const elapsedMs = prevTickAt ? (now - prevTickAt) : 1000;
+    const elapsedSec = Math.min(20, Math.max(0.2, elapsedMs / 1000));
+    this.lastTickAt = now;
     this.lastWallTickMs = now;
     this.tick(now, elapsedSec);
   }
 
   startLoop() {
     this.stopLoop();
-    this.lastWallTickMs = Date.now();
+    this.lastTickAt = Date.now();
+    this.lastWallTickMs = this.lastTickAt;
     if (typeof Worker !== 'undefined' && typeof Blob !== 'undefined' && typeof URL !== 'undefined') {
       try {
         const workerCode = `
@@ -490,6 +493,7 @@ export class GpsSimulator {
       clearInterval(this.timer);
       this.timer = null;
     }
+    this.lastTickAt = 0;
     this.lastWallTickMs = 0;
   }
 

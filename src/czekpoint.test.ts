@@ -147,8 +147,18 @@ import {
   computeOffscreenIndicatorPlacement,
   checkWebGLSupport,
   buildWebGLErrorBannerHtml,
+  normalizePointLatLng,
+  toMapLibreLngLat,
 } from './walk.js';
-import { config as appConfig } from '../config.js';
+import {
+  config as appConfig,
+  normalizePointLatLng as configNormalizePointLatLng,
+  toMapLibreLngLat as configToMapLibreLngLat,
+} from '../config.js';
+import {
+  normalizePointLatLng as plannerNormalizePointLatLng,
+  toMapLibreLngLat as plannerToMapLibreLngLat,
+} from './planner.js';
 import {
   SILENT_WAV_BASE64,
   startBackgroundTracking,
@@ -2359,6 +2369,90 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
     assert.ok(walkJs.includes('https://tiles.openfreemap.org/planet'), 'Vektorový zdroj openfreemap-v používá OpenFreeMap planet');
     assert.ok(walkJs.includes("id: 'czekpoint-3d-buildings'"), 'Vrstva czekpoint-3d-buildings vykresluje 3D budovy (fill-extrusion)');
     assert.ok(configJs.includes('terrainExaggeration: 1.9'), 'config.js má terrainExaggeration: 1.9');
+  });
+
+  it('KRITICKÁ OPRAVA 2 (Hotfix v2.0.2) — Ochrana proti záměně [lng, lat], výpočet a vykreslení trasy z aktuální polohy postavičky a spolehlivý běh při zhasnutém displeji', () => {
+    const walkJs = fs.readFileSync('src/walk.js', 'utf-8');
+    const plannerJs = fs.readFileSync('src/planner.js', 'utf-8');
+    const keepAliveJs = fs.readFileSync('src/keep-alive.js', 'utf-8');
+    const gpsSimJs = fs.readFileSync('src/gps-simulator.js', 'utf-8');
+
+    // 1. Ochrana proti záměně lat a lng (Česko: lat 47..52, lng 11..20)
+    const swappedObj = { lat: 13.8644, lng: 49.6014 };
+    const swappedArr = [13.8644, 49.6014];
+    const normalObj = { lat: 49.6014, lng: 13.8644 };
+    const normalArr = [49.6014, 13.8644];
+
+    for (const normFn of [normalizePointLatLng, configNormalizePointLatLng, plannerNormalizePointLatLng]) {
+      assert.deepEqual(normFn(swappedObj), { lat: 49.6014, lng: 13.8644 }, 'normalizePointLatLng musí automaticky opravit prohozené { lat: 13.86, lng: 49.60 }');
+      assert.deepEqual(normFn(swappedArr), { lat: 49.6014, lng: 13.8644 }, 'normalizePointLatLng musí automaticky opravit prohozené pole [13.86, 49.60]');
+      assert.deepEqual(normFn(normalObj), { lat: 49.6014, lng: 13.8644 });
+      assert.deepEqual(normFn(normalArr), { lat: 49.6014, lng: 13.8644 });
+    }
+
+    for (const mlFn of [toMapLibreLngLat, configToMapLibreLngLat, plannerToMapLibreLngLat]) {
+      assert.deepEqual(mlFn(swappedObj), [13.8644, 49.6014], 'toMapLibreLngLat musí vždy vrátit [lng, lat] i při prohozeném vstupu');
+      assert.deepEqual(mlFn(swappedArr), [13.8644, 49.6014], 'toMapLibreLngLat musí vždy vrátit [lng, lat] pro MapLibre GeoJSON');
+      assert.deepEqual(mlFn(normalObj), [13.8644, 49.6014]);
+      assert.deepEqual(mlFn(normalArr), [13.8644, 49.6014]);
+    }
+
+    // 2. buildPlannedRouteGeoJson produkuje striktní [lng, lat] LineString i při smíšených vstupech
+    const routeGeoJson = buildPlannedRouteGeoJson([
+      [49.6014, 13.8644],
+      [13.8626, 49.5993], // prohozený bod [lng, lat]
+      { lat: 13.8518, lng: 49.5991 } as any, // prohozený objekt
+    ]);
+    assert.equal(routeGeoJson.type, 'FeatureCollection');
+    assert.equal(routeGeoJson.features.length, 1);
+    assert.equal(routeGeoJson.features[0].geometry.type, 'LineString');
+    assert.deepEqual(routeGeoJson.features[0].geometry.coordinates, [
+      [13.8644, 49.6014],
+      [13.8626, 49.5993],
+      [13.8518, 49.5991],
+    ]);
+
+    // 3. buildLocalRoutedGeometry v planner.js opraví prohozené waypointy a vrátí platnou pěší geometrii
+    const localRouted = buildLocalRoutedGeometry([
+      { lat: 13.8644, lng: 49.6014 }, // prohozený start
+      { lat: 49.5993, lng: 13.8626 }, // cíl
+    ]);
+    assert.ok(localRouted.coordinates.length >= 2, 'buildLocalRoutedGeometry musí vytvořit trasu i při prohozených souřadnicích');
+    assert.ok(localRouted.distanceM > 150, 'Vzdálenost lokální trasy musí být > 150 m');
+    for (const [lat, lng] of localRouted.coordinates) {
+      assert.ok(lat >= 47 && lat <= 52, `Zeměpisná šířka bodu trasy musí být v ČR (47..52), získáno: ${lat}`);
+      assert.ok(lng >= 11 && lng <= 20, `Zeměpisná délka bodu trasy musí být v ČR (11..20), získáno: ${lng}`);
+    }
+
+    // 4. Ověření getRouteOriginPoint(), addStopToRoute() a okamžitého vykreslení trasy v src/walk.js
+    assert.ok(walkJs.includes('function getRouteOriginPoint()'), 'Funkce getRouteOriginPoint() musí existovat v src/walk.js');
+    assert.ok(walkJs.includes('if (lastAcceptedFix && Number.isFinite(lastAcceptedFix.lat))'), 'getRouteOriginPoint() prioritně vrací lastAcceptedFix');
+    assert.ok(walkJs.includes('if (lastFix && Number.isFinite(lastFix.lat))'), 'getRouteOriginPoint() jako druhé vrací lastFix');
+    assert.ok(walkJs.includes('if (visualPlayerPos && Number.isFinite(visualPlayerPos.lat))'), 'getRouteOriginPoint() jako třetí vrací visualPlayerPos');
+    assert.ok(walkJs.includes('async function addStopToRoute('), 'Funkce addStopToRoute musí existovat v src/walk.js');
+    assert.ok(walkJs.includes('ensureStopSavedInEmbeddedStops('), 'Dynamická místa z Overpassu se ukládají do plannedRoute.embeddedStops');
+    assert.ok(walkJs.includes('plannedRouteRenderKey = null;'), 'Při přidání bodu se vynuluje plannedRouteRenderKey');
+    assert.ok(walkJs.includes('await renderPlannedRouteOnMap(true);'), 'Při přidání bodu se ihned zavolá await renderPlannedRouteOnMap(true)');
+    assert.ok(walkJs.includes("map.moveLayer('planned-route-line')"), 'Vrstva planned-route-line je přesunuta nad mlhu (czekpoint-fog-layer) a 3D terén');
+
+    // 5. Spolehlivý běh při zhasnutém displeji (document.hidden === true, Gap Recovery, setInterval s Date.now() - lastTickAt)
+    assert.ok(walkJs.includes('document.hidden === true'), 'handleGpsFix kontroluje document.hidden === true a přeskakuje requestAnimationFrame');
+    assert.ok(walkJs.includes('visualPlayerPos = cleanFix;'), 'Při document.hidden se visualPlayerPos nastaví přímo na cleanFix');
+    assert.ok(walkJs.includes('updateFogCanvas(true);'), 'Po probuzení displeje (visibilitychange) se ihned překreslí mlha updateFogCanvas(true)');
+    assert.ok(gpsSimJs.includes('this.lastTickAt'), 'GpsSimulator sleduje skutečný uplynulý čas this.lastTickAt v setInterval');
+    assert.ok(keepAliveJs.includes('lat < 25 && lng > 45'), 'interpolateBackgroundGap v keep-alive.js chrání proti záměně [lng, lat]');
+
+    const gapSwapped = interpolateBackgroundGap({
+      prevFix: { lat: 13.8644, lng: 49.6014, ts: 1000 }, // prohozené
+      nextFix: { lat: 49.6032, lng: 13.8670, ts: 141000 },
+      plannedCoords: [
+        [13.8644, 49.6014], // prohozené [lng, lat]
+        [13.8657, 49.6023],
+        [13.8670, 49.6032],
+      ] as any,
+    } as any);
+    assert.equal(gapSwapped.recovered, true, 'Gap Recovery musí zafungovat i při prohozených souřadnicích [lng, lat]');
+    assert.ok(gapSwapped.points.length >= 5);
   });
 });
 

@@ -29,22 +29,51 @@ export const CONFIG = config;
 export default config;
 
 /**
+ * Ochrana proti záměně `lat` a `lng` (Česko = `lat: 47..52`, `lng: 11..20`).
+ * Vždy vrací objekt `{ lat, lng }` pro interní výpočty vzdálenosti a `planner.js`.
+ */
+export function normalizePointLatLng(pt) {
+  if (!pt) return null;
+  let lat;
+  let lng;
+  if (Array.isArray(pt)) {
+    if (pt.length < 2) return null;
+    lat = Number(pt[0]);
+    lng = Number(pt[1]);
+  } else if (typeof pt === 'object') {
+    lat = Number(pt.lat ?? pt.latitude);
+    lng = Number(pt.lng ?? pt.lon ?? pt.longitude);
+  } else {
+    return null;
+  }
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+  // V ČR je zeměpisná šířka lat vždy mezi 47 a 52 a zeměpisná délka lng vždy mezi 11 a 20.
+  // Pokud jsou prohozené (lat < 25 && lng > 45), automaticky je opravíme!
+  if (lat < 25 && lng > 45) {
+    const tmp = lat;
+    lat = lng;
+    lng = tmp;
+  }
+  return { lat, lng };
+}
+
+/**
+ * Pro MapLibre GeoJSON (`plannedRoute` čára na mapě) vždy vrací striktně pole `[lng, lat]` (`[13.86..., 49.60...]`).
+ */
+export function toMapLibreLngLat(pt) {
+  const norm = normalizePointLatLng(pt);
+  if (!norm) return null;
+  return [norm.lng, norm.lat];
+}
+
+/**
  * Převede bod z aplikačního formátu `{ lat, lng }` nebo `[lat, lng]`
  * na pořadí vyžadované v MapLibre GL JS a GeoJSON: `[lng, lat]`.
  * Datové schéma v úložišti a jádru aplikace zůstává `{ lat, lng }`.
  */
 export function toLngLat(pt) {
-  if (!pt) return null;
-  if (Array.isArray(pt)) {
-    const lat = Number(pt[0]);
-    const lng = Number(pt[1]);
-    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-    return [lng, lat];
-  }
-  const lat = Number(pt.lat);
-  const lng = Number(pt.lng);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-  return [lng, lat];
+  return toMapLibreLngLat(pt);
 }
 
 /**

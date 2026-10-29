@@ -1,5 +1,7 @@
 import {
   config as defaultAppConfig,
+  normalizePointLatLng,
+  toMapLibreLngLat,
   toLngLat,
   createGeoJsonCirclePolygon,
   buildMapLibreStyle,
@@ -264,7 +266,7 @@ export function renderPlayerAvatarMarkerHtml(arg1 = 'liska', arg2 = 0, arg3 = fa
   `;
 }
 
-export { toLngLat, createGeoJsonCirclePolygon, buildMapLibreStyle };
+export { normalizePointLatLng, toMapLibreLngLat, toLngLat, createGeoJsonCirclePolygon, buildMapLibreStyle };
 
 /**
  * Převede pole bodů trasy (`[lat, lng]` nebo `{ lat, lng }`) na GeoJSON FeatureCollection
@@ -274,7 +276,7 @@ export function buildPlannedRouteGeoJson(coords = [], isFallback = false) {
   if (!Array.isArray(coords) || coords.length < 2) {
     return { type: 'FeatureCollection', features: [] };
   }
-  const lngLats = coords.map(toLngLat).filter(Boolean);
+  const lngLats = coords.map(toMapLibreLngLat).filter(Boolean);
   if (lngLats.length < 2) {
     return { type: 'FeatureCollection', features: [] };
   }
@@ -989,7 +991,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
   let lupaSearchTimer = null;
   let lastLupaResults = [];
 
-  let anchor = null, lastFix = null, lastAcceptedFix = null, watch = null;
+  let anchor = null, lastFix = null, lastAcceptedFix = null, visualPlayerPos = null, watch = null;
   let active = false, disposed = false, demo = false, demoIndex = 0;
   let releaseLock = null, wake = null, frame = null, starting = false;
   // DÁVKA 1 (Bod 2.1): Sjednocený stavový model procházky: 'idle' | 'locating' | 'running' | 'paused' | 'finished'
@@ -1104,6 +1106,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     plannedRoute.origin.custom
   );
   let lockedExpeditionOrigin = null;
+  let expeditionStartPoint = null;
 
   let wizardCollapsed = true;
   let wizardScenario = userExplicitlyPickedOrigin ? 'from-home' : 'on-site';
@@ -2022,12 +2025,14 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
   }
 
   function getAvatarReferencePosition() {
-    if (lastFix && Number.isFinite(lastFix.lat) && Number.isFinite(lastFix.lng)) return lastFix;
+    if (lastAcceptedFix && Number.isFinite(lastAcceptedFix.lat) && Number.isFinite(lastAcceptedFix.lng)) return normalizePointLatLng(lastAcceptedFix);
+    if (lastFix && Number.isFinite(lastFix.lat) && Number.isFinite(lastFix.lng)) return normalizePointLatLng(lastFix);
+    if (visualPlayerPos && Number.isFinite(visualPlayerPos.lat) && Number.isFinite(visualPlayerPos.lng)) return normalizePointLatLng(visualPlayerPos);
     if (telemetry?.lastKnownPosition && Number.isFinite(telemetry.lastKnownPosition.lat) && Number.isFinite(telemetry.lastKnownPosition.lng)) {
-      return telemetry.lastKnownPosition;
+      return normalizePointLatLng(telemetry.lastKnownPosition);
     }
     const markerPos = typeof player?.getLatLng === 'function' ? player.getLatLng() : null;
-    if (markerPos && Number.isFinite(markerPos.lat) && Number.isFinite(markerPos.lng)) return markerPos;
+    if (markerPos && Number.isFinite(markerPos.lat) && Number.isFinite(markerPos.lng)) return normalizePointLatLng(markerPos);
     return getRouteOriginPoint();
   }
 
@@ -2243,6 +2248,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     }
 
     if (!startLatLng || currentOpacity === 0 || distM > 350 || distM < 0.2 || durationMs <= 0) {
+      visualPlayerPos = { lat: targetLat, lng: targetLng };
       player.setLatLng([targetLat, targetLng]);
       accuracyRing?.setLatLng([targetLat, targetLng]);
       return;
@@ -2263,6 +2269,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       const curLat = sLat + (targetLat - sLat) * eased;
       const curLng = sLng + (targetLng - sLng) * eased;
 
+      visualPlayerPos = { lat: curLat, lng: curLng };
       player.setLatLng([curLat, curLng]);
       accuracyRing?.setLatLng([curLat, curLng]);
 
@@ -2270,6 +2277,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         playerLerpRafId = requestAnimationFrame(stepLerp);
       } else {
         playerLerpRafId = null;
+        visualPlayerPos = { lat: targetLat, lng: targetLng };
         updatePlayerAvatarIcon(Boolean(active || demo));
         if (!follow) {
           updateRecenterButtonVisibility();
@@ -2373,6 +2381,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       }
     }
   }
+  const updateFogCanvas = drawFog;
 
   function scheduleFog(delayMs = 600, force = false) {
     if (disposed) return;
@@ -2460,12 +2469,14 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     if (Array.isArray(plannedRoute.embeddedStops)) {
       for (const p of plannedRoute.embeddedStops) {
         if (p && p.id && !mapById.has(p.id)) {
-          const acc = resolveAccessibleStopLocation(p);
+          const normP = normalizePointLatLng(p);
+          if (!normP) continue;
+          const acc = resolveAccessibleStopLocation({ ...p, lat: normP.lat, lng: normP.lng });
           mapById.set(p.id, {
             id: p.id,
-            title: p.title || p.id,
-            lat: acc ? acc.lat : p.lat,
-            lng: acc ? acc.lng : p.lng,
+            title: p.title || p.label || p.id,
+            lat: acc ? acc.lat : normP.lat,
+            lng: acc ? acc.lng : normP.lng,
             kind: p.kind || 'forest',
             category: p.category || 'nature',
             pointKind: 'place',
@@ -3429,18 +3440,49 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     routeOverlayMarkers = [];
   }
 
+  /**
+   * KRITICKÁ OPRAVA 2 (Hotfix v2.0.2): Start trasy VŽDY z aktuální polohy postavičky.
+   */
   function getRouteOriginPoint() {
-    if (lockedExpeditionOrigin) {
-      return lockedExpeditionOrigin;
+    // 1. Aktuální poloha hráče (reálná GPS nebo simulátor)
+    if (lastAcceptedFix && Number.isFinite(lastAcceptedFix.lat)) return normalizePointLatLng(lastAcceptedFix);
+    if (lastFix && Number.isFinite(lastFix.lat)) return normalizePointLatLng(lastFix);
+    if (visualPlayerPos && Number.isFinite(visualPlayerPos.lat)) return normalizePointLatLng(visualPlayerPos);
+    // 2. Uložený start trasy
+    if (plannedRoute?.origin && Number.isFinite(plannedRoute.origin.lat)) return normalizePointLatLng(plannedRoute.origin);
+    // 3. Střed mapy jako poslední záchrana
+    if (map && typeof map.getCenter === 'function') {
+      const c = map.getCenter();
+      if (c && Number.isFinite(c.lat) && Number.isFinite(c.lng)) {
+        return normalizePointLatLng({ lat: c.lat, lng: c.lng });
+      }
     }
-    if (!userExplicitlyPickedOrigin && lastFix && Number.isFinite(lastFix.lat) && Number.isFinite(lastFix.lng)) {
-      return lastFix;
+    return { lat: 49.6022, lng: 13.8636 };
+  }
+
+  function getExpeditionStartPoint() {
+    if (expeditionStartPoint && Number.isFinite(expeditionStartPoint.lat)) {
+      const norm = normalizePointLatLng(expeditionStartPoint);
+      return { ...expeditionStartPoint, lat: norm.lat, lng: norm.lng };
     }
-    return plannedRoute.origin || lastFix || { lat: 49.6014, lng: 13.8644 };
+    if (lockedExpeditionOrigin && Number.isFinite(lockedExpeditionOrigin.lat)) {
+      const norm = normalizePointLatLng(lockedExpeditionOrigin);
+      return { ...lockedExpeditionOrigin, lat: norm.lat, lng: norm.lng };
+    }
+    if (plannedRoute?.origin && Number.isFinite(plannedRoute.origin.lat)) {
+      const norm = normalizePointLatLng(plannedRoute.origin);
+      return { ...plannedRoute.origin, lat: norm.lat, lng: norm.lng };
+    }
+    return getRouteOriginPoint();
   }
 
   function getRouteGeometryKey(waypoints) {
-    return waypoints.map(w => `${Number(w.lat).toFixed(5)},${Number(w.lng).toFixed(5)}`).join('|');
+    return waypoints
+      .map(w => {
+        const norm = normalizePointLatLng(w);
+        return norm ? `${Number(norm.lat).toFixed(5)},${Number(norm.lng).toFixed(5)}` : '0,0';
+      })
+      .join('|');
   }
 
   async function getCachedWalkingGeometry(waypoints, key) {
@@ -3459,24 +3501,62 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     return pending;
   }
 
+  function applyPlannedRouteGeoJsonToMap(coords, isFallbackGeom = false) {
+    if (!map) return;
+    ensureCustomMapSourcesAndLayers();
+    try {
+      const showLine = appSettings.gameMode !== 'explorer' && Array.isArray(coords) && coords.length >= 2;
+      const geojson = buildPlannedRouteGeoJson(showLine ? coords : [], isFallbackGeom);
+      const routeSrc = typeof map.getSource === 'function' ? map.getSource('planned-route-source') : null;
+      if (routeSrc && typeof routeSrc.setData === 'function') {
+        routeSrc.setData(geojson);
+      }
+      const vis = showLine ? 'visible' : 'none';
+      if (typeof map.setLayoutProperty === 'function') {
+        if (map.getLayer('planned-route-casing')) {
+          map.setLayoutProperty('planned-route-casing', 'visibility', vis);
+        }
+        if (map.getLayer('planned-route-line')) {
+          map.setLayoutProperty('planned-route-line', 'visibility', vis);
+        }
+        if (map.getLayer('planned-route-fallback-line')) {
+          map.setLayoutProperty('planned-route-fallback-line', 'visibility', vis);
+        }
+      }
+      if (typeof map.moveLayer === 'function' && map.getLayer('czekpoint-fog-layer')) {
+        if (map.getLayer('planned-route-casing')) map.moveLayer('planned-route-casing');
+        if (map.getLayer('planned-route-line')) map.moveLayer('planned-route-line');
+        if (map.getLayer('planned-route-fallback-line')) map.moveLayer('planned-route-fallback-line');
+      }
+    } catch {}
+  }
+
   /**
    * Vykreslí společnou naplánovanou pěší trasu na mapě MapLibre GL JS jako GeoJSON vrstvu
    * a předá ji simulátoru i výpočtu zbývající vzdálenosti.
    */
   async function renderPlannedRouteOnMap(force = false, opts = {}) {
     if (!map) return;
+    ensureCustomMapSourcesAndLayers();
 
     const plannedPlaces = getPlannedPlaces();
     const currentOrigin = getRouteOriginPoint();
     const unvisitedPlaces = plannedPlaces.filter(p => !isStopVisited(p));
     const isOffRouteRecalc = Boolean(opts?.offRoute && (active || demo || simSandboxActive) && lastFix && Number.isFinite(lastFix.lat));
-    const isLoop = plannedRoute.routeType === 'loop' && plannedPlaces.length >= 1;
+    const isLoop = plannedRoute.routeType === 'loop' && plannedPlaces.length >= 2;
+    const loopReturnOrigin = getExpeditionStartPoint() || currentOrigin;
+
+    const activeStopsForRoute = (active || demo || simSandboxActive) && unvisitedPlaces.length > 0
+      ? unvisitedPlaces
+      : plannedPlaces;
 
     const allWaypoints = isOffRouteRecalc
       ? (unvisitedPlaces.length > 0
-          ? [lastFix, ...unvisitedPlaces, ...(isLoop ? [currentOrigin] : [])]
-          : (isLoop ? [lastFix, currentOrigin] : [lastFix]))
-      : (isLoop ? [currentOrigin, ...plannedPlaces, currentOrigin] : [currentOrigin, ...plannedPlaces]);
+          ? [currentOrigin, ...unvisitedPlaces, ...(isLoop ? [loopReturnOrigin] : [])]
+          : (isLoop ? [currentOrigin, loopReturnOrigin] : [currentOrigin]))
+      : (isLoop
+          ? [currentOrigin, ...activeStopsForRoute, loopReturnOrigin]
+          : [currentOrigin, ...activeStopsForRoute]);
 
     const geomKey = getRouteGeometryKey(allWaypoints);
     const renderKey = `${geomKey}|r${plannedRoute.radiusKm || 10}|l${isLoop ? 1 : 0}|gm${appSettings.gameMode || 'gamified'}`;
@@ -3487,13 +3567,21 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     let coords = null;
     let isFallbackGeom = true;
     if (plannedPlaces.length > 0) {
+      // Okamžitě (0 ms) vykreslíme lokální pěší geometrii, aby uživatel ihned po kliknutí viděl fialovou trasu z místa, kde stojí
+      const instantLocal = buildLocalRoutedGeometry(allWaypoints, { isFallback: false });
+      if (instantLocal && Array.isArray(instantLocal.coordinates) && instantLocal.coordinates.length >= 2) {
+        lastRoutedGeometry = instantLocal;
+        plannedRouteCoords = instantLocal.coordinates;
+        applyPlannedRouteGeoJsonToMap(instantLocal.coordinates, false);
+      }
+
       let geomResult = null;
       const calcTaskId = beginMapTask('⏳ Počítám trasu…');
       try {
         geomResult = await getCachedWalkingGeometry(allWaypoints, geomKey);
         if (token !== plannedRouteRenderToken || disposed) return;
         if (!geomResult || !geomResult.coordinates || geomResult.coordinates.length < 2) {
-          geomResult = buildLocalRoutedGeometry(allWaypoints, { isFallback: true });
+          geomResult = instantLocal || buildLocalRoutedGeometry(allWaypoints, { isFallback: true });
         }
       } finally {
         endMapTask(calcTaskId);
@@ -3503,7 +3591,12 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       fakeGpsSim?.setSharedWalkingRoute(lastRoutedGeometry);
       coords = geomResult?.coordinates;
       isFallbackGeom = Boolean(!geomResult || geomResult.isFallback || geomResult.routeStatus === 'fallback_direct');
-      if (!coords || coords.length < 2) coords = allWaypoints.map(p => [p.lat, p.lng]);
+      if (!coords || coords.length < 2) {
+        coords = allWaypoints
+          .map(normalizePointLatLng)
+          .filter(Boolean)
+          .map(p => [p.lat, p.lng]);
+      }
 
       const myEleToken = ++elevationProfileToken;
       fetchRouteElevationProfile(coords, { signal: aborter.signal })
@@ -3515,14 +3608,14 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         .catch(() => {});
 
       renderPlannerBasketAndXray();
-      renderQuestHud(lastFix || plannedRoute.origin);
+      renderQuestHud(currentOrigin);
     } else {
       lastRoutedGeometry = null;
       currentElevationProfile = null;
       fakeGpsSim?.setSharedWalkingRoute(null);
       renderPlannerBasketAndXray();
-      renderTouristStatsHud(lastFix || plannedRoute.origin);
-      renderPhase1AndPhase4Ui(lastFix || plannedRoute.origin);
+      renderTouristStatsHud(currentOrigin);
+      renderPhase1AndPhase4Ui(currentOrigin);
     }
 
     clearRouteOverlayMarkers();
@@ -3538,23 +3631,18 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       }
     } catch {}
 
-    // 2. Plánovaná trasa výpravy jako GeoJSON v MapLibre
-    try {
-      const routeSrc = typeof map.getSource === 'function' ? map.getSource('planned-route-source') : null;
-      if (routeSrc && typeof routeSrc.setData === 'function') {
-        const showLine = appSettings.gameMode !== 'explorer' && Array.isArray(coords) && coords.length >= 2;
-        routeSrc.setData(buildPlannedRouteGeoJson(showLine ? coords : [], isFallbackGeom));
-      }
-    } catch {}
+    // 2. Plánovaná trasa výpravy jako GeoJSON v MapLibre (vždy nad mlhou)
+    applyPlannedRouteGeoJsonToMap(coords, isFallbackGeom);
 
-    updatePlayerLead(lastFix);
+    updatePlayerLead(lastFix || currentOrigin);
     if (!coords || !maplibregl) return;
 
     if (appSettings.gameMode !== 'explorer') {
       // 3. Zvýraznění detekovaných rohů ulic a odboček podél trasy (anchor: 'center')
       if (lastRoutedGeometry && Array.isArray(lastRoutedGeometry.steps)) {
         for (const step of lastRoutedGeometry.steps) {
-          if (step.maneuverType === 'turn' && Number.isFinite(step.lat) && Number.isFinite(step.lng)) {
+          const normStep = normalizePointLatLng(step);
+          if (step.maneuverType === 'turn' && normStep) {
             const dotEl = document.createElement('div');
             dotEl.className = 'route-corner-dot-marker';
             dotEl.style.width = '8px';
@@ -3562,7 +3650,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
             dotEl.style.pointerEvents = 'none';
             dotEl.innerHTML = `<span class="route-corner-dot" title="${e(step.actionLabel || 'Roh')}"></span>`;
             const m = new maplibregl.Marker({ element: dotEl, anchor: 'center' })
-              .setLngLat([step.lng, step.lat])
+              .setLngLat([normStep.lng, normStep.lat])
               .addTo(map);
             routeOverlayMarkers.push(m);
           }
@@ -3571,12 +3659,12 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
 
       // 4. Směrové šipky podél plánované trasy (anchor: 'center')
       for (let i = 0; i < coords.length - 1; i += Math.max(1, Math.floor(coords.length / 8))) {
-        const p1 = coords[i];
-        const p2 = coords[i + 1];
+        const p1 = normalizePointLatLng(coords[i]);
+        const p2 = normalizePointLatLng(coords[i + 1]);
         if (!p1 || !p2) continue;
-        const angle = (Math.atan2(p2[1] - p1[1], p2[0] - p1[0]) * 180 / Math.PI + 360) % 360;
-        const midLat = (p1[0] + p2[0]) / 2;
-        const midLng = (p1[1] + p2[1]) / 2;
+        const angle = (Math.atan2(p2.lng - p1.lng, p2.lat - p1.lat) * 180 / Math.PI + 360) % 360;
+        const midLat = (p1.lat + p2.lat) / 2;
+        const midLng = (p1.lng + p2.lng) / 2;
         const arrEl = document.createElement('div');
         arrEl.className = 'route-dir-marker';
         arrEl.style.width = '16px';
@@ -3591,19 +3679,105 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     }
   }
 
+  function ensureStopSavedInEmbeddedStops(placeObj) {
+    if (!placeObj || !placeObj.id) return null;
+    const norm = normalizePointLatLng(placeObj);
+    if (!norm) return null;
+    const normalizedStop = {
+      id: placeObj.id,
+      title: placeObj.title || placeObj.label || placeObj.id,
+      lat: norm.lat,
+      lng: norm.lng,
+      kind: placeObj.kind || 'nature',
+      category: placeObj.category || 'nature',
+    };
+    if (!Array.isArray(plannedRoute.embeddedStops)) {
+      plannedRoute.embeddedStops = [];
+    }
+    const existingIdx = plannedRoute.embeddedStops.findIndex(item => item && item.id === normalizedStop.id);
+    if (existingIdx >= 0) {
+      plannedRoute.embeddedStops[existingIdx] = normalizedStop;
+    } else {
+      plannedRoute.embeddedStops.push(normalizedStop);
+    }
+    return normalizedStop;
+  }
+
   /**
    * Přepočítá zbývající trasu po úpravě zastávek (odebrání, nahrazení, posun pořadí)
    * bez smazání ušlé vzdálenosti a získaných návštěv (Bod 19 & 27).
    */
-  function recalculateRemainingRoute(reasonMsg = '') {
+  async function recalculateRemainingRoute(reasonMsg = '') {
     plannedRouteRenderKey = null;
     saveAppState();
     renderPlannerBasketAndXray();
     renderPlaces();
-    renderQuestHud(lastFix || plannedRoute.origin);
-    renderPhase1AndPhase4Ui(lastFix || plannedRoute.origin);
-    renderPlannedRouteOnMap(true);
+    renderQuestHud(getRouteOriginPoint());
+    renderPhase1AndPhase4Ui(getRouteOriginPoint());
     if (reasonMsg) status(reasonMsg);
+    await renderPlannedRouteOnMap(true);
+  }
+
+  async function addStopToRoute(placeOrId, opts = {}) {
+    const placeObj = typeof placeOrId === 'object' && placeOrId !== null
+      ? placeOrId
+      : getAllAvailablePlaces().find(item => item.id === placeOrId);
+    if (!placeObj || !placeObj.id) return false;
+    const normStop = ensureStopSavedInEmbeddedStops(placeObj);
+    if (!normStop) return false;
+
+    const currentPlaces = getPlannedPlaces();
+    if (opts.setAsEnd) {
+      plannedRoute.routeType = 'oneway';
+      phase1EndMode = 'custom';
+      const others = currentPlaces.filter(item => item.id !== normStop.id);
+      const orderedOthers = others.length >= 2
+        ? optimizeRouteOrder(getRouteOriginPoint(), others, {
+            returnToOrigin: false,
+            visitedStopIds: confirmedStopIds,
+            currentPosition: getRouteOriginPoint(),
+          })
+        : others;
+      plannedRoute.selectedPlaceIds = [...orderedOthers.map(item => item.id), normStop.id];
+    } else if (opts.append) {
+      const ids = (plannedRoute.selectedPlaceIds || []).filter(id => id !== normStop.id);
+      if (ids.length >= 10) {
+        status('Plán výpravy může obsahovat nejvýše 10 zastávek.');
+        return false;
+      }
+      plannedRoute.selectedPlaceIds = [...ids, normStop.id];
+    } else {
+      const isLoop = plannedRoute.routeType === 'loop';
+      const inserted = insertStopAtBestPosition(getRouteOriginPoint(), currentPlaces, normStop, {
+        returnToOrigin: isLoop,
+        visitedStopIds: confirmedStopIds,
+        currentPosition: getRouteOriginPoint(),
+      });
+      plannedRoute.selectedPlaceIds = inserted.map(item => item.id);
+    }
+
+    lastRoutedGeometry = null;
+    plannedRouteRenderKey = null;
+    await recalculateRemainingRoute(
+      opts.reasonMsg || (opts.setAsEnd ? `🏁 Nový konec trasy nastaven na: ${normStop.title}.` : `➕ Zastávka „${normStop.title}“ přidána do trasy.`)
+    );
+    return true;
+  }
+
+  async function togglePlaceInRoute(placeOrId) {
+    const placeId = typeof placeOrId === 'object' && placeOrId !== null ? placeOrId.id : placeOrId;
+    if (!placeId) return false;
+    const ids = plannedRoute.selectedPlaceIds || [];
+    if (ids.includes(placeId)) {
+      plannedRoute.selectedPlaceIds = ids.filter(id => id !== placeId);
+      lastRoutedGeometry = null;
+      plannedRouteRenderKey = null;
+      await recalculateRemainingRoute('Zastávka odebrána z plánu. Zbývající trasa přepočítána.');
+      return false;
+    }
+    return addStopToRoute(placeOrId, {
+      reasonMsg: 'Zastávka přidána do plánu. Zbývající trasa přepočítána.',
+    });
   }
 
   function renderReplaceStopPicker() {
@@ -4276,64 +4450,41 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     $('btn-close-place-detail')?.addEventListener('click', closePlaceDetail);
 
     // 1. Bod UŽ JE v trase -> [ ✕ Vynechat tuto zastávku ]
-    $('btn-p3-skip-stop')?.addEventListener('click', () => {
+    $('btn-p3-skip-stop')?.addEventListener('click', async () => {
       const remainingPlaces = getPlannedPlaces().filter(item => item.id !== p.id);
       const isLoop = plannedRoute.routeType === 'loop' && remainingPlaces.length >= 2;
       const ordered = remainingPlaces.length >= 2
         ? optimizeRouteOrder(getRouteOriginPoint(), remainingPlaces, {
             returnToOrigin: isLoop,
             visitedStopIds: confirmedStopIds,
-            currentPosition: (active || demo) && lastFix ? lastFix : null,
+            currentPosition: getRouteOriginPoint(),
           })
         : remainingPlaces;
       plannedRoute.selectedPlaceIds = ordered.map(item => item.id);
       lastRoutedGeometry = null;
+      plannedRouteRenderKey = null;
       closePlaceDetail();
-      recalculateRemainingRoute(`Zastávka „${p.title}“ vynechána. Trasa a čas do cíle byly zkráceny.`);
       playTick(stateObj.soundEnabled);
+      await recalculateRemainingRoute(`Zastávka „${p.title}“ vynechána. Trasa a čas do cíle byly zkráceny.`);
     });
 
     // 2A. Bod NENÍ v trase -> [ ➕ Přidat jako zastávku po cestě ]
-    $('btn-p3-insert-stop')?.addEventListener('click', () => {
-      const currentPlaces = getPlannedPlaces();
-      if (!plannedRoute.embeddedStops) plannedRoute.embeddedStops = [];
-      if (!getAllAvailablePlaces().some(item => item.id === p.id)) {
-        plannedRoute.embeddedStops.push(p);
-      }
-      const isLoop = plannedRoute.routeType === 'loop';
-      const inserted = insertStopAtBestPosition(getRouteOriginPoint(), currentPlaces, p, {
-        returnToOrigin: isLoop,
-        visitedStopIds: confirmedStopIds,
-        currentPosition: (active || demo) && lastFix ? lastFix : null,
-      });
-      plannedRoute.selectedPlaceIds = inserted.map(item => item.id);
-      lastRoutedGeometry = null;
+    $('btn-p3-insert-stop')?.addEventListener('click', async () => {
       closePlaceDetail();
-      recalculateRemainingRoute(`➕ Zastávka „${p.title}“ vložena na nejvhodnější místo po cestě.`);
       playStampChord(stateObj.soundEnabled);
+      await addStopToRoute(p, {
+        reasonMsg: `➕ Zastávka „${p.title}“ vložena na nejvhodnější místo po cestě.`,
+      });
     });
 
     // 2B. Bod NENÍ v trase -> [ 🏁 Nastavit jako nový konec trasy ]
-    $('btn-p3-set-end')?.addEventListener('click', () => {
-      if (!plannedRoute.embeddedStops) plannedRoute.embeddedStops = [];
-      if (!getAllAvailablePlaces().some(item => item.id === p.id)) {
-        plannedRoute.embeddedStops.push(p);
-      }
-      plannedRoute.routeType = 'oneway';
-      phase1EndMode = 'custom';
-      const others = getPlannedPlaces().filter(item => item.id !== p.id);
-      const orderedOthers = others.length >= 2
-        ? optimizeRouteOrder(getRouteOriginPoint(), others, {
-            returnToOrigin: false,
-            visitedStopIds: confirmedStopIds,
-            currentPosition: (active || demo) && lastFix ? lastFix : null,
-          })
-        : others;
-      plannedRoute.selectedPlaceIds = [...orderedOthers.map(item => item.id), p.id];
-      lastRoutedGeometry = null;
+    $('btn-p3-set-end')?.addEventListener('click', async () => {
       closePlaceDetail();
-      recalculateRemainingRoute(`🏁 Nový konec trasy nastaven na: ${p.title}.`);
       playStampChord(stateObj.soundEnabled);
+      await addStopToRoute(p, {
+        setAsEnd: true,
+        reasonMsg: `🏁 Nový konec trasy nastaven na: ${p.title}.`,
+      });
     });
   }
 
@@ -5304,7 +5455,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     if ($('walk-more-btn')) $('walk-more-btn').setAttribute('aria-expanded', 'false');
     const curPos = lastFix || telemetry.lastKnownPosition || getRouteOriginPoint();
     if (!curPos) return;
-    const startOrigin = getRouteOriginPoint();
+    const startOrigin = getExpeditionStartPoint();
     const returnStopId = 'return-to-start-stop';
     const returnStopObj = {
       id: returnStopId,
@@ -5456,7 +5607,8 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     gpsOutageWarning = false;
     gpsBrowseOnlyMode = false;
 
-    if (!coords || !Number.isFinite(Number(coords.lat)) || !Number.isFinite(Number(coords.lng)) || coords.accuracy > 500) {
+    const normCoords = normalizePointLatLng(coords);
+    if (!normCoords || Number(coords?.accuracy) > 500) {
       return;
     }
 
@@ -5466,8 +5618,8 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       : now;
 
     const cleanFix = {
-      lat: Number(coords.lat),
-      lng: Number(coords.lng),
+      lat: normCoords.lat,
+      lng: normCoords.lng,
       accuracy: Math.max(1, Number(coords.accuracy) || 10),
       altitude: Number.isFinite(coords.altitude) ? Number(coords.altitude) : null,
       timestamp: fixTime,
@@ -5540,6 +5692,9 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
           ? { ...plannedRoute.origin }
           : { id: 'start-gps', label: 'Místo startu', lat: cleanFix.lat, lng: cleanFix.lng };
       }
+      if (!expeditionStartPoint) {
+        expeditionStartPoint = { ...lockedExpeditionOrigin };
+      }
       updateMapActionBar();
       updateTopBarUi();
     }
@@ -5559,22 +5714,9 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       }
     }
 
-    if (map && player && accuracyRing) {
-      const isHiddenOrPocket = (typeof document !== 'undefined' && document.hidden) || ($('pocket-mode-overlay') && !$('pocket-mode-overlay').hidden);
-      if (isHiddenOrPocket) {
-        setPlayerMarkerVisible(true);
-        updatePlayerAvatarIcon(walkState === 'running');
-        player.setLatLng([cleanFix.lat, cleanFix.lng]);
-        accuracyRing.setLatLng([cleanFix.lat, cleanFix.lng]);
-        if (follow) {
-          centerMapOnPlayer(cleanFix, false);
-        }
-      } else {
-        smoothMovePlayerTo(cleanFix.lat, cleanFix.lng, coords.simulated ? 420 : 1100);
-      }
-      accuracyRing.setRadius(cleanFix.accuracy);
-    }
-
+    // KRITICKÁ OPRAVA 2 (Hotfix v2.0.2):
+    // 1. Herní logika (zápis do walkSegments, přičtení metrů v sample(), potvrzení zastávek <= 35 m a hlasová navigace updateTurnNavPill())
+    //    probíhá OKAMŽITĚ A SYNCHRONNĚ v handleGpsFix bez čekání na smoothMovePlayerTo() nebo requestAnimationFrame!
     updateGpsTelemetryUi(cleanFix);
     renderCompass(cleanFix);
     refreshWeatherStrip(cleanFix);
@@ -5595,6 +5737,30 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       }
     } else {
       renderQuestHud(cleanFix);
+    }
+
+    // 2. Vizuální posun postavičky na mapě:
+    //    Když je obrazovka zhasnutá (document.hidden === true), prohlížeč zastaví requestAnimationFrame.
+    //    Proto při document.hidden === true přeskočíme animaci smoothMovePlayerTo a rovnou nastavíme visualPlayerPos = cleanFix.
+    const isHiddenOrPocket = (typeof document !== 'undefined' && document.hidden === true) || ($('pocket-mode-overlay') && !$('pocket-mode-overlay').hidden);
+    if (isHiddenOrPocket) {
+      if (playerLerpRafId) {
+        cancelAnimationFrame(playerLerpRafId);
+        playerLerpRafId = null;
+      }
+      visualPlayerPos = cleanFix;
+      if (map && player && accuracyRing) {
+        setPlayerMarkerVisible(true);
+        updatePlayerAvatarIcon(walkState === 'running');
+        player.setLatLng([cleanFix.lat, cleanFix.lng]);
+        accuracyRing.setLatLng([cleanFix.lat, cleanFix.lng]);
+        accuracyRing.setRadius(cleanFix.accuracy);
+      }
+    } else if (map && player && accuracyRing) {
+      smoothMovePlayerTo(cleanFix.lat, cleanFix.lng, coords.simulated ? 420 : 1100);
+      accuracyRing.setRadius(cleanFix.accuracy);
+    } else {
+      visualPlayerPos = cleanFix;
     }
   }
 
@@ -5990,6 +6156,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       lockedExpeditionOrigin = plannedRoute.origin
         ? { ...plannedRoute.origin }
         : (lastFix ? { id: 'start-gps', label: 'Místo startu', lat: lastFix.lat, lng: lastFix.lng } : null);
+      expeditionStartPoint = lockedExpeditionOrigin ? { ...lockedExpeditionOrigin } : null;
       if (lastFix) centerMapOnPlayer(lastFix, false);
       updateMapActionBar();
       updateTopBarUi();
@@ -6044,6 +6211,9 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         ? { id: 'start-gps', label: 'Místo startu', lat: lastAcceptedFix.lat, lng: lastAcceptedFix.lng }
         : (plannedRoute.origin ? { ...plannedRoute.origin } : { ...START_PRESETS[0] });
       lockedExpeditionOrigin = plannedRoute.origin ? { ...plannedRoute.origin } : fallbackStart;
+    }
+    if (!expeditionStartPoint && lockedExpeditionOrigin) {
+      expeditionStartPoint = { ...lockedExpeditionOrigin };
     }
 
     // DÁVKA 1 (Bod 2.1): Kritické pravidlo — dokud prohlížeč nevrátí platnou GPS polohu,
@@ -6610,6 +6780,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       isWalking: walkState === 'running',
     });
     let playerPos = { lat: center.lat, lng: center.lng };
+    visualPlayerPos = { lat: center.lat, lng: center.lng };
     let playerOpacity = (active || demo || simSandboxActive || lastFix) ? 1 : 0;
     const rawPlayerMarker = new maplibregl.Marker({ element: playerEl, anchor: 'center' })
       .setLngLat([center.lng, center.lat])
@@ -6617,8 +6788,10 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     player = {
       marker: rawPlayerMarker,
       setLatLng([lat, lng]) {
-        if (Number.isFinite(Number(lat)) && Number.isFinite(Number(lng))) {
-          playerPos = { lat: Number(lat), lng: Number(lng) };
+        const norm = normalizePointLatLng([lat, lng]);
+        if (norm) {
+          playerPos = { lat: norm.lat, lng: norm.lng };
+          visualPlayerPos = { lat: norm.lat, lng: norm.lng };
           rawPlayerMarker.setLngLat([playerPos.lng, playerPos.lat]);
         }
       },
@@ -8136,24 +8309,15 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         kind: item.kind || 'culture',
         category: item.category || 'views',
       };
-      if (!plannedRoute.embeddedStops) plannedRoute.embeddedStops = [];
-      if (!getAllAvailablePlaces().some(p => p.id === stopObj.id)) {
-        plannedRoute.embeddedStops.push(stopObj);
-      }
-      const curStops = getPlannedPlaces();
-      const inserted = insertStopAtBestPosition(getRouteOriginPoint(), curStops, stopObj, {
-        returnToOrigin: plannedRoute.routeType === 'loop',
-        visitedStopIds: confirmedStopIds,
-        currentPosition: (active || demo) && lastFix ? lastFix : null,
-      });
-      plannedRoute.selectedPlaceIds = inserted.map(p => p.id);
       if (map) {
         follow = false;
         updateFollowUi();
         setMapView(item.lat, item.lng, Math.max(map.getZoom?.() || 14, 14), true);
       }
-      recalculateRemainingRoute(`+ Místo „${item.title}“ přidáno do trasy.`);
       playStampChord(stateObj.soundEnabled);
+      addStopToRoute(stopObj, {
+        reasonMsg: `+ Místo „${item.title}“ přidáno do trasy.`,
+      });
     }
   });
 
@@ -9263,19 +9427,8 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     const planBtn = event.target.closest('.toggle-plan-place-btn');
     if (planBtn) {
       const placeId = planBtn.dataset.placeId;
-      const ids = plannedRoute.selectedPlaceIds || [];
-      if (ids.includes(placeId)) {
-        plannedRoute.selectedPlaceIds = ids.filter(id => id !== placeId);
-        recalculateRemainingRoute('Zastávka odebrána z plánu. Zbývající trasa přepočítána.');
-      } else {
-        if (ids.length >= 10) {
-          status('Plán výpravy může obsahovat nejvýše 10 zastávek.');
-          return;
-        }
-        plannedRoute.selectedPlaceIds = [...ids, placeId];
-        recalculateRemainingRoute('Zastávka přidána do plánu. Zbývající trasa přepočítána.');
-      }
       playTick(stateObj.soundEnabled);
+      await togglePlaceInRoute(placeId);
       return;
     }
 
@@ -9298,13 +9451,11 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     const addRadarBtn = event.target.closest('.add-radar-place-btn');
     if (addRadarBtn) {
       const placeId = addRadarBtn.dataset.placeId;
-      const ids = plannedRoute.selectedPlaceIds || [];
-      if (!ids.includes(placeId)) {
-        plannedRoute.selectedPlaceIds = [...ids, placeId].slice(0, 10);
-        $('walk-radar-banner').hidden = true;
-        playTick(stateObj.soundEnabled);
-        recalculateRemainingRoute('Místo z radaru přidáno mezi zastávky.');
-      }
+      $('walk-radar-banner').hidden = true;
+      playTick(stateObj.soundEnabled);
+      await addStopToRoute(placeId, {
+        reasonMsg: 'Místo z radaru přidáno mezi zastávky.',
+      });
       return;
     }
 
@@ -9677,20 +9828,33 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       // DÁVKA 3 (Bod 3.3): Po návratu do aplikace z pozadí čistě obnovíme odběr senzoru orientace bez duplicitních listenerů
       bindOrientationListeners();
       updateDirectionalIndicators();
-    }
-    if (!document.hidden && active && !disposed && !simSandboxActive) {
-      restartGpsWatch();
-      holdWake();
+
+      // KRITICKÁ OPRAVA 2 (Hotfix v2.0.2): Okamžitá synchronizace a přemostění při rozsvícení displeje
       if (map) {
         resizeMap();
-        if (lastFix) {
-          smoothMovePlayerTo(lastFix.lat, lastFix.lng, 350);
-          if (follow) centerMapOnPlayer(lastFix, false);
+        const latestFix = lastAcceptedFix || lastFix;
+        if (latestFix && Number.isFinite(latestFix.lat) && Number.isFinite(latestFix.lng)) {
+          visualPlayerPos = { lat: latestFix.lat, lng: latestFix.lng };
+          if (player) {
+            setPlayerMarkerVisible(true);
+            player.setLatLng([latestFix.lat, latestFix.lng]);
+          }
+          if (accuracyRing) {
+            accuracyRing.setLatLng([latestFix.lat, latestFix.lng]);
+          }
+          if (follow) {
+            centerMapOnPlayer(latestFix, false);
+          }
         }
+        updateFogCanvas(true);
+        renderTrail();
       }
-      stats();
-      scheduleFog();
-      renderTrail();
+
+      if (active && !simSandboxActive) {
+        restartGpsWatch();
+        holdWake();
+        stats();
+      }
     }
   };
   document.addEventListener('visibilitychange', visibility, { signal: aborter.signal });

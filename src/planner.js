@@ -9,6 +9,52 @@ import {
 } from './natural-features.js';
 import { PILOT_HIKING_TRAILS } from './hiking-trails.js';
 
+/**
+ * Ochrana proti záměně `lat` a `lng` (Česko = `lat: 47..52`, `lng: 11..20`).
+ * Pro interní výpočty vzdálenosti a `planner.js` vždy vrací objekt `{ lat, lng }`.
+ */
+export function normalizePointLatLng(pt) {
+  if (!pt) return null;
+  let lat;
+  let lng;
+  if (Array.isArray(pt)) {
+    if (pt.length < 2) return null;
+    lat = Number(pt[0]);
+    lng = Number(pt[1]);
+  } else if (typeof pt === 'object') {
+    lat = Number(pt.lat ?? pt.latitude);
+    lng = Number(pt.lng ?? pt.lon ?? pt.longitude);
+  } else {
+    return null;
+  }
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+  if (lat < 25 && lng > 45) {
+    const tmp = lat;
+    lat = lng;
+    lng = tmp;
+  }
+  return { lat, lng };
+}
+
+/**
+ * Pro MapLibre GeoJSON (`plannedRoute` čára na mapě) vždy vrací striktně pole `[lng, lat]` (`[13.86..., 49.60...]`).
+ */
+export function toMapLibreLngLat(pt) {
+  const norm = normalizePointLatLng(pt);
+  if (!norm) return null;
+  return [norm.lng, norm.lat];
+}
+
+function normalizeWaypointObject(w) {
+  const norm = normalizePointLatLng(w);
+  if (!norm) return null;
+  if (w && typeof w === 'object' && !Array.isArray(w)) {
+    return { ...w, lat: norm.lat, lng: norm.lng };
+  }
+  return { lat: norm.lat, lng: norm.lng };
+}
+
 export const START_PRESETS = Object.freeze([
   { id: 'namesti', label: 'Náměstí Rožmitál', lat: 49.6033, lng: 13.8633 },
   { id: 'nadrazi', label: 'Nádraží Rožmitál pod Třemšínem', lat: 49.5968, lng: 13.8682 },
@@ -292,8 +338,11 @@ export function computeLocalWalkingLeg(fromPoint, toPoint, options = {}) {
   const ponds = options.ponds || BUILTIN_NATURAL_FEATURES.filter(f => f.kind === 'water');
   const rivers = options.rivers || BUILTIN_RIVER_OBSTACLES;
 
-  const pFrom = resolveAccessibleStopLocation(fromPoint, ponds) || { lat: fromPoint.lat, lng: fromPoint.lng };
-  const pTo = resolveAccessibleStopLocation(toPoint, ponds) || { lat: toPoint.lat, lng: toPoint.lng };
+  const normFrom = normalizeWaypointObject(fromPoint) || { lat: 49.6022, lng: 13.8636 };
+  const normTo = normalizeWaypointObject(toPoint) || normFrom;
+
+  const pFrom = resolveAccessibleStopLocation(normFrom, ponds) || { lat: normFrom.lat, lng: normFrom.lng };
+  const pTo = resolveAccessibleStopLocation(normTo, ponds) || { lat: normTo.lat, lng: normTo.lng };
 
   let waypoints = [pFrom, pTo];
 
@@ -1361,27 +1410,32 @@ export function extractStepsFromOsrmRoute(route, coordinates = [], stopTargets =
  * kolmou vzdálenost k úseku (`distanceToRouteM`) a kolik metrů zbývá do konce tohoto úseku (`distToSegEndM`).
  */
 export function locatePlayerOnPolyline(currentPos, coords = []) {
-  if (!currentPos || !Number.isFinite(currentPos.lat) || !Number.isFinite(currentPos.lng) || !Array.isArray(coords) || coords.length === 0) {
+  const normPos = normalizePointLatLng(currentPos);
+  if (!normPos || !Array.isArray(coords) || coords.length === 0) {
     return { segIdx: 0, distanceToRouteM: 0, distToSegEndM: 0 };
   }
-  if (coords.length === 1) {
-    const d = haversineMeters(currentPos, { lat: coords[0][0], lng: coords[0][1] }) ?? 0;
+  const normCoords = coords.map(normalizePointLatLng).filter(Boolean);
+  if (normCoords.length === 0) {
+    return { segIdx: 0, distanceToRouteM: 0, distToSegEndM: 0 };
+  }
+  if (normCoords.length === 1) {
+    const d = haversineMeters(normPos, normCoords[0]) ?? 0;
     return { segIdx: 0, distanceToRouteM: d, distToSegEndM: d };
   }
 
-  const cosLat = Math.cos((currentPos.lat * Math.PI) / 180) || 0.65;
-  const px = currentPos.lng * 111320 * cosLat;
-  const py = currentPos.lat * 111320;
+  const cosLat = Math.cos((normPos.lat * Math.PI) / 180) || 0.65;
+  const px = normPos.lng * 111320 * cosLat;
+  const py = normPos.lat * 111320;
 
   let bestSegIdx = 0;
   let bestDistM = Infinity;
   let bestDistToEndM = 0;
 
-  for (let i = 0; i < coords.length - 1; i++) {
-    const ax = coords[i][1] * 111320 * cosLat;
-    const ay = coords[i][0] * 111320;
-    const bx = coords[i + 1][1] * 111320 * cosLat;
-    const by = coords[i + 1][0] * 111320;
+  for (let i = 0; i < normCoords.length - 1; i++) {
+    const ax = normCoords[i].lng * 111320 * cosLat;
+    const ay = normCoords[i].lat * 111320;
+    const bx = normCoords[i + 1].lng * 111320 * cosLat;
+    const by = normCoords[i + 1].lat * 111320;
 
     const dx = bx - ax;
     const dy = by - ay;
@@ -1717,7 +1771,7 @@ export async function buildReturnToOriginRoute(currentPos, origin, fetchImpl = t
  * fiktivní boční objížďky mimo skutečnou síť cest.
  */
 export function ensureLoopDetourWaypoints(waypoints = []) {
-  return (waypoints || []).filter(p => p && Number.isFinite(p.lat) && Number.isFinite(p.lng));
+  return (waypoints || []).map(normalizeWaypointObject).filter(Boolean);
 }
 
 function enrichLegWithStreetCorners(legCoords = []) {
@@ -1725,7 +1779,7 @@ function enrichLegWithStreetCorners(legCoords = []) {
 }
 
 export function buildLocalRoutedGeometry(waypoints, options = {}) {
-  const rawValid = (waypoints || []).filter(p => p && Number.isFinite(p.lat) && Number.isFinite(p.lng));
+  const rawValid = (waypoints || []).map(normalizeWaypointObject).filter(Boolean);
   if (rawValid.length < 2) {
     return {
       coordinates: rawValid.map(p => [p.lat, p.lng]),
@@ -1817,7 +1871,7 @@ export async function fetchWalkingGeometry(waypoints, fetchImpl = typeof fetch !
   if (!Array.isArray(waypoints) || waypoints.length === 0) {
     return { coordinates: [], distanceM: 0, legs: [], steps: [], stopTargets: [], mode: 'empty', routeStatus: 'empty', isFallback: false, canSimulate: false };
   }
-  const rawValid = waypoints.filter(p => p && Number.isFinite(p.lat) && Number.isFinite(p.lng));
+  const rawValid = waypoints.map(normalizeWaypointObject).filter(Boolean);
   if (rawValid.length < 2) {
     return {
       coordinates: rawValid.map(p => [p.lat, p.lng]),
@@ -1923,7 +1977,10 @@ export async function fetchWalkingGeometry(waypoints, fetchImpl = typeof fetch !
       return fallback();
     }
       if (route?.geometry?.coordinates && Array.isArray(route.geometry.coordinates) && route.geometry.coordinates.length >= 2) {
-        const rawCoords = route.geometry.coordinates.map(([lng, lat]) => [lat, lng]);
+        const rawCoords = route.geometry.coordinates
+          .map(pt => normalizePointLatLng(Array.isArray(pt) ? [pt[1], pt[0]] : pt))
+          .filter(Boolean)
+          .map(norm => [norm.lat, norm.lng]);
         // Ověříme, že vrácená trasa nevede přímou čarou přes rybník nebo řeku bez mostu;
         // pokud OSRM vrátilo jen 2 body přes vodní plochu, zpřesníme ji lokální břehovou/mostní geometrií
         const localCheck = buildLocalRoutedGeometry(accessibleWaypoints, options);
@@ -2023,9 +2080,11 @@ export function computePolylineLengthM(coords = []) {
   if (!Array.isArray(coords) || coords.length < 2) return 0;
   let total = 0;
   for (let i = 0; i < coords.length - 1; i++) {
-    const a = Array.isArray(coords[i]) ? { lat: coords[i][0], lng: coords[i][1] } : coords[i];
-    const b = Array.isArray(coords[i + 1]) ? { lat: coords[i + 1][0], lng: coords[i + 1][1] } : coords[i + 1];
-    total += haversineMeters(a, b) ?? 0;
+    const a = normalizePointLatLng(coords[i]);
+    const b = normalizePointLatLng(coords[i + 1]);
+    if (a && b) {
+      total += haversineMeters(a, b) ?? 0;
+    }
   }
   return Math.round(total);
 }
