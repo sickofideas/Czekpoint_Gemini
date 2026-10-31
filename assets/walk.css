@@ -870,15 +870,12 @@
 }
 
 /* 7. Modální dialogy a formuláře (Upravit procházku, Nastavení, Vzpomínka, Shrnutí) */
-.edit-walk-modal-backdrop,
-.walk-modal-backdrop,
-#app-settings-modal,
-#save-memory-modal,
-#memory-modal,
-#edit-walk-modal,
-#session-summary-container,
-#confirm-dialog,
-#report-dialog {
+.edit-walk-modal-backdrop:not([hidden]),
+.walk-modal-backdrop:not([hidden]),
+#app-settings-modal:not([hidden]),
+#save-memory-modal:not([hidden]),
+#memory-modal:not([hidden]),
+#edit-walk-modal:not([hidden]) {
   position: fixed !important;
   inset: 0 !important;
   z-index: 10500 !important;
@@ -887,6 +884,27 @@
   display: grid;
   place-items: center;
   padding: 16px;
+}
+.edit-walk-modal-backdrop[hidden],
+.walk-modal-backdrop[hidden],
+#app-settings-modal[hidden],
+#save-memory-modal[hidden],
+#memory-modal[hidden],
+#edit-walk-modal[hidden],
+#arrival-goal-modal[hidden],
+#pocket-mode-overlay[hidden],
+#session-summary-container:empty,
+dialog:not([open]) {
+  display: none !important;
+}
+#session-summary-container {
+  position: static !important;
+  background: transparent !important;
+  padding: 0 !important;
+  pointer-events: none;
+}
+#session-summary-container > * {
+  pointer-events: auto;
 }
 .edit-walk-modal-card {
   background: #ffffff;
@@ -5038,8 +5056,16 @@
 }
 
 .place-detail-sheet {
-  bottom: 72px !important;
+  bottom: 124px !important;
   z-index: 1150 !important;
+}
+
+#sheet-body .top-route-itinerary-wrap {
+  background: #1b2d21;
+  color: #f8f5ec;
+  padding: 10px 14px;
+  border-radius: 14px;
+  border: 1.5px solid #d4af37;
 }
 
 .stop-ctrl-btn {

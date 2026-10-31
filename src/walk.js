@@ -1314,19 +1314,9 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         </div>
       </div>
 
-      <!-- Vizuální plán dnešní cesty: všechny zastávky v pořadí 1 -> 2 -> 3 přímo na očích -->
-      <div class="top-route-itinerary-wrap" id="top-route-itinerary-wrap">
-        <div class="top-itinerary-header">
-          <span class="top-itinerary-label" id="top-itinerary-label">🗺️ Plán dnešní cesty a zastávky (kliknutím ukážeš místo na mapě):</span>
-          <button type="button" class="top-itinerary-toggle-btn" id="btn-toggle-p1-bar" aria-expanded="true">
-            ▲ Sbalit volby trasy
-          </button>
-        </div>
-        <div class="top-route-itinerary-strip" id="top-route-itinerary-strip" role="list" aria-label="Body na naplánované trase"></div>
-      </div>
     </section>
 
-    <!-- Zjednodušený panel pro 50+: velké dlaždice Herního stylu a Co chci vidět -->
+    <!-- Zjednodušený panel pro 50+: kompaktní lišta herního stylu a nastavení -->
     <section class="phase1-bottom-bar phase1-planner-card" id="phase1-bottom-bar" role="region" aria-label="Výběr herního stylu a filtru míst">
       <div class="p1-row">
         <span class="p1-row-label">1. Herní styl:</span>
@@ -1340,133 +1330,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
           <button type="button" class="p1-choice-btn p1-gamemode-btn ${appSettings.gameMode === 'casual' ? 'active' : ''}" data-p1-gamemode="casual" aria-pressed="${appSettings.gameMode === 'casual'}">
             🗺️ Turistická mapa
           </button>
-        </div>
-      </div>
-
-      <div class="p1-row">
-        <span class="p1-row-label">2. Co chci vidět:</span>
-        <div class="p1-btn-group" role="group" aria-label="Co chci vidět">
-          <button type="button" class="p1-choice-btn p1-cat-btn active" data-p1-theme="all" aria-pressed="true">✨ Vše zajímavé</button>
-          <button type="button" class="p1-choice-btn p1-cat-btn" data-p1-theme="castles" aria-pressed="false">🏰 Památky a hrady</button>
-          <button type="button" class="p1-choice-btn p1-cat-btn" data-p1-theme="nature" aria-pressed="false">🌲 Příroda a vyhlídky</button>
-          <button type="button" class="p1-choice-btn p1-cat-btn" data-p1-theme="water" aria-pressed="false">💧 Voda a rybníky</button>
-        </div>
-      </div>
-    </section>
-
-    <!-- DÁVKA 2 (Bod 3.3): Zpřístupněný panel „📊 Moje chůze a počasí“ přímo pod ovládáním (nadmořská výška při nedostupnosti jako —) -->
-    <section class="map-command-bar" id="map-command-bar" aria-label="Moje chůze a počasí">
-      <div class="mcb-primary-row" hidden>
-        <div class="mcb-section-heading">
-          <strong>📊 Moje chůze a počasí</strong>
-        </div>
-        <div class="mcb-walk-actions" id="expedition-buttons" hidden>
-          <button type="button" id="walk-start" class="button accent-action-btn main-start-btn">▶ Začít procházku</button>
-          <button type="button" id="walk-stop" class="button dark-ctrl-btn" disabled>II Pozastavit</button>
-          <button type="button" id="walk-end" class="button danger-ctrl-btn" disabled>⏹ Ukončit</button>
-        </div>
-      </div>
-
-      <div class="tourist-main-hud" id="tourist-main-hud" aria-label="Hlavní ukazatele chůze">
-        <div class="tmh-header-row">
-          <strong class="tmh-section-title">📊 Moje chůze a počasí</strong>
-          <div class="mcb-secondary-actions">
-            <button type="button" class="button small edit-walk-trigger-btn" id="btn-open-settings-modal" title="Nastavení aplikace a herního stylu">
-              ⚙️ Nastavení
-            </button>
-            <button type="button" class="button small edit-walk-trigger-btn" id="btn-open-edit-walk" aria-haspopup="dialog">
-              ✏️ Upravit zastávky
-            </button>
-            <a href="#/pas" class="mcb-passport-pill" id="compact-top-summary" title="Sbírky, hůl a hodnosti najdeš v Mém pasu">
-              ⭐ 0 b. · 🏅 Úroveň 1 · Můj pas →
-            </a>
-          </div>
-        </div>
-        <div class="tmh-metrics">
-          <div class="tmh-metric">
-            <span class="tmh-label">👣 Ušlá vzdálenost</span>
-            <strong class="tmh-value" id="hud-walked-dist">0 m</strong>
-          </div>
-          <div class="tmh-metric">
-            <span class="tmh-label">⏱ Čas chůze</span>
-            <strong class="tmh-value" id="hud-walk-time">0:00</strong>
-          </div>
-          <div class="tmh-metric">
-            <span class="tmh-label">🎯 Další zastávka</span>
-            <strong class="tmh-value" id="hud-next-stop">—</strong>
-          </div>
-        </div>
-        <button type="button" class="button small dark-ctrl-btn tmh-expand-btn" id="btn-toggle-tourist-stats" aria-expanded="false" aria-controls="tourist-stats-drawer">
-          📊 Podrobné údaje ▼
-        </button>
-      </div>
-
-      <div class="tourist-stats-drawer" id="tourist-stats-drawer" hidden>
-        <div class="tsd-grid">
-          <div class="tsd-item">
-            <span class="tsd-label">Aktuální rychlost (vyhlazená)</span>
-            <strong class="tsd-val" id="stat-current-speed">0,0 km/h</strong>
-            <small class="tsd-note">Při stání ukazuje 0,0 km/h</small>
-          </div>
-          <div class="tsd-item">
-            <span class="tsd-label">Průměrná rychlost chůze</span>
-            <strong class="tsd-val" id="stat-avg-speed">0,0 km/h</strong>
-            <small class="tsd-note">Z aktivního času chůze (bez pauz)</small>
-          </div>
-          <div class="tsd-item">
-            <span class="tsd-label">Čas aktivní chůze / Celkem</span>
-            <strong class="tsd-val" id="stat-total-time">0:00 / 0:00</strong>
-            <small class="tsd-note">Odděluje chůzi od zastavení</small>
-          </div>
-          <div class="tsd-item">
-            <span class="tsd-label">Nadmořská výška (odhad)</span>
-            <strong class="tsd-val" id="stat-altitude">—</strong>
-            <small class="tsd-note" id="stat-altitude-source">Výška není k dispozici</small>
-          </div>
-          <div class="tsd-item">
-            <span class="tsd-label">Nastoupáno / Sestoupáno</span>
-            <strong class="tsd-val" id="stat-elevation">+0 m / -0 m</strong>
-            <small class="tsd-note">Filtrovaný výškový přírůstek</small>
-          </div>
-          <div class="tsd-item">
-            <span class="tsd-label">Zbývá do cíle (pěší trasa)</span>
-            <strong class="tsd-val" id="stat-remaining">—</strong>
-            <small class="tsd-note" id="stat-remaining-note">Ze společné pěší trasy</small>
-          </div>
-        </div>
-      </div>
-
-      <div class="weather-strip" id="weather-strip" role="region" aria-label="Předpověď počasí na příštích 60 minut">
-        <div class="weather-strip-main">
-          <span class="weather-strip-sentence" id="weather-sentence">🌤️ Načítám stručný výhled počasí na příštích 60 minut…</span>
-          <button type="button" class="mcb-link-btn" id="btn-toggle-weather-detail" aria-expanded="false" aria-controls="weather-detail-panel">
-            Počasí podrobně ▼
-          </button>
-        </div>
-        <div class="weather-detail-panel" id="weather-detail-panel" hidden>
-          <div class="weather-detail-grid" id="weather-detail-grid"></div>
-        </div>
-      </div>
-
-      <div class="mcb-telemetry-row" role="status" aria-live="polite">
-        <span class="telemetry-pill state-ready" id="walk-state-pill">● Připraveno</span>
-        <span class="telemetry-pill gps-pill" id="gps-accuracy-badge">
-          📡 Nepřesnost GPS: čekám na signál (limit ≤ ${MAX_GPS_ACCURACY_M} m)
-        </span>
-        <span class="telemetry-pill fog-pill" id="fog-radius-badge">
-          🗺️ Dosah odkrývání: ${FOG_REVEAL_RADIUS_M} m
-        </span>
-        <span class="telemetry-session-text" id="walk-session">Tato výprava: 0 m · 0 dílků · 0 zastávek</span>
-      </div>
-
-      <div class="mcb-status-line">
-        <strong id="walk-status" role="status" aria-live="polite">${e(storageError || 'Mapa připravena.')}</strong>
-        <div class="mcb-toggles">
-          <label class="mcb-check"><input type="checkbox" id="walk-awake" checked> Držet displej</label>
-          <label class="mcb-check" title="Záznam pokračuje i se zhasnutou obrazovkou v kapse"><input type="checkbox" id="walk-bg-record" checked disabled> 🔋 Záznam při zhasnutém displeji: ZAP</label>
-          <label class="mcb-check"><input type="checkbox" id="walk-sound" ${stateObj.soundEnabled !== false ? 'checked' : ''}> 🔊 Zvuk</label>
-          <label class="mcb-check"><input type="checkbox" id="walk-voice-nav" ${voiceNavEnabled ? 'checked' : ''}> 🗣️ Hlasová navigace</label>
-          <span id="wake-status" class="visually-hidden">Displej: zámek není aktivní.</span>
+          <button type="button" class="p1-choice-btn" id="btn-open-settings-modal" title="Nastavení aplikace a herního stylu">⚙️ Nastavení</button>
         </div>
       </div>
     </section>
@@ -1711,6 +1575,120 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     <div id="simulator-test-zone" class="simulator-test-zone" hidden></div>
     <p id="tile-status" class="small-note" role="status"></p>
 
+    <!-- DÁVKA 2 (Bod 3.3): Zpřístupněný panel „📊 Moje chůze a počasí“ pod mapou -->
+    <section class="map-command-bar" id="map-command-bar" aria-label="Moje chůze a počasí">
+      <div class="mcb-primary-row" hidden>
+        <div class="mcb-section-heading">
+          <strong>📊 Moje chůze a počasí</strong>
+        </div>
+        <div class="mcb-walk-actions" id="expedition-buttons" hidden>
+          <button type="button" id="walk-start" class="button accent-action-btn main-start-btn">▶ Začít procházku</button>
+          <button type="button" id="walk-stop" class="button dark-ctrl-btn" disabled>II Pozastavit</button>
+          <button type="button" id="walk-end" class="button danger-ctrl-btn" disabled>⏹ Ukončit</button>
+        </div>
+      </div>
+
+      <div class="tourist-main-hud" id="tourist-main-hud" aria-label="Hlavní ukazatele chůze">
+        <div class="tmh-header-row">
+          <strong class="tmh-section-title">📊 Moje chůze a počasí</strong>
+          <div class="mcb-secondary-actions">
+            <button type="button" class="button small edit-walk-trigger-btn" id="btn-open-edit-walk" aria-haspopup="dialog">
+              ✏️ Upravit zastávky
+            </button>
+            <a href="#/pas" class="mcb-passport-pill" id="compact-top-summary" title="Sbírky, hůl a hodnosti najdeš v Mém pasu">
+              ⭐ 0 b. · 🏅 Úroveň 1 · Můj pas →
+            </a>
+          </div>
+        </div>
+        <div class="tmh-metrics">
+          <div class="tmh-metric">
+            <span class="tmh-label">👣 Ušlá vzdálenost</span>
+            <strong class="tmh-value" id="hud-walked-dist">0 m</strong>
+          </div>
+          <div class="tmh-metric">
+            <span class="tmh-label">⏱ Čas chůze</span>
+            <strong class="tmh-value" id="hud-walk-time">0:00</strong>
+          </div>
+          <div class="tmh-metric">
+            <span class="tmh-label">🎯 Další zastávka</span>
+            <strong class="tmh-value" id="hud-next-stop">—</strong>
+          </div>
+        </div>
+        <button type="button" class="button small dark-ctrl-btn tmh-expand-btn" id="btn-toggle-tourist-stats" aria-expanded="false" aria-controls="tourist-stats-drawer">
+          📊 Podrobné údaje ▼
+        </button>
+      </div>
+
+      <div class="tourist-stats-drawer" id="tourist-stats-drawer" hidden>
+        <div class="tsd-grid">
+          <div class="tsd-item">
+            <span class="tsd-label">Aktuální rychlost (vyhlazená)</span>
+            <strong class="tsd-val" id="stat-current-speed">0,0 km/h</strong>
+            <small class="tsd-note">Při stání ukazuje 0,0 km/h</small>
+          </div>
+          <div class="tsd-item">
+            <span class="tsd-label">Průměrná rychlost chůze</span>
+            <strong class="tsd-val" id="stat-avg-speed">0,0 km/h</strong>
+            <small class="tsd-note">Z aktivního času chůze (bez pauz)</small>
+          </div>
+          <div class="tsd-item">
+            <span class="tsd-label">Čas aktivní chůze / Celkem</span>
+            <strong class="tsd-val" id="stat-total-time">0:00 / 0:00</strong>
+            <small class="tsd-note">Odděluje chůzi od zastavení</small>
+          </div>
+          <div class="tsd-item">
+            <span class="tsd-label">Nadmořská výška (odhad)</span>
+            <strong class="tsd-val" id="stat-altitude">—</strong>
+            <small class="tsd-note" id="stat-altitude-source">Výška není k dispozici</small>
+          </div>
+          <div class="tsd-item">
+            <span class="tsd-label">Nastoupáno / Sestoupáno</span>
+            <strong class="tsd-val" id="stat-elevation">+0 m / -0 m</strong>
+            <small class="tsd-note">Filtrovaný výškový přírůstek</small>
+          </div>
+          <div class="tsd-item">
+            <span class="tsd-label">Zbývá do cíle (pěší trasa)</span>
+            <strong class="tsd-val" id="stat-remaining">—</strong>
+            <small class="tsd-note" id="stat-remaining-note">Ze společné pěší trasy</small>
+          </div>
+        </div>
+      </div>
+
+      <div class="weather-strip" id="weather-strip" role="region" aria-label="Předpověď počasí na příštích 60 minut">
+        <div class="weather-strip-main">
+          <span class="weather-strip-sentence" id="weather-sentence">🌤️ Načítám stručný výhled počasí na příštích 60 minut…</span>
+          <button type="button" class="mcb-link-btn" id="btn-toggle-weather-detail" aria-expanded="false" aria-controls="weather-detail-panel">
+            Počasí podrobně ▼
+          </button>
+        </div>
+        <div class="weather-detail-panel" id="weather-detail-panel" hidden>
+          <div class="weather-detail-grid" id="weather-detail-grid"></div>
+        </div>
+      </div>
+
+      <div class="mcb-telemetry-row" role="status" aria-live="polite">
+        <span class="telemetry-pill state-ready" id="walk-state-pill">● Připraveno</span>
+        <span class="telemetry-pill gps-pill" id="gps-accuracy-badge">
+          📡 Nepřesnost GPS: čekám na signál (limit ≤ ${MAX_GPS_ACCURACY_M} m)
+        </span>
+        <span class="telemetry-pill fog-pill" id="fog-radius-badge">
+          🗺️ Dosah odkrývání: ${FOG_REVEAL_RADIUS_M} m
+        </span>
+        <span class="telemetry-session-text" id="walk-session">Tato výprava: 0 m · 0 dílků · 0 zastávek</span>
+      </div>
+
+      <div class="mcb-status-line">
+        <strong id="walk-status" role="status" aria-live="polite">${e(storageError || 'Mapa připravena.')}</strong>
+        <div class="mcb-toggles" hidden>
+          <label class="mcb-check"><input type="checkbox" id="walk-awake" checked> Držet displej</label>
+          <label class="mcb-check" title="Záznam pokračuje i se zhasnutou obrazovkou v kapse"><input type="checkbox" id="walk-bg-record" checked disabled> 🔋 Záznam při zhasnutém displeji: ZAP</label>
+          <label class="mcb-check"><input type="checkbox" id="walk-sound" ${stateObj.soundEnabled !== false ? 'checked' : ''}> 🔊 Zvuk</label>
+          <label class="mcb-check"><input type="checkbox" id="walk-voice-nav" ${voiceNavEnabled ? 'checked' : ''}> 🗣️ Hlasová navigace</label>
+          <span id="wake-status" class="visually-hidden">Displej: zámek není aktivní.</span>
+        </div>
+      </div>
+    </section>
+
     <!-- Podrobný plán a zastávky výpravy pod mapou (vždy přístupný a přehledný) -->
     <section class="bottom-sheet" id="walk-bottom-sheet" aria-label="Plán a zastávky procházky">
       <div class="bottom-sheet-bar">
@@ -1739,6 +1717,17 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
             <small class="small-note">Bezpečnost: Nikdy nevstupuj na nepřístupné pozemky, nesahej na přírodu a nesleduj displej při přecházení silnice.</small>
             <button type="button" class="button small lime" id="btn-mindfulness-save-memory">✨ Uložit vzpomínku</button>
           </div>
+        </div>
+
+        <!-- Vizuální plán dnešní cesty: všechny zastávky v pořadí 1 -> 2 -> 3 přímo na očích -->
+        <div class="top-route-itinerary-wrap" id="top-route-itinerary-wrap">
+          <div class="top-itinerary-header">
+            <span class="top-itinerary-label" id="top-itinerary-label">🗺️ Plán dnešní cesty a zastávky (kliknutím ukážeš místo na mapě):</span>
+            <button type="button" class="top-itinerary-toggle-btn" id="btn-toggle-p1-bar" aria-expanded="true">
+              ▲ Sbalit volby trasy
+            </button>
+          </div>
+          <div class="top-route-itinerary-strip" id="top-route-itinerary-strip" role="list" aria-label="Body na naplánované trase"></div>
         </div>
 
         <div class="planner-box">
@@ -2035,45 +2024,57 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
   }
 
   function projectLatLngToContainerPoint(lat, lng) {
-    if (!map) return { x: 0, y: 0 };
+    if (!map || !Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) return { x: 0, y: 0 };
     if (typeof map.project === 'function') {
-      const pt = map.project([Number(lng), Number(lat)]);
-      return { x: Number(pt?.x) || 0, y: Number(pt?.y) || 0 };
+      try {
+        const pt = map.project([Number(lng), Number(lat)]);
+        return { x: Number.isFinite(Number(pt?.x)) ? Number(pt.x) : 0, y: Number.isFinite(Number(pt?.y)) ? Number(pt.y) : 0 };
+      } catch {
+        return { x: 0, y: 0 };
+      }
     }
     return { x: 0, y: 0 };
   }
 
   function setMapView(lat, lng, zoom = null, animate = false) {
     if (!map || !Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) return;
-    const targetZoom = zoom != null && Number.isFinite(Number(zoom))
+    const rawZoom = zoom != null && Number.isFinite(Number(zoom))
       ? Number(zoom)
-      : (typeof map.getZoom === 'function' ? map.getZoom() : 15.5);
+      : (typeof map.getZoom === 'function' ? Number(map.getZoom()) : 15.5);
+    const targetZoom = Number.isFinite(rawZoom) ? Math.max(3, Math.min(19, rawZoom)) : 15.5;
     const centerLngLat = [Number(lng), Number(lat)];
-    if (animate && typeof map.easeTo === 'function') {
-      map.easeTo({ center: centerLngLat, zoom: targetZoom, duration: 420 });
-    } else if (typeof map.jumpTo === 'function') {
-      map.jumpTo({ center: centerLngLat, zoom: targetZoom });
-    } else if (typeof map.setCenter === 'function') {
-      map.setCenter(centerLngLat);
-      if (typeof map.setZoom === 'function') map.setZoom(targetZoom);
-    }
+    try {
+      if (animate && typeof map.easeTo === 'function') {
+        map.easeTo({ center: centerLngLat, zoom: targetZoom, duration: 420 });
+      } else if (typeof map.jumpTo === 'function') {
+        map.jumpTo({ center: centerLngLat, zoom: targetZoom });
+      } else if (typeof map.setCenter === 'function') {
+        map.setCenter(centerLngLat);
+        if (typeof map.setZoom === 'function') map.setZoom(targetZoom);
+      }
+    } catch {}
   }
 
   function panMapTo(lat, lng, animate = false) {
     if (!map || !Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) return;
     const centerLngLat = [Number(lng), Number(lat)];
-    if (animate && typeof map.easeTo === 'function') {
-      map.easeTo({ center: centerLngLat, duration: 350 });
-    } else if (typeof map.jumpTo === 'function') {
-      map.jumpTo({ center: centerLngLat });
-    } else if (typeof map.panTo === 'function') {
-      map.panTo(centerLngLat, { duration: 0 });
-    }
+    try {
+      if (animate && typeof map.easeTo === 'function') {
+        map.easeTo({ center: centerLngLat, duration: 350 });
+      } else if (typeof map.jumpTo === 'function') {
+        map.jumpTo({ center: centerLngLat });
+      } else if (typeof map.panTo === 'function') {
+        map.panTo(centerLngLat, { duration: 0 });
+      }
+    } catch {}
   }
 
   function resizeMap() {
     if (!map) return;
     try {
+      const mapEl = $('walk-map');
+      if (mapEl && (mapEl.clientWidth <= 0 || mapEl.clientHeight <= 0)) return;
+      if (map._renderTaskQueue && map._renderTaskQueue._currentlyRunning) return;
       if (typeof map.resize === 'function') {
         map.resize();
       }
@@ -2114,11 +2115,11 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       if (lat < minLat) minLat = lat;
       if (lat > maxLat) maxLat = lat;
     }
-    if (!Number.isFinite(minLng) || !Number.isFinite(maxLng)) return;
+    if (!Number.isFinite(minLng) || !Number.isFinite(maxLng) || !Number.isFinite(minLat) || !Number.isFinite(maxLat)) return;
     try {
       map.fitBounds(
         [[minLng, minLat], [maxLng, maxLat]],
-        { padding, maxZoom, duration: 450 }
+        { padding: Number.isFinite(padding) ? padding : 40, maxZoom: Number.isFinite(maxZoom) ? maxZoom : 16, duration: 450 }
       );
     } catch {}
   }
@@ -2158,16 +2159,25 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     if (!map || zenMode || sheetCollapsed) return 0;
     const mapRect = $('walk-map')?.getBoundingClientRect?.();
     const sheetRect = $('walk-bottom-sheet')?.getBoundingClientRect?.();
-    if (!mapRect || !sheetRect) return 80;
+    if (!mapRect || !sheetRect || !Number.isFinite(mapRect.height) || mapRect.height < 120) return 0;
     const overlap = Math.max(0, mapRect.bottom - sheetRect.top);
-    return overlap > 0 ? Math.min(mapRect.height * 0.5, overlap + 32) : Math.round(mapRect.height * 0.16);
+    const raw = overlap > 0 ? Math.min(mapRect.height * 0.4, overlap + 24) : Math.round(mapRect.height * 0.12);
+    return Number.isFinite(raw) ? Math.max(0, Math.round(raw)) : 0;
   }
 
   function getMapCameraPadding() {
     if (!map) return { top: 0, bottom: 0, left: 0, right: 0 };
+    const mapEl = $('walk-map');
+    const h = mapEl?.clientHeight || map?.transform?.height || 0;
+    const w = mapEl?.clientWidth || map?.transform?.width || 0;
+    if (!Number.isFinite(h) || !Number.isFinite(w) || h < 140 || w < 100) {
+      return { top: 0, bottom: 0, left: 0, right: 0 };
+    }
+    const maxBottom = Math.max(0, Math.floor(h * 0.35));
+    const bottom = zenMode ? 0 : Math.min(140, maxBottom, Math.round(getBottomSheetOverlapPx() * 0.5));
     return {
-      top: 20,
-      bottom: zenMode ? 0 : Math.min(160, Math.round(getBottomSheetOverlapPx() * 0.5)),
+      top: Math.min(20, Math.floor(h * 0.1)),
+      bottom: Number.isFinite(bottom) ? Math.max(0, bottom) : 0,
       left: 0,
       right: 0,
     };
@@ -2178,7 +2188,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
 
   function centerMapOnPlayer(pos = lastFix || telemetry.lastKnownPosition, animate = false) {
     if (!follow || isUserTouchingMap) return;
-    if (!map || !pos || !Number.isFinite(pos.lat) || !Number.isFinite(pos.lng)) return;
+    if (!map || !pos || !Number.isFinite(Number(pos.lat)) || !Number.isFinite(Number(pos.lng))) return;
     const padding = getMapCameraPadding();
     const opts = {
       center: [Number(pos.lng), Number(pos.lat)],
@@ -2186,17 +2196,19 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     };
     if (is3dMode || is3DMode) {
       opts.pitch = 45;
-      if (currentWalkHeadingDeg != null && followHeadingMode) {
+      if (Number.isFinite(currentWalkHeadingDeg) && followHeadingMode) {
         opts.bearing = currentWalkHeadingDeg;
       }
     }
-    if (animate && typeof map.easeTo === 'function') {
-      map.easeTo({ ...opts, duration: 350 });
-    } else if (typeof map.jumpTo === 'function') {
-      map.jumpTo(opts);
-    } else if (typeof map.setCenter === 'function') {
-      map.setCenter(opts.center);
-    }
+    try {
+      if (animate && typeof map.easeTo === 'function') {
+        map.easeTo({ ...opts, duration: 350 });
+      } else if (typeof map.jumpTo === 'function') {
+        map.jumpTo(opts);
+      } else if (typeof map.setCenter === 'function') {
+        map.setCenter(opts.center);
+      }
+    } catch {}
   }
 
   function getAvatarReferencePosition() {
@@ -2441,21 +2453,21 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       player.setLatLng([targetLat, targetLng]);
       accuracyRing?.setLatLng([targetLat, targetLng]);
       if (follow && !isUserTouchingMap && map) {
-        let snapBearing = camBearing;
+        let snapBearing = Number.isFinite(camBearing) ? camBearing : 0;
         if (is3dMode || is3DMode) {
-          snapBearing = currentWalkHeadingDeg != null ? currentWalkHeadingDeg : (Number.isFinite(targetBearing) ? targetBearing : camBearing);
+          snapBearing = Number.isFinite(currentWalkHeadingDeg) ? currentWalkHeadingDeg : (Number.isFinite(targetBearing) ? targetBearing : snapBearing);
         } else if (followHeadingMode) {
-          snapBearing = currentDeviceHeading != null ? currentDeviceHeading : (currentWalkHeadingDeg != null ? currentWalkHeadingDeg : camBearing);
+          snapBearing = Number.isFinite(currentDeviceHeading) ? currentDeviceHeading : (Number.isFinite(currentWalkHeadingDeg) ? currentWalkHeadingDeg : snapBearing);
         }
         const jumpOpts = {
           center: [targetLng, targetLat],
           padding: getMapCameraPadding(),
         };
-        if (is3dMode || is3DMode || followHeadingMode) {
+        if ((is3dMode || is3DMode || followHeadingMode) && Number.isFinite(snapBearing)) {
           jumpOpts.bearing = snapBearing;
         }
         if (typeof map.jumpTo === 'function') {
-          map.jumpTo(jumpOpts);
+          try { map.jumpTo(jumpOpts); } catch {}
         }
       }
       return;
@@ -2481,17 +2493,18 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       accuracyRing?.setLatLng([curLat, curLng]);
 
       // Jediná synchronní aktualizace kamery v LERP smyčce bez cukání
-      if (follow && !isUserTouchingMap) {
+      if (follow && !isUserTouchingMap && Number.isFinite(curLat) && Number.isFinite(curLng)) {
+        if (!Number.isFinite(camBearing)) camBearing = 0;
         let targetCamHeading = camBearing;
         if (is3dMode || is3DMode) {
           // GTA pohled zezadu ve směru pohybu
-          targetCamHeading = currentWalkHeadingDeg != null
+          targetCamHeading = Number.isFinite(currentWalkHeadingDeg)
             ? currentWalkHeadingDeg
             : (Number.isFinite(targetBearing) ? targetBearing : camBearing);
         } else if (followHeadingMode) {
-          targetCamHeading = currentDeviceHeading != null
+          targetCamHeading = Number.isFinite(currentDeviceHeading)
             ? currentDeviceHeading
-            : (currentWalkHeadingDeg != null ? currentWalkHeadingDeg : camBearing);
+            : (Number.isFinite(currentWalkHeadingDeg) ? currentWalkHeadingDeg : camBearing);
         }
 
         // Kruhový LERP přes nejmenší úhel
@@ -2504,11 +2517,11 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
           center: [curLng, curLat],
           padding: getMapCameraPadding(),
         };
-        if (is3dMode || is3DMode || followHeadingMode) {
+        if ((is3dMode || is3DMode || followHeadingMode) && Number.isFinite(camBearing)) {
           jumpOpts.bearing = camBearing;
         }
         if (typeof map.jumpTo === 'function') {
-          map.jumpTo(jumpOpts);
+          try { map.jumpTo(jumpOpts); } catch {}
         }
       }
 
@@ -4664,7 +4677,11 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
             renderPlaces();
             renderNextCheckpointHero(lastFix || telemetry.lastKnownPosition);
             if (selectedDetailPlace && !$('place-detail-sheet')?.hidden) {
-              openPlaceDetail(selectedDetailPlace);
+              const updatedPhoto = getCachedPlacePhoto(selectedDetailPlace);
+              const imgEl = $('pds-photo-img');
+              if (updatedPhoto?.photoUrl && imgEl && imgEl.getAttribute('src') !== updatedPhoto.photoUrl) {
+                imgEl.src = updatedPhoto.photoUrl;
+              }
             }
           },
         });
@@ -7003,9 +7020,12 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       updateFollowUi();
       updateHeadingModeBannerUi();
 
-      const curZoom = typeof map.getZoom === 'function' ? map.getZoom() : 16.5;
-      const targetBearing = typeof map.getBearing === 'function' ? map.getBearing() : 0;
-      const curCenter = typeof map.getCenter === 'function' ? map.getCenter() : null;
+      const rawZoom = typeof map.getZoom === 'function' ? Number(map.getZoom()) : 16.5;
+      const curZoom = Number.isFinite(rawZoom) ? rawZoom : 16.5;
+      const rawBearing = typeof map.getBearing === 'function' ? Number(map.getBearing()) : 0;
+      const targetBearing = Number.isFinite(rawBearing) ? rawBearing : 0;
+      const rawCenter = typeof map.getCenter === 'function' ? map.getCenter() : null;
+      const curCenter = (rawCenter && Number.isFinite(rawCenter.lng) && Number.isFinite(rawCenter.lat)) ? rawCenter : null;
       const padding = getMapCameraPadding();
 
       // Bezpečné přepnutí 2D/3D i během načítání stylu (!map.isStyleLoaded())
@@ -7104,6 +7124,154 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     }
   }
 
+  function hardenMapLibreInternals(mapInstance, fallbackCenter) {
+    if (!mapInstance) return;
+    const safeDefaultLng = Number.isFinite(Number(fallbackCenter?.lng)) ? Number(fallbackCenter.lng) : 13.8644;
+    const safeDefaultLat = Number.isFinite(Number(fallbackCenter?.lat)) ? Number(fallbackCenter.lat) : 49.6014;
+
+    // 1. Ochrana interních front úloh (_renderTaskQueue / _taskQueue) proti re-entrantnímu volání a uváznutí _currentlyRunning
+    for (const queueKey of ['_renderTaskQueue', '_taskQueue']) {
+      const q = mapInstance[queueKey];
+      if (q && typeof q.run === 'function' && !q.__czekpointHardened) {
+        const origRun = q.run.bind(q);
+        q.run = function (id) {
+          if (this._currentlyRunning) {
+            return;
+          }
+          try {
+            return origRun(id);
+          } catch {
+            // Zabráníme zamrznutí vykreslovací smyčky při výjimce v animaci nebo scrollZoom
+          } finally {
+            this._currentlyRunning = false;
+          }
+        };
+        q.__czekpointHardened = true;
+      }
+    }
+
+    // 2. Ochrana transformace proti nulovým rozměrům a NaN souřadnicím v pointLocation / coordinateLocation
+    const tr = mapInstance.transform;
+    if (tr && !tr.__czekpointHardened) {
+      if (!Number.isFinite(tr.width) || tr.width <= 0 || !Number.isFinite(tr.height) || tr.height <= 0) {
+        try {
+          const cont = typeof mapInstance.getContainer === 'function' ? mapInstance.getContainer() : null;
+          const w = Math.max(320, Number(cont?.clientWidth) || 390);
+          const h = Math.max(320, Number(cont?.clientHeight) || 600);
+          if (typeof tr.resize === 'function') tr.resize(w, h);
+        } catch {}
+      }
+
+      if (typeof tr.pointLocation === 'function') {
+        const origPointLocation = tr.pointLocation.bind(tr);
+        tr.pointLocation = function (p) {
+          const safeW = Number.isFinite(tr.width) && tr.width > 0 ? tr.width : 390;
+          const safeH = Number.isFinite(tr.height) && tr.height > 0 ? tr.height : 600;
+          if (!Number.isFinite(tr.width) || tr.width <= 0 || !Number.isFinite(tr.height) || tr.height <= 0) {
+            try { tr.resize?.(safeW, safeH); } catch {}
+          }
+          const px = Number.isFinite(Number(p?.x)) ? Number(p.x) : safeW / 2;
+          const py = Number.isFinite(Number(p?.y)) ? Number(p.y) : safeH / 2;
+          const safePoint = (p && Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y)))
+            ? p
+            : { x: px, y: py };
+          try {
+            const coord = origPointLocation(safePoint);
+            if (coord && Number.isFinite(Number(coord.x)) && Number.isFinite(Number(coord.y))) {
+              return coord;
+            }
+          } catch {}
+          try {
+            if (typeof tr.locationCoordinate === 'function' && tr.center && Number.isFinite(tr.center.lng) && Number.isFinite(tr.center.lat)) {
+              return tr.locationCoordinate(tr.center);
+            }
+          } catch {}
+          return { x: 0.5, y: 0.5, z: 0 };
+        };
+      }
+
+      if (typeof tr.coordinateLocation === 'function') {
+        const origCoordLocation = tr.coordinateLocation.bind(tr);
+        tr.coordinateLocation = function (coord) {
+          const cx = Number.isFinite(Number(coord?.x)) ? Number(coord.x) : 0.5;
+          const cy = Number.isFinite(Number(coord?.y)) ? Number(coord.y) : 0.5;
+          const safeCoord = (coord && Number.isFinite(Number(coord.x)) && Number.isFinite(Number(coord.y)))
+            ? coord
+            : { x: cx, y: cy, z: 0 };
+          try {
+            const ll = origCoordLocation(safeCoord);
+            if (ll && Number.isFinite(Number(ll.lng)) && Number.isFinite(Number(ll.lat))) {
+              return ll;
+            }
+          } catch {}
+          const c = tr.center;
+          const lng = Number.isFinite(Number(c?.lng)) ? Number(c.lng) : safeDefaultLng;
+          const lat = Number.isFinite(Number(c?.lat)) ? Number(c.lat) : safeDefaultLat;
+          return maplibregl?.LngLat ? new maplibregl.LngLat(lng, lat) : { lng, lat };
+        };
+      }
+      tr.__czekpointHardened = true;
+    }
+
+    // 3. Ochrana map.unproject proti NaN vstupu i výstupu
+    if (typeof mapInstance.unproject === 'function' && !mapInstance.__czekpointUnprojectHardened) {
+      const origUnproject = mapInstance.unproject.bind(mapInstance);
+      mapInstance.unproject = function (point) {
+        const safeW = Number.isFinite(mapInstance.transform?.width) && mapInstance.transform.width > 0 ? mapInstance.transform.width : 390;
+        const safeH = Number.isFinite(mapInstance.transform?.height) && mapInstance.transform.height > 0 ? mapInstance.transform.height : 600;
+        let safePt = point;
+        if (Array.isArray(point)) {
+          const x = Number.isFinite(Number(point[0])) ? Number(point[0]) : safeW / 2;
+          const y = Number.isFinite(Number(point[1])) ? Number(point[1]) : safeH / 2;
+          safePt = [x, y];
+        } else if (!point || !Number.isFinite(Number(point.x)) || !Number.isFinite(Number(point.y))) {
+          safePt = { x: safeW / 2, y: safeH / 2 };
+        }
+        try {
+          const res = origUnproject(safePt);
+          if (res && Number.isFinite(Number(res.lng)) && Number.isFinite(Number(res.lat))) {
+            return res;
+          }
+        } catch {}
+        const c = mapInstance.transform?.center;
+        const lng = Number.isFinite(Number(c?.lng)) ? Number(c.lng) : safeDefaultLng;
+        const lat = Number.isFinite(Number(c?.lat)) ? Number(c.lat) : safeDefaultLat;
+        return maplibregl?.LngLat ? new maplibregl.LngLat(lng, lat) : { lng, lat };
+      };
+      mapInstance.__czekpointUnprojectHardened = true;
+    }
+
+    // 4. Ochrana ScrollZoomHandler (us.wheel / us._start) proti událostem s NaN pozicí nebo při nulové velikosti mapy
+    const sz = mapInstance.scrollZoom;
+    if (sz && !sz.__czekpointHardened) {
+      if (typeof sz.wheel === 'function') {
+        const origWheel = sz.wheel.bind(sz);
+        sz.wheel = function (e) {
+          const w = mapInstance.transform?.width || 0;
+          const h = mapInstance.transform?.height || 0;
+          if (w <= 0 || h <= 0) return;
+          try {
+            return origWheel(e);
+          } catch {}
+        };
+      }
+      if (typeof sz._start === 'function') {
+        const origStart = sz._start.bind(sz);
+        sz._start = function (e) {
+          const w = Number.isFinite(mapInstance.transform?.width) && mapInstance.transform.width > 0 ? mapInstance.transform.width : 390;
+          const h = Number.isFinite(mapInstance.transform?.height) && mapInstance.transform.height > 0 ? mapInstance.transform.height : 600;
+          if (!this._pos || !Number.isFinite(Number(this._pos.x)) || !Number.isFinite(Number(this._pos.y))) {
+            this._pos = { x: w / 2, y: h / 2 };
+          }
+          try {
+            return origStart(e);
+          } catch {}
+        };
+      }
+      sz.__czekpointHardened = true;
+    }
+  }
+
   function initializeMapLibreInstance() {
     if (!maplibregl || disposed) return false;
     const webglCheck = checkWebGLSupport();
@@ -7112,7 +7280,10 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       return false;
     }
 
-    const center = lastFix || (progress.cells.length ? cellCenter(progress.cells.at(-1)) : { lat: 49.6014, lng: 13.8644 });
+    const rawCenter = lastFix || (progress.cells.length ? cellCenter(progress.cells.at(-1)) : { lat: 49.6014, lng: 13.8644 });
+    const center = (rawCenter && Number.isFinite(Number(rawCenter.lat)) && Number.isFinite(Number(rawCenter.lng)))
+      ? { lat: Number(rawCenter.lat), lng: Number(rawCenter.lng) }
+      : { lat: 49.6014, lng: 13.8644 };
 
     try {
       if (map) {
@@ -7134,6 +7305,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         maxPitch: 60,
         attributionControl: false,
       });
+      hardenMapLibreInternals(map, center);
       appliedTerrain3D = false;
       enableAllMapInteractions();
       hideWebGLErrorBanner();
