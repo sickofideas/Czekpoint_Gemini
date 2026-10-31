@@ -5,25 +5,48 @@
 // - Poskytuje cache-first strategii s doživotním fallbackem pro dlaždice při výpadku signálu
 // ============================================================
 
-const APP_CACHE_NAME = 'czekpoint-app-shell-v2.0-final';
+const APP_CACHE_NAME = 'czekpoint-app-shell-v2.3';
 const TILE_CACHE_NAME = 'czekpoint-offline-tiles-v1.3';
 
 const CORE_ASSETS = [
   './',
   './index.html',
   './manifest.webmanifest',
+  './config.js',
   './assets/styles.css',
   './assets/walk.css',
+  './assets/icon.svg',
+  './assets/vendor/maplibre-gl/maplibre-gl.js',
+  './assets/vendor/maplibre-gl/maplibre-gl.css',
   './src/app.js',
   './src/walk.js',
   './src/walk-engine.js',
   './src/walk-store.js',
   './src/planner.js',
   './src/place-photos.js',
+  './src/poi-photos.js',
   './src/elevation.js',
   './src/postcards.js',
+  './src/postcard.js',
   './src/offline-maps.js',
   './src/keep-alive.js',
+  './src/background-keepalive.js',
+  './src/gps-simulator.js',
+  './src/hiking-trails.js',
+  './src/natural-features.js',
+  './src/nearby.js',
+  './src/auto-places.js',
+  './src/avatars.js',
+  './src/walking-stick.js',
+  './src/achievements.js',
+  './src/expedition-engine.js',
+  './src/pilgrims.js',
+  './src/telemetry.js',
+  './src/brand-logo.js',
+  './src/weather.js',
+  './src/media.js',
+  './src/fx.js',
+  './src/repository.js',
   './src/domain.js',
   './src/ui.js',
   './src/data.js',
@@ -53,7 +76,7 @@ self.addEventListener('activate', (event) => {
       .then((keys) =>
         Promise.all(
           keys.map((key) => {
-            if (key !== APP_CACHE_NAME && key !== TILE_CACHE_NAME) {
+            if (key.startsWith('czekpoint-') && key !== APP_CACHE_NAME && key !== TILE_CACHE_NAME) {
               return caches.delete(key);
             }
             return Promise.resolve();
@@ -90,7 +113,10 @@ self.addEventListener('fetch', (event) => {
             '<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256"><rect width="256" height="256" fill="#efe6d5"/><text x="128" y="128" text-anchor="middle" fill="#8b7355" font-family="sans-serif" font-size="11">Offline mapa</text></svg>',
             {
               status: 200,
-              headers: { 'Content-Type': 'image/svg+xml' },
+              headers: {
+                'Content-Type': 'image/svg+xml',
+                'X-Czekpoint-Fallback-Tile': '1',
+              },
             }
           );
         }

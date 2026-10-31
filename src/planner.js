@@ -1688,33 +1688,72 @@ export function computeActiveTurnInstruction(arg1, arg2, arg3 = null, arg4 = nul
 }
 
 /**
- * Vyhledá město, obec nebo místo v ČR pomocí Nominatim API s vestavěnou zálohou českých obcí (ZADÁNÍ #08 Bod 1).
+ * Normalizuje vyhledávací řetězec: malá písmena, odstranění diakritiky, oříznutí mezer.
  */
-export async function searchPlaceNominatim(query, fetchImpl = typeof fetch !== 'undefined' ? fetch : null) {
-  const q = String(query || '').trim();
-  if (!q) return [...CZECH_PLACE_PRESETS];
+export function normalizeSearchQuery(str) {
+  if (typeof str !== 'string') return '';
+  return str.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+}
 
-  const qNorm = q.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+/**
+ * Vyhledá město, obec nebo místo v ČR i ve světě pomocí Nominatim API (ZADÁNÍ #08 & Dávka 2).
+ * Podporuje 2. parametr jako options objekt { signal, fetchImpl, lang }, přímo AbortSignal nebo fetchImpl funkci.
+ * NIKDY nevrací náhodné české presety, pokud hledané místo neexistuje!
+ */
+export async function searchPlaceNominatim(query, optionsOrSignal = {}) {
+  const q = String(query || '').trim();
+  if (!q) {
+    // Když je vyhledávací pole prázdné, vrátíme české presety jako tipy
+    return [...CZECH_PLACE_PRESETS];
+  }
+
+  let signal = undefined;
+  let fetchImpl = typeof fetch !== 'undefined' ? fetch : null;
+  let lang = typeof navigator !== 'undefined' ? (navigator.language || 'cs,en') : 'cs,en';
+
+  if (typeof optionsOrSignal === 'function') {
+    fetchImpl = optionsOrSignal;
+  } else if (
+    (typeof AbortSignal !== 'undefined' && optionsOrSignal instanceof AbortSignal) ||
+    typeof optionsOrSignal?.aborted === 'boolean'
+  ) {
+    signal = optionsOrSignal;
+  } else if (typeof optionsOrSignal === 'object' && optionsOrSignal !== null) {
+    if (optionsOrSignal.signal) signal = optionsOrSignal.signal;
+    if (typeof optionsOrSignal.fetchImpl === 'function') fetchImpl = optionsOrSignal.fetchImpl;
+    if (optionsOrSignal.lang) lang = optionsOrSignal.lang;
+  }
+
+  const qNorm = normalizeSearchQuery(q);
   const localMatches = CZECH_PLACE_PRESETS.filter(item => {
-    const lNorm = item.label.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const lNorm = normalizeSearchQuery(item.label || item.title || '');
     return lNorm.includes(qNorm);
   });
 
   if (!fetchImpl || q.length < 2) {
-    return localMatches.length > 0 ? localMatches : CZECH_PLACE_PRESETS.slice(0, 4);
+    return localMatches;
   }
 
   try {
-    const url = `https://nominatim.openstreetmap.org/search?format=json&countrycodes=cz&limit=5&q=${encodeURIComponent(q)}`;
+    // Celosvětové hledání (bez countrycodes=cz), s jazykem podle prohlížeče
+    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=6&q=${encodeURIComponent(q)}`;
     let timeoutId;
-    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    const signal = controller ? controller.signal : undefined;
-    if (controller) timeoutId = setTimeout(() => controller.abort(), 3500);
+    let ownController = null;
+    let effectiveSignal = signal;
+
+    if (!effectiveSignal && typeof AbortController !== 'undefined') {
+      ownController = new AbortController();
+      effectiveSignal = ownController.signal;
+      timeoutId = setTimeout(() => ownController.abort(), 4500);
+    }
 
     try {
       const res = await fetchImpl(url, {
-        signal,
-        headers: { 'Accept-Language': 'cs' },
+        signal: effectiveSignal,
+        headers: {
+          'Accept-Language': lang,
+          'User-Agent': 'Czekpoint-App/2.2',
+        },
       });
       if (res && res.ok) {
         const data = await res.json();
@@ -1722,7 +1761,7 @@ export async function searchPlaceNominatim(query, fetchImpl = typeof fetch !== '
           const remoteResults = data
             .map((item, idx) => ({
               id: `nom-${item.place_id || idx}`,
-              label: String(item.display_name || q).split(',').slice(0, 2).join(', ').trim(),
+              label: String(item.display_name || q).split(',').slice(0, 3).map(s => s.trim()).filter(Boolean).join(', '),
               fullLabel: String(item.display_name || q),
               lat: Number(item.lat),
               lng: Number(item.lon),
@@ -1736,11 +1775,14 @@ export async function searchPlaceNominatim(query, fetchImpl = typeof fetch !== '
     } finally {
       if (timeoutId) clearTimeout(timeoutId);
     }
-  } catch {
-    // Fallback to local presets on network error
+  } catch (err) {
+    if (err?.name === 'AbortError') {
+      throw err;
+    }
   }
 
-  return localMatches.length > 0 ? localMatches : CZECH_PLACE_PRESETS.slice(0, 4);
+  // ZÁKAZ FALEŠNÝCH VÝSLEDKŮ: vrací pouze skutečně shodné lokální tipy nebo prázdné pole []
+  return localMatches;
 }
 
 /**

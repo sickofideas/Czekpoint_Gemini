@@ -1,5 +1,7 @@
 export const config = {
   appName: 'Czekpoint',
+  version: '2.3.0',
+  appVersion: 'v2.3',
   regionName: 'Rožmitálsko a Brdy',
   defaultCity: 'Rožmitál pod Třemšínem',
   dataUrl: './data/routes.json',
@@ -14,7 +16,7 @@ export const config = {
   terrainEncoding: 'terrarium',
   terrainTileSize: 256,
   terrainMaxZoom: 15,
-  terrainExaggeration: 1.8,
+  terrainExaggeration: 1.25,
   openFreeMapVectorUrl: 'https://tiles.openfreemap.org/planet',
   firebase: {
     enabled: false,

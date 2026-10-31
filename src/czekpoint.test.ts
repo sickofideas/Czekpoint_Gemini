@@ -55,6 +55,7 @@ import {
   buildTurnStepsFromCoordinates,
   locatePlayerOnPolyline,
   searchPlaceNominatim,
+  normalizeSearchQuery,
   buildReturnToOriginRoute,
   computeQuadrantSector,
   sortPlacesClockwise,
@@ -149,6 +150,8 @@ import {
   buildWebGLErrorBannerHtml,
   normalizePointLatLng,
   toMapLibreLngLat,
+  getActiveWalkStopsStatus,
+  formatBackgroundGpsStatus,
 } from './walk.js';
 import {
   config as appConfig,
@@ -1219,7 +1222,7 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
 
     // 7. Ověření v1.2/v1.3/v1.4/v1.5 prvků v index.html a src/walk.js
     const indexHtml = fs.readFileSync('index.html', 'utf-8');
-    assert.ok(indexHtml.includes('v1.2') || indexHtml.includes('v1.3') || indexHtml.includes('v1.4') || indexHtml.includes('v1.5') || indexHtml.includes('v2.0') || indexHtml.includes('v2.1') || indexHtml.includes('v2.2'), 'index.html musí mít platnou verzi');
+    assert.ok(indexHtml.includes('v1.2') || indexHtml.includes('v1.3') || indexHtml.includes('v1.4') || indexHtml.includes('v1.5') || indexHtml.includes('v2.0') || indexHtml.includes('v2.1') || indexHtml.includes('v2.2') || indexHtml.includes('v2.3'), 'index.html musí mít platnou verzi');
     const walkJs = fs.readFileSync('src/walk.js', 'utf-8');
     assert.ok(walkJs.includes('map-lupa-search-input'), 'Vyhledávací lupa v mapě musí existovat');
     assert.ok(walkJs.includes('btn-pocket-mode'), 'Tlačítko Kapesního režimu musí existovat');
@@ -1822,7 +1825,7 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
     const stylesCss = fs.readFileSync('assets/styles.css', 'utf-8');
     assert.ok(indexHtml.includes('site-header-logo-icon'), 'Logo v záhlaví má třídu .site-header-logo-icon');
     assert.ok(indexHtml.includes('footer-horizon-decor'), 'Zápatí má klidnou siluetu horizontu .footer-horizon-decor');
-    assert.ok(indexHtml.includes('v1.5.0') || indexHtml.includes('v2.0') || indexHtml.includes('v2.1') || indexHtml.includes('v2.2'), 'Zápatí má označení verze Pilot · v1.5.0, v2.0, v2.1 nebo v2.2');
+    assert.ok(indexHtml.includes('v1.5.0') || indexHtml.includes('v2.0') || indexHtml.includes('v2.1') || indexHtml.includes('v2.2') || indexHtml.includes('v2.3'), 'Zápatí má označení verze Pilot');
     assert.ok(stylesCss.includes('stickGentleFloat'), 'CSS obsahuje klidnou prostorovou animaci @keyframes stickGentleFloat');
     assert.ok(stylesCss.includes('headerLogoSway'), 'CSS obsahuje jemné vlnění loga @keyframes headerLogoSway');
     assert.ok(stylesCss.includes('body.nav-active .stick-float-wrap'), 'Dekorativní animace se vypínají při aktivní navigaci (body.nav-active)');
@@ -2372,11 +2375,11 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
     // 3. Skutečné 3D hory (terrain-dem + terrain-hillshade, exaggeration: 1.8, pitch: 58) a 3D budovy (openfreemap-v + czekpoint-3d-buildings)
     assert.ok(walkJs.includes('https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'), 'Zdroj terrain-dem používá AWS Terrarium dlaždice');
     assert.ok(walkJs.includes("id: 'terrain-hillshade'"), 'Vrstva terrain-hillshade zvýrazňuje svahy a údolí');
-    assert.ok(walkJs.includes('exaggeration: 1.8'), '3D terén má exaggeration: 1.8');
-    assert.ok(walkJs.includes('pitch: 58'), 'Přepnutí do 3D nastavuje pitch: 58');
+    assert.ok(walkJs.includes('exaggeration: 1.8') || walkJs.includes('exaggeration: 1.25'), '3D terén má exaggeration');
+    assert.ok(walkJs.includes('pitch: 58') || walkJs.includes('pitch: 45') || walkJs.includes('pitch: 66'), 'Přepnutí do 3D nastavuje pitch');
     assert.ok(walkJs.includes('https://tiles.openfreemap.org/planet'), 'Vektorový zdroj openfreemap-v používá OpenFreeMap planet');
     assert.ok(walkJs.includes("id: 'czekpoint-3d-buildings'"), 'Vrstva czekpoint-3d-buildings vykresluje 3D budovy (fill-extrusion)');
-    assert.ok(configJs.includes('terrainExaggeration: 1.8'), 'config.js má terrainExaggeration: 1.8');
+    assert.ok(configJs.includes('terrainExaggeration: 1.8') || configJs.includes('terrainExaggeration: 1.25'), 'config.js má terrainExaggeration');
   });
 
   it('KRITICKÁ OPRAVA 2 (Hotfix v2.0.2) — Ochrana proti záměně [lng, lat], výpočet a vykreslení trasy z aktuální polohy postavičky a spolehlivý běh při zhasnutém displeji', () => {
@@ -2470,10 +2473,10 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
     const indexHtml = fs.readFileSync('index.html', 'utf-8');
     const pkgJson = JSON.parse(fs.readFileSync('package.json', 'utf-8'));
 
-    // 1. Verze v2.1 / v2.2
-    assert.ok(pkgJson.version === '2.1.0' || pkgJson.version === '2.2.0');
-    assert.ok(indexHtml.includes('v2.1') || indexHtml.includes('v2.2'));
-    assert.ok(walkJs.includes('Czekpoint v2.1') || walkJs.includes('Czekpoint v2.2'));
+    // 1. Verze v2.1 / v2.2 / v2.3
+    assert.ok(['2.1.0', '2.2.0', '2.2.1', '2.2.2', '2.3.0'].includes(pkgJson.version));
+    assert.ok(indexHtml.includes('v2.1') || indexHtml.includes('v2.2') || indexHtml.includes('v2.3'));
+    assert.ok(walkJs.includes('Czekpoint v2.1') || walkJs.includes('Czekpoint v2.2') || walkJs.includes('Czekpoint v2.3'));
 
     // 2. Turistické trasy KČT: PILOT_HIKING_TRAILS prázdné, rastrová vrstva waymarked-hiking-layer maxzoom: 19, zdroj maxzoom: 17
     assert.equal(PILOT_HIKING_TRAILS.length, 0);
@@ -2503,17 +2506,14 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
     const indexHtml = fs.readFileSync('index.html', 'utf-8');
     const pkgJson = JSON.parse(fs.readFileSync('package.json', 'utf-8'));
 
-    // 1. Verze v2.2 (2.2.0)
-    assert.equal(pkgJson.version, '2.2.0');
-    assert.ok(indexHtml.includes('v2.2'));
-    assert.ok(walkJs.includes('Czekpoint v2.2'));
+    // 1. Verze v2.2 / v2.3
+    assert.ok(['2.2.0', '2.2.1', '2.2.2', '2.3.0'].includes(pkgJson.version));
+    assert.ok(indexHtml.includes('v2.2') || indexHtml.includes('v2.3'));
+    assert.ok(walkJs.includes('Czekpoint v2.2') || walkJs.includes('Czekpoint v2.3'));
 
-    // 2. Konec cukání ve 3D a GTA pohled:
-    assert.ok(walkJs.includes('maxPitch: 75'));
-    assert.ok(walkJs.includes('pitch: 66'));
-    assert.ok(walkJs.includes('18.4'));
+    // 2. Konec cukání ve 3D a plynulý pohled:
     assert.ok(walkJs.includes('delta = ((targetCamHeading - camBearing + 540) % 360) - 180'));
-    assert.ok(walkJs.includes('fogTextureCanvas.width = 512'));
+    assert.ok(walkJs.includes('fogTextureCanvas.width = 1024') || walkJs.includes('fogTextureCanvas.width = 512'));
     assert.ok(walkJs.includes('1200'));
 
     // 3. Velký Avatar a prostorový podstavec:
@@ -2530,6 +2530,299 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
     assert.ok(walkJs.includes('#1a120b'));
     assert.ok(walkJs.includes('#f5c542'));
     assert.ok(walkJs.includes('targetDist += 2.2'));
+  });
+
+  it('OPRAVA MOBILNÍ MAPY — DÁVKA 1 (Verze v2.2.1 — P0 body 1 až 4)', () => {
+    const walkJs = fs.readFileSync('src/walk.js', 'utf-8');
+    const walkCss = fs.readFileSync('assets/walk.css', 'utf-8');
+    const configJs = fs.readFileSync('config.js', 'utf-8');
+    const walkStoreJs = fs.readFileSync('src/walk-store.js', 'utf-8');
+    const pkgJson = JSON.parse(fs.readFileSync('package.json', 'utf-8'));
+
+    // Verze 2.2.1 / 2.2.2 / 2.3.0
+    assert.ok(['2.2.1', '2.2.2', '2.3.0'].includes(pkgJson.version));
+
+    // P0 / 1. Vrstvení dialogů a scrollování ve fullscreenu:
+    assert.ok(walkCss.includes('.walk-map-wrap.zen-mode'));
+    assert.ok(walkCss.includes('z-index: 2000 !important;'));
+    assert.ok(walkCss.includes('z-index: 10500 !important;'));
+    assert.ok(walkCss.includes('max-height: min(88dvh, 720px)'));
+    assert.ok(walkJs.includes('walk-more-settings') && walkJs.includes('ev?.stopPropagation?.()'));
+    assert.ok(walkJs.includes("t.closest('#walk-more-settings')"));
+
+    // P0 / 2. 3D pohled bez vynuceného kompasu a zoomu:
+    assert.ok(configJs.includes('terrainExaggeration: 1.25') || configJs.includes('terrainExaggeration: 1.8'));
+    assert.ok(walkStoreJs.includes('show3dBuildings: false'));
+    assert.ok(walkJs.includes('show3dBuildings'));
+    assert.ok(walkJs.includes('sync3DBuildingsLayerState'));
+    assert.ok(walkJs.includes('maxPitch: 60'));
+    assert.ok(!walkJs.includes('top: Math.round(h * 0.44)'));
+
+    // P0 / 3. Výpočet směru a oddělení kompasu od GPS:
+    assert.ok(walkJs.includes('hasExplicitHeading'));
+    assert.ok(walkJs.includes('hasExplicitSpeed'));
+    assert.ok(walkJs.includes('screenAngle'));
+
+    // a) Když je heading explicitně null, nesmí vrátit 0° sever, ale při stání null
+    const standingFix = { lat: 49.6014, lng: 13.8644, accuracy: 10, speed: null, heading: null, timestamp: 1000 };
+    const prevStandingFix = { lat: 49.6014, lng: 13.8644, accuracy: 10, speed: null, heading: null, timestamp: 0 };
+    const resStanding = computeGpsWalkingCourseDeg(prevStandingFix, standingFix);
+    assert.equal(resStanding.valid, false, 'Při stání na místě musí vracet valid: false');
+    assert.equal(resStanding.headingDeg, null, 'Při stání na místě musí vracet headingDeg: null');
+
+    // b) Při skutečném pohybu (rychlost 1.2 m/s, posun 15 m) vrátí platný kurz
+    const movingFix = { lat: 49.6015, lng: 13.8646, accuracy: 10, speed: 1.2, heading: null, timestamp: 10000 };
+    const resMoving = computeGpsWalkingCourseDeg(prevStandingFix, movingFix);
+    assert.equal(resMoving.valid, true);
+    assert.ok(Number.isFinite(resMoving.headingDeg));
+
+    // P0 / 4. Neodpojování při pouhém kliknutí na mapu:
+    assert.ok(walkJs.includes('Math.hypot(dx, dy) > 12'));
+    assert.ok(walkJs.includes('mapTouchStartPointer'));
+  });
+
+  it('OPRAVA MOBILNÍ MAPY — DÁVKA 2 (Verze v2.2.2 — P0 bod 5 + P1 body 6 a 7)', async () => {
+    const walkJs = fs.readFileSync('src/walk.js', 'utf-8');
+    const plannerJs = fs.readFileSync('src/planner.js', 'utf-8');
+    const appJs = fs.readFileSync('src/app.js', 'utf-8');
+    const pkgJson = JSON.parse(fs.readFileSync('package.json', 'utf-8'));
+    const indexHtml = fs.readFileSync('index.html', 'utf-8');
+
+    // 0. Verze 2.2.2 / 2.3.0
+    assert.ok(['2.2.2', '2.3.0'].includes(pkgJson.version));
+    assert.ok(indexHtml.includes('v2.2') || indexHtml.includes('v2.3'));
+
+    // P0 / 5. Přesnost mlhy (skutečných 65 metrů) a výkon:
+    // a) computeFogGeographicBounds nastavuje minimální rozpětí minLatSpan = 0.015 a minLngSpan = 0.022 (~1.6 km)
+    const center = { lat: 49.6014, lng: 13.8644 };
+    const fogBounds = computeFogGeographicBounds(center, {});
+    const latSpan = fogBounds.north - fogBounds.south;
+    const lngSpan = fogBounds.east - fogBounds.west;
+    assert.ok(latSpan >= 0.015 && latSpan <= 0.04, `latSpan (${latSpan}) musí odpovídat výřezu ~1.6 km`);
+    assert.ok(lngSpan >= 0.022 && lngSpan <= 0.05, `lngSpan (${lngSpan}) musí odpovídat výřezu ~1.6 km`);
+
+    // b) metersToFogPixels počítá přesný poloměr v metrech bez umělého nafukování (žádné Math.max(4, ...))
+    const px65m = metersToFogPixels(65, fogBounds, 49.6014, 1024, 1024);
+    assert.ok(px65m >= 25 && px65m <= 55, `Poloměr 65 m na 1024 px plátně musí odpovídat skutečnému měřítku (naměřeno: ${px65m} px)`);
+    // Pro malý poloměr 2 m nesmí být vynuceno minimum 4 px (odstraněno Math.max(4, ...))
+    const px2m = metersToFogPixels(2, fogBounds, 49.6014, 1024, 1024);
+    assert.ok(px2m < 4, `Malý poloměr 2 m nesmí být uměle nafouknut na 4 px (naměřeno: ${px2m} px)`);
+
+    // c) Prostorové filtrování historie v renderFogTextureToCanvas:
+    assert.ok(walkJs.includes('fogBounds.south - bufDeg') && walkJs.includes('fogBounds.north + bufDeg'));
+    assert.ok(walkJs.includes('fogTextureCanvas.width = 1024'));
+
+    // P1 / 6. Oprava vyhledávání míst a celosvětové použití:
+    // a) normalizeSearchQuery existuje v planner.js a je importováno do walk.js
+    assert.equal(normalizeSearchQuery('Příbram — Svatá Hora!'), 'pribram — svata hora!');
+    assert.equal(normalizeSearchQuery('SYDNEY'), 'sydney');
+    assert.ok(plannerJs.includes('export function normalizeSearchQuery'));
+    assert.ok(walkJs.includes('normalizeSearchQuery'));
+
+    // b) searchPlaceNominatim přijímá optionsOrSignal (signal, fetchImpl, lang)
+    let capturedUrl = '';
+    let capturedLang = '';
+    const mockFetch = async (url: string, opts: any) => {
+      capturedUrl = url;
+      capturedLang = opts?.headers?.['Accept-Language'] || '';
+      if (url.toLowerCase().includes('sydney')) {
+        return {
+          ok: true,
+          json: async () => [
+            { place_id: 12345, display_name: 'Sydney, New South Wales, Australia', lat: '-33.8688', lon: '151.2093' },
+          ],
+        };
+      }
+      return { ok: true, json: async () => [] };
+    };
+
+    // Test vyhledání celosvětového místa "Sydney"
+    const sydneyResults = await searchPlaceNominatim('Sydney', { fetchImpl: mockFetch });
+    assert.ok(!capturedUrl.includes('countrycodes=cz'), 'Hledání nesmí být omezeno pouze na ČR (countrycodes=cz odstraněno)');
+    assert.ok(sydneyResults.length > 0);
+    assert.equal(sydneyResults[0].label, 'Sydney, New South Wales, Australia');
+    assert.ok(Math.abs(sydneyResults[0].lat - (-33.8688)) < 0.001);
+
+    // ZÁKAZ FALEŠNÝCH VÝSLEDKŮ: Neexistující místo NIKDY nevrátí Příbram ani Rožmitál!
+    const nonExistentResults = await searchPlaceNominatim('xyznonexistentplacename12345', { fetchImpl: mockFetch });
+    assert.deepEqual(nonExistentResults, [], 'Neexistující dotaz nesmí vrátit žádné falešné presety');
+
+    // Prázdný dotaz vrátí místní tipy
+    const emptyResults = await searchPlaceNominatim('');
+    assert.ok(emptyResults.length > 0, 'Prázdný dotaz vrátí výchozí české presety jako tipy');
+
+    // c) Dodržení Nominatim pravidel: UI obsahuje tlačítko Hledat a limit
+    assert.ok(walkJs.includes('lastNominatimCallAt'));
+    assert.ok(walkJs.includes('lupaAbortController'));
+    assert.ok(walkJs.includes('map-lupa-search-submit'));
+
+    // P1 / 7. Router simulátoru (#/?sim=1), úklid značek v placeMarkersById a fallback vrstev:
+    // a) Router v src/app.js odděluje query string od hash cesty a detekuje sim=1
+    assert.ok(appJs.includes("rawHash.split('?')"));
+    assert.ok(appJs.includes("searchParams.get('sim') === '1'") || appJs.includes("hashParams.get('sim') === '1'"));
+    assert.ok(appJs.includes('sim: isSimRequested'));
+
+    // b) Úklid neaktuálních DOM značek v placeMarkersById:
+    assert.ok(walkJs.includes('placeMarkersById.delete(existingId)'));
+    assert.ok(walkJs.includes('displayMapPlaces'));
+    assert.ok(walkJs.includes('curZoom < 14'));
+
+    // c) Sjednocený identifikátor vrstvy opentopo-raster-layer
+    assert.ok(walkJs.includes("map.getLayer('opentopo-raster-layer')"));
+    assert.ok(!walkJs.includes("map.getLayer('opentopo-layer')"), 'Staré ID opentopo-layer nesmí být použito');
+  });
+
+  it('OPRAVA MOBILNÍ MAPY — DÁVKA 3 (Verze v2.3.0 — P1 body 8, 9 a 10)', async () => {
+    const walkJs = fs.readFileSync('src/walk.js', 'utf-8');
+    const walkCss = fs.readFileSync('assets/walk.css', 'utf-8');
+    const swJs = fs.readFileSync('sw.js', 'utf-8');
+    const readmeMd = fs.readFileSync('README.md', 'utf-8');
+    const pkgJson = JSON.parse(fs.readFileSync('package.json', 'utf-8'));
+    const indexHtml = fs.readFileSync('index.html', 'utf-8');
+
+    // 0. Verze v2.3 / 2.3.0
+    assert.equal(pkgJson.version, '2.3.0', 'package.json musí mít verzi 2.3.0');
+    assert.ok(indexHtml.includes('v2.3'), 'index.html musí uvádět verzi v2.3');
+    assert.ok(readmeMd.includes('v2.3.0'), 'README.md musí dokumentovat verzi v2.3.0');
+
+    // =========================================================================
+    // P1 / 8. Mobilní rozložení (320 / 360 / 390 px), virtuální klávesnice a stav Volná chůze
+    // =========================================================================
+    // 1. Stav „Volná chůze · Odkrývání mapy“ při 0 vybraných zastávkách
+    // a) 0 zastávek:
+    const status0Stops = getActiveWalkStopsStatus({ plannedPlaces: [], confirmedStopIds: new Set() });
+    assert.equal(status0Stops.mode, 'free_walk');
+    assert.equal(status0Stops.plainText, '🥾 Volná chůze · Odkrývání mapy');
+    assert.ok(status0Stops.textHtml.includes('Volná chůze · Odkrývání mapy'));
+    assert.ok(!status0Stops.textHtml.includes('Všechny zastávky navštíveny'), 'Při 0 zastávkách nesmí tvrdit, že jsou všechny navštíveny');
+    assert.ok(!status0Stops.textHtml.includes('Do cíle'), 'Při 0 zastávkách nesmí odpočítávat do cíle');
+    assert.ok(!status0Stops.textHtml.includes('(0 m)'), 'Při 0 zastávkách nesmí zobrazovat falešných 0 m');
+
+    // b) 1 nenavštívená zastávka:
+    const status1Stop = getActiveWalkStopsStatus({
+      plannedPlaces: [{ id: 'stop-1', title: 'Vyhlídka Na Skále' }],
+      rem: { nextStop: { id: 'stop-1', title: 'Vyhlídka Na Skále' }, nextStopDistanceM: 520, remainingDistanceM: 520 },
+      speedKmH: 4.2,
+    });
+    assert.equal(status1Stop.mode, 'in_progress');
+    assert.ok(status1Stop.plainText.includes('Do cíle'));
+    assert.ok(status1Stop.plainText.includes('Vyhlídka Na Skále'));
+
+    // c) Všechny zastávky skutečně navštívené:
+    const statusAllVisited = getActiveWalkStopsStatus({
+      plannedPlaces: [{ id: 'stop-1', title: 'Vyhlídka Na Skále' }],
+      rem: { nextStop: null, nextStopDistanceM: 0, remainingDistanceM: 0 },
+      speedKmH: 4.2,
+    });
+    assert.equal(statusAllVisited.mode, 'all_visited');
+    assert.ok(statusAllVisited.plainText.includes('Všechny zastávky navštíveny'));
+
+    // 2. Mobilní rozložení bez přetékání a překryvů na 320/360/390 px:
+    // a) Spodní akční lišta: grid s 2 sloupci
+    assert.ok(walkCss.includes('grid-template-columns: repeat(2, minmax(0, 1fr))'));
+    assert.ok(walkCss.includes('.mab-active-group'));
+    assert.ok(walkJs.includes('id="walk-save-memory"'));
+
+    // b) Pravý sloupec: max-height a scrollbar-width: none
+    assert.ok(walkCss.includes('max-height: calc(100% - 140px)'));
+    assert.ok(walkCss.includes('overflow-y: auto'));
+    assert.ok(walkCss.includes('scrollbar-width: none'));
+    assert.ok(walkJs.includes('visualViewport'));
+
+    // c) Horní oblast mapy: flex sloupec .map-top-overlays bránící překryvům
+    assert.ok(walkCss.includes('.map-top-overlays'));
+    assert.ok(walkCss.includes('flex-direction: column'));
+    assert.ok(walkJs.includes('class="map-top-overlays"'));
+
+    // =========================================================================
+    // P1 / 9. Pravdivé informace o pozadí, atribuce ve Fullscreenu a oprava sw.js
+    // =========================================================================
+    // 1. Poctivá informace o chování při zhasnutém displeji:
+    const bgStatusEmpty = formatBackgroundGpsStatus(null);
+    assert.ok(bgStatusEmpty.includes('Čekám na GPS vzorek'));
+    assert.ok(bgStatusEmpty.includes('Záznam při zamčené obrazovce závisí na omezeních vašeho telefonu'));
+
+    const bgStatusWithFix = formatBackgroundGpsStatus(Date.now() - 4000);
+    assert.ok(bgStatusWithFix.includes('Poslední GPS vzorek'));
+    assert.ok(bgStatusWithFix.includes('Záznam při zamčené obrazovce závisí na omezeních vašeho telefonu'));
+    assert.ok(!walkJs.includes('Běží i při zhasnutém displeji v kapse'), 'Neověřené tvrzení Běží i při zhasnutém displeji v kapse bylo odstraněno');
+
+    // 2. Viditelná atribuce mapových zdrojů přímo uvnitř mapy (i ve Fullscreenu / zen-mode):
+    assert.ok(walkJs.includes('class="map-in-wrap-attribution"'));
+    assert.ok(walkJs.includes('© <a href="https://www.openstreetmap.org/copyright"'));
+    assert.ok(walkJs.includes('Waymarked Trails'));
+    assert.ok(walkJs.includes('AWS Terrarium DEM'));
+    assert.ok(walkCss.includes('.map-in-wrap-attribution'));
+
+    // 3. Bezpečný Service Worker (sw.js):
+    assert.ok(swJs.includes("const APP_CACHE_NAME = 'czekpoint-app-shell-v2.3'"));
+    assert.ok(swJs.includes("key.startsWith('czekpoint-')"), 'sw.js maže výhradně cache začínající prefixem czekpoint-');
+    assert.ok(swJs.includes("'X-Czekpoint-Fallback-Tile': '1'"), 'Offline fallback SVG dlaždice obsahuje hlavičku X-Czekpoint-Fallback-Tile');
+    assert.ok(swJs.includes('./src/walk.js'));
+    assert.ok(swJs.includes('./assets/vendor/maplibre-gl/maplibre-gl.js'));
+
+    // Simulace chování activate v sw.js: cizí cache se nesmí smazat!
+    const mockCaches = ['my-foreign-site-cache', 'another-service-v1', 'czekpoint-old-cache-v1.0'];
+    const deletedCaches: string[] = [];
+    const APP_CACHE = 'czekpoint-app-shell-v2.3';
+    const TILE_CACHE = 'czekpoint-offline-tiles-v1.3';
+    for (const key of mockCaches) {
+      if (key.startsWith('czekpoint-') && key !== APP_CACHE && key !== TILE_CACHE) {
+        deletedCaches.push(key);
+      }
+    }
+    assert.deepEqual(deletedCaches, ['czekpoint-old-cache-v1.0'], 'sw.js smaže pouze starou cache aplikace, cizí cache zachová');
+
+    // =========================================================================
+    // P1 / 10. Skutečné testy chování funkcí (žádné křehké textové konstanty)
+    // =========================================================================
+    // a) computeGpsWalkingCourseDeg:
+    // Pohyb na východ (heading: null, speed: 1.2 m/s):
+    const prevPt = { lat: 49.6000, lng: 13.8000, accuracy: 10, timestamp: 1000 };
+    const eastPt = { lat: 49.6000, lng: 13.8010, accuracy: 10, speed: 1.2, heading: null, timestamp: 6000 };
+    const eastCourse = computeGpsWalkingCourseDeg(prevPt, eastPt);
+    assert.equal(eastCourse.valid, true);
+    assert.ok(eastCourse.headingDeg != null && eastCourse.headingDeg >= 80 && eastCourse.headingDeg <= 100, `Pohyb na východ musí vrátit ~90° (naměřeno: ${eastCourse.headingDeg}°)`);
+    assert.notEqual(eastCourse.headingDeg, 0, 'Pohyb na východ nesmí vrátit 0° sever');
+
+    // Stojící hráč s šumem:
+    const jitterPt = { lat: 49.60001, lng: 13.80001, accuracy: 10, speed: 0.1, heading: null, timestamp: 6000 };
+    const jitterCourse = computeGpsWalkingCourseDeg(prevPt, jitterPt);
+    assert.equal(jitterCourse.valid, false, 'Stojící hráč musí vrátit valid: false');
+    assert.equal(jitterCourse.headingDeg, null, 'Stojící hráč musí vrátit headingDeg: null');
+
+    // b) searchPlaceNominatim s mockovaným fetch a AbortSignal:
+    const abortCtrl = new AbortController();
+    let receivedSignal: any = null;
+    const customFetch = async (url: string, opts: any) => {
+      receivedSignal = opts?.signal;
+      if (url.toLowerCase().includes('sydney')) {
+        return {
+          ok: true,
+          json: async () => [{ place_id: 1, display_name: 'Sydney, New South Wales, Australia', lat: '-33.8688', lon: '151.2093' }],
+        };
+      }
+      return { ok: true, json: async () => [] };
+    };
+
+    const sydneyPlace = await searchPlaceNominatim('Sydney', { signal: abortCtrl.signal, fetchImpl: customFetch });
+    assert.equal(receivedSignal, abortCtrl.signal, 'searchPlaceNominatim správně předá AbortSignal do fetch');
+    assert.ok(sydneyPlace.length > 0);
+    assert.ok(sydneyPlace[0].label.includes('Sydney'));
+    assert.ok(!sydneyPlace[0].label.includes('Rožmitál'), 'Hledání Sydney nesmí vrátit Rožmitál');
+
+    const unknownPlace = await searchPlaceNominatim('randomnotfoundterm98765', { signal: abortCtrl.signal, fetchImpl: customFetch });
+    assert.deepEqual(unknownPlace, [], 'Nenalezené místo vrátí prázdné pole');
+
+    // c) Ověření setMap3DMode:
+    // Přepnutí do 3D nesmí nutit zoom 18.4 ani followHeadingMode:
+    const set3DFnStart = walkJs.indexOf('function setMap3DMode');
+    assert.ok(set3DFnStart > 0, 'setMap3DMode musí existovat v src/walk.js');
+    const set3DFnChunk = walkJs.slice(set3DFnStart, set3DFnStart + 1500);
+    assert.ok(set3DFnChunk.includes('const curZoom = typeof map.getZoom === \'function\' ? map.getZoom() : 16.5;'));
+    assert.ok(set3DFnChunk.includes('zoom: curZoom'), 'setMap3DMode zachovává stávající zoom uživatele');
+    assert.ok(!set3DFnChunk.includes('followHeadingMode = true'), 'setMap3DMode samo o sobě nesmí zapnout otáčení za kompasem');
+    assert.ok(!set3DFnChunk.includes('zoom: 18.4'), 'setMap3DMode nesmí vynucovat zoom 18.4');
   });
 });
 

@@ -873,11 +873,19 @@
   font-weight: 700;
 }
 
-/* 7. Modální dialog „Upravit procházku“ (Potvrdit změny / Zrušit — Bod 20) */
-.edit-walk-modal-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 1200;
+/* 7. Modální dialogy a formuláře (Upravit procházku, Nastavení, Vzpomínka, Shrnutí) */
+.edit-walk-modal-backdrop,
+.walk-modal-backdrop,
+#app-settings-modal,
+#save-memory-modal,
+#memory-modal,
+#edit-walk-modal,
+#session-summary-container,
+#confirm-dialog,
+#report-dialog {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 10500 !important;
   background: rgba(14, 34, 27, 0.72);
   backdrop-filter: blur(4px);
   display: grid;
@@ -891,14 +899,20 @@
   border-radius: 22px;
   max-width: 780px;
   width: 100%;
-  max-height: calc(100dvh - 32px);
+  max-height: min(88dvh, 720px);
   display: flex;
   flex-direction: column;
+  overflow: hidden;
   gap: 12px;
   padding: 20px;
   box-shadow: 0 24px 64px rgba(0, 0, 0, 0.38);
 }
 .edit-walk-modal-header {
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: inherit;
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
@@ -907,6 +921,8 @@
   padding-bottom: 10px;
 }
 .edit-walk-modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -914,6 +930,11 @@
   padding-right: 4px;
 }
 .edit-walk-modal-footer {
+  flex-shrink: 0;
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  background: inherit;
   display: flex;
   justify-content: flex-end;
   align-items: center;
@@ -1047,7 +1068,7 @@
 .walk-map-wrap.zen-mode {
   position: fixed;
   inset: 0;
-  z-index: 9999;
+  z-index: 2000 !important;
   border-radius: 0;
   border: 0;
   height: 100dvh;
@@ -1315,9 +1336,9 @@
 
 /* Aktivní kompas */
 .active-compass-widget {
-  position: absolute;
-  top: 12px;
-  left: 56px;
+  position: relative;
+  top: 0;
+  left: 0;
   width: 64px;
   height: 64px;
   z-index: 820;
@@ -3490,14 +3511,30 @@
 .map-action-bar > * {
   pointer-events: auto;
 }
-.mab-inactive-group,
-.mab-active-group {
+.mab-inactive-group {
   display: flex;
   gap: 8px;
   width: 100%;
   align-items: center;
   justify-content: center;
-  flex-wrap: wrap;
+}
+.mab-active-group {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.mab-active-group > * {
+  width: 100%;
+  box-sizing: border-box;
+}
+.mab-more-wrap {
+  position: relative;
+  width: 100%;
+}
+.mab-more-wrap .mab-more-btn {
+  width: 100% !important;
 }
 .mab-btn {
   border-radius: 14px !important;
@@ -3509,6 +3546,8 @@
   justify-content: center !important;
   gap: 8px !important;
   cursor: pointer !important;
+  min-height: 44px !important;
+  box-sizing: border-box;
 }
 .mab-btn:active {
   transform: scale(0.97) !important;
@@ -3675,12 +3714,39 @@
   color: #ffffff !important;
 }
 
+/* DÁVKA 3 (Bod 8.2): Sjednocená horní oblast mapy v odděleném flex sloupci (.map-top-overlays) */
+.map-top-overlays {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  right: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 820;
+  pointer-events: none;
+  max-width: 680px;
+}
+.map-top-overlays > * {
+  pointer-events: auto;
+}
+.map-top-subrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  pointer-events: none;
+}
+.map-top-subrow > * {
+  pointer-events: auto;
+}
+
 /* 2.2 Horní vyhledávací pole s lupou přímo v mapě */
 .map-search-overlay {
-  position: absolute;
-  top: 12px;
-  left: 12px;
-  right: 12px;
+  position: relative;
+  top: 0;
+  left: 0;
+  right: 0;
+  width: 100%;
   z-index: 800;
   pointer-events: auto;
   max-width: 680px;
@@ -3734,6 +3800,16 @@
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+}
+
+.map-search-submit-btn {
+  flex-shrink: 0;
+  padding: 6px 12px !important;
+  font-size: 0.82rem !important;
+  font-weight: 700 !important;
+  border-radius: 10px !important;
+  cursor: pointer;
+  white-space: nowrap;
 }
 
 .map-search-results {
@@ -3818,9 +3894,16 @@
   bottom: auto !important;
   display: flex !important;
   flex-direction: column !important;
-  gap: 8px !important;
+  gap: 6px !important;
   z-index: 800 !important;
   pointer-events: auto;
+  max-height: calc(100% - 140px);
+  overflow-y: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.map-right-toolbar::-webkit-scrollbar {
+  display: none;
 }
 
 .map-right-btn {
@@ -4114,10 +4197,11 @@
    ========================================================================== */
 
 .map-busy-indicator {
-  position: absolute;
-  top: 72px;
-  left: 50%;
-  transform: translateX(-50%);
+  position: relative;
+  top: 0;
+  left: 0;
+  transform: none;
+  align-self: center;
   z-index: 1200;
   display: inline-flex;
   align-items: center;
@@ -4262,7 +4346,7 @@
   margin: 0 !important;
   border-radius: 0 !important;
   border: 0 !important;
-  z-index: 9999 !important;
+  z-index: 2000 !important;
 }
 
 .walk-map-wrap.zen-mode #walk-map {
@@ -4277,7 +4361,7 @@
   display: none !important;
 }
 
-@media (max-width: 420px) {
+@media (max-width: 480px) {
   .map-search-overlay {
     left: 8px;
     right: 8px;
@@ -4287,27 +4371,35 @@
     right: 8px !important;
     top: 66px !important;
     gap: 6px !important;
+    max-height: calc(100% - 140px);
+    overflow-y: auto;
+    scrollbar-width: none;
   }
   .map-action-bar {
     width: calc(100% - 16px);
     bottom: 10px;
   }
   .mab-active-group {
-    gap: 6px;
-    flex-wrap: nowrap;
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 8px !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+  .mab-active-group > * {
+    width: 100% !important;
+    box-sizing: border-box !important;
   }
   .mab-pause-btn,
   .mab-finish-btn,
-  .mab-more-btn {
+  .mab-more-btn,
+  .mab-memory-btn {
     min-width: 0 !important;
-    padding: 10px 11px !important;
+    width: 100% !important;
+    min-height: 44px !important;
+    padding: 10px 8px !important;
     font-size: 0.85rem !important;
-  }
-  .mab-pause-btn {
-    flex: 1.15;
-  }
-  .mab-finish-btn {
-    flex: 1.15;
+    box-sizing: border-box !important;
   }
   .return-to-gps-btn {
     bottom: 70px;
@@ -4316,17 +4408,45 @@
   }
 }
 
+/* DÁVKA 3 (Bod 9.2): Trvale viditelná atribuce uvnitř mapy i ve fullscreenu (.zen-mode) */
+.map-in-wrap-attribution {
+  position: absolute;
+  bottom: 84px;
+  left: 10px;
+  z-index: 750;
+  pointer-events: auto;
+  font-size: 10px;
+  line-height: 1.25;
+  color: rgba(254, 240, 138, 0.95);
+  background: rgba(20, 34, 25, 0.86);
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(212, 175, 55, 0.4);
+  backdrop-filter: blur(4px);
+  max-width: calc(100% - 130px);
+  user-select: none;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.map-in-wrap-attribution a {
+  color: #86efac;
+  text-decoration: underline;
+}
+
 /* DÁVKA 2 (Verze v1.4-part2): Osobní atlas malých objevů, výzvy všímavosti a stav trasy */
 .mab-memory-btn {
   background: linear-gradient(135deg, #fef08a 0%, #f59e0b 100%) !important;
   color: #1f1606 !important;
   border: 2px solid #fffbeb !important;
   font-weight: 800 !important;
-  min-height: 44px;
-  padding: 8px 14px;
-  border-radius: 999px;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+  min-height: 44px !important;
+  padding: 8px 12px !important;
+  border-radius: 14px !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28) !important;
   white-space: nowrap;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .mab-memory-btn:hover {

@@ -50,7 +50,7 @@ export function getAudioKeepaliveElement() {
 export function startBackgroundTracking({
   title = 'Záznam výpravy běží',
   artist = 'Czekpoint · Objevování a mapa',
-  album = 'Záznam na pozadí i při zhasnutém displeji',
+  album = 'Záznam trasy na pozadí',
   onPause = /** @type {(() => void) | null} */ (null),
   onResume = /** @type {(() => void) | null} */ (null),
   onStop = /** @type {(() => void) | null} */ (null),

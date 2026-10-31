@@ -121,6 +121,7 @@ import {
   computeRemainingFromSharedRoute,
   buildLocalRoutedGeometry,
   computeActiveTurnInstruction,
+  normalizeSearchQuery,
   searchPlaceNominatim,
   buildReturnToOriginRoute,
   computeQuadrantSector,
@@ -189,6 +190,90 @@ export function formatDistanceLabel(meters, suffix = '') {
     ? `${(meters / 1000).toFixed(1).replace('.', ',')} km`
     : `${Math.round(meters)} m`;
   return suffix ? `${base} ${suffix}` : base;
+}
+
+export function formatDurationCz(minutes) {
+  const mins = Math.max(1, Math.round(Number(minutes) || 0));
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  if (h <= 0) return `~${m} min`;
+  if (m === 0) return `~${h} hod`;
+  return `~${h} hod ${m} min`;
+}
+
+export function formatStopsCountCz(count) {
+  const n = Number(count) || 0;
+  if (n === 1) return '1 zastávka';
+  if (n >= 2 && n <= 4) return `${n} zastávky`;
+  return `${n} zastávek`;
+}
+
+/**
+ * @param {Object} [options]
+ * @param {Array<any>} [options.plannedPlaces]
+ * @param {Set<string> | Array<string> | null | any} [options.confirmedStopIds]
+ * @param {any} [options.rem]
+ * @param {number} [options.speedKmH]
+ * @returns {{ totalStops: number, mode: string, textHtml: string, plainText: string, nextStop?: any, remDistM?: number, remTimeStr?: string }}
+ */
+export function getActiveWalkStopsStatus({ plannedPlaces = /** @type {any[]} */ ([]), confirmedStopIds = /** @type {any} */ (null), rem = /** @type {any} */ (null), speedKmH = 4.2 } = {}) {
+  const totalStops = Array.isArray(plannedPlaces) ? plannedPlaces.length : 0;
+  if (totalStops === 0) {
+    return {
+      totalStops: 0,
+      mode: 'free_walk',
+      textHtml: '🥾 <strong>Volná chůze · Odkrývání mapy</strong>',
+      plainText: '🥾 Volná chůze · Odkrývání mapy',
+      nextStop: null,
+    };
+  }
+  const remDistM = rem?.remainingDistanceM != null ? rem.remainingDistanceM : 0;
+  const safeSpeed = Number.isFinite(speedKmH) && speedKmH > 0 ? speedKmH : 4.2;
+  const remMins = Math.max(1, Math.round((remDistM / 1000) / safeSpeed * 60));
+  const remTimeStr = formatDurationCz(remMins);
+  const remDistStr = formatDistanceLabel(remDistM);
+  if (rem?.nextStop) {
+    const nextDistStr = rem.nextStopDistanceM != null ? formatDistanceLabel(rem.nextStopDistanceM) : '';
+    const safeTitle = typeof rem.nextStop.title === 'string' ? rem.nextStop.title : 'Zastávka';
+    return {
+      totalStops,
+      mode: 'in_progress',
+      textHtml: `Do cíle <strong>${remTimeStr} (${remDistStr})</strong> · 🎯 Další: <strong>${safeTitle}</strong>${nextDistStr ? ` (${nextDistStr})` : ''}`,
+      plainText: `Do cíle ${remTimeStr} (${remDistStr}) · 🎯 Další: ${safeTitle}`,
+      nextStop: rem.nextStop,
+      remDistM,
+      remTimeStr,
+    };
+  }
+  return {
+    totalStops,
+    mode: 'all_visited',
+    textHtml: `Do cíle <strong>${remTimeStr} (${remDistStr})</strong> · 🎉 Všechny zastávky navštíveny`,
+    plainText: `Do cíle ${remTimeStr} (${remDistStr}) · 🎉 Všechny zastávky navštíveny`,
+    nextStop: null,
+    remDistM,
+    remTimeStr,
+  };
+}
+
+/**
+ * @param {number | string | Date | null | any} [lastFixTimestamp]
+ * @param {number} [now]
+ * @returns {string}
+ */
+export function formatBackgroundGpsStatus(lastFixTimestamp = /** @type {any} */ (null), now = Date.now()) {
+  const DISCLAIMER = 'Záznam při zamčené obrazovce závisí na omezeních vašeho telefonu a prohlížeče — pro nejspolehlivější záznam kontrolujte polohu při rozsvíceném displeji.';
+  if (!lastFixTimestamp) {
+    return `🔋 Záznam na pozadí: Čekám na GPS vzorek · ${DISCLAIMER}`;
+  }
+  const tsNum = typeof lastFixTimestamp === 'number' ? lastFixTimestamp : new Date(lastFixTimestamp).getTime();
+  if (!Number.isFinite(tsNum) || tsNum <= 0) {
+    return `🔋 Záznam na pozadí: Čekám na GPS vzorek · ${DISCLAIMER}`;
+  }
+  const diffSec = Math.max(0, Math.round((now - tsNum) / 1000));
+  const timeStr = new Date(tsNum).toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const agoStr = diffSec < 5 ? 'právě teď' : `před ${diffSec} s`;
+  return `🔋 Záznam na pozadí: Poslední GPS vzorek ${timeStr} (${agoStr}) · ${DISCLAIMER}`;
 }
 
 /**
@@ -452,20 +537,24 @@ export function computeGpsWalkingCourseDeg(prevFix, currentFix) {
     return { valid: false, headingDeg: null, source: 'none', label: null };
   }
 
-  let effectiveSpeedMs = Number.isFinite(Number(currentFix.speed)) && Number(currentFix.speed) >= 0
+  const hasExplicitHeading = currentFix.heading !== null && currentFix.heading !== undefined && currentFix.heading !== '' && Number.isFinite(Number(currentFix.heading));
+  const hasExplicitSpeed = currentFix.speed !== null && currentFix.speed !== undefined && currentFix.speed !== '' && Number.isFinite(Number(currentFix.speed));
+
+  let effectiveSpeedMs = hasExplicitSpeed && Number(currentFix.speed) >= 0
     ? Number(currentFix.speed)
     : null;
 
   let vectorBearing = null;
+  let distM = null;
   if (
     prevFix &&
     Number.isFinite(Number(prevFix.lat)) &&
     Number.isFinite(Number(prevFix.lng)) &&
     Number(prevFix.accuracy ?? 15) <= 25
   ) {
-    const distM = haversineMeters(prevFix, currentFix);
+    distM = haversineMeters(prevFix, currentFix);
     const dtSec = ((Number(currentFix.timestamp) || 0) - (Number(prevFix.timestamp) || 0)) / 1000;
-    if (distM != null && distM >= 2.0) {
+    if (distM != null && distM >= 4.0) {
       vectorBearing = computeGeodesicBearingDeg(prevFix, currentFix);
       if (effectiveSpeedMs == null && dtSec > 0 && dtSec <= 120) {
         effectiveSpeedMs = distM / dtSec;
@@ -473,13 +562,17 @@ export function computeGpsWalkingCourseDeg(prevFix, currentFix) {
     }
   }
 
-  if (effectiveSpeedMs == null || effectiveSpeedMs < 1.0 || effectiveSpeedMs > 12.0) {
+  // Pokud hráč stojí na místě nebo je rychlost pod prahem chůze 0.8 m/s, vracíme striktně null (žádné falešné otáčení)
+  if (effectiveSpeedMs == null || effectiveSpeedMs < 0.8 || effectiveSpeedMs > 12.0) {
     return { valid: false, headingDeg: null, source: 'none', label: null };
   }
 
-  const rawGpsHeading = Number.isFinite(Number(currentFix.heading)) && Number(currentFix.heading) >= 0
-    ? ((Number(currentFix.heading) % 360) + 360) % 360
-    : vectorBearing;
+  let rawGpsHeading = null;
+  if (hasExplicitHeading && Number(currentFix.heading) >= 0) {
+    rawGpsHeading = ((Number(currentFix.heading) % 360) + 360) % 360;
+  } else if (vectorBearing != null && distM != null && distM >= 4.0) {
+    rawGpsHeading = vectorBearing;
+  }
 
   if (rawGpsHeading == null || !Number.isFinite(rawGpsHeading)) {
     return { valid: false, headingDeg: null, source: 'none', label: null };
@@ -592,16 +685,17 @@ export function computeFogGeographicBounds(center, options = {}) {
     } catch {}
   }
 
-  const padLat = Math.max(0.045, Number(options.padLat || 0.045));
-  const padLng = Math.max(0.065, Number(options.padLng || 0.065));
+  const padLat = Math.max(0.006, Number(options.padLat || 0.008));
+  const padLng = Math.max(0.009, Number(options.padLng || 0.012));
 
   let west = minLng - padLng;
   let east = maxLng + padLng;
   let south = minLat - padLat;
   let north = maxLat + padLat;
 
-  const minSpanLat = Math.max(0.08, Number(options.minSpanLat || 0.10));
-  const minSpanLng = Math.max(0.12, Number(options.minSpanLng || 0.15));
+  // DÁVKA 2 (P0 Bod 5.1): Přesné měřítko v metrech (minLatSpan = 0.015 ~1.6 km, minLngSpan = 0.022 ~1.6 km)
+  const minSpanLat = Math.max(0.015, Number(options.minSpanLat || 0.015));
+  const minSpanLng = Math.max(0.022, Number(options.minSpanLng || 0.022));
 
   if (north - south < minSpanLat) {
     const mid = (north + south) / 2;
@@ -668,11 +762,24 @@ export function projectLngLatToFogPixels(lng, lat, bounds, width = 1024, height 
 }
 
 /**
- * Převod poloměru v metrech na poloměr v pixelech textury mlhy.
+ * Převod poloměru v metrech na poloměr v pixelech textury mlhy (DÁVKA 2 P0 Bod 5.1).
+ * Přesný poloměr v metrech bez umělého nafukování (odstraněno Math.max(4, ...)).
  */
-export function metersToFogPixels(radiusMeters, bounds, midLat = 49.6, width = 1024, height = 1024) {
+export function metersToFogPixels(radiusMeters, bounds, arg3 = 49.6, arg4 = 1024, arg5 = 1024) {
   const r = Math.max(1, Number(radiusMeters) || FOG_REVEAL_RADIUS_M);
   if (!bounds) return 8;
+  let midLat = 49.6;
+  let width = 1024;
+  let height = 1024;
+  if (typeof arg3 === 'number' && arg3 > 90) {
+    width = arg3;
+    height = typeof arg4 === 'number' ? arg4 : width;
+    midLat = typeof arg5 === 'number' && Math.abs(arg5) <= 90 ? arg5 : (((bounds.north + bounds.south) / 2) || 49.6);
+  } else {
+    midLat = typeof arg3 === 'number' && Math.abs(arg3) <= 90 ? arg3 : (((bounds.north + bounds.south) / 2) || 49.6);
+    width = typeof arg4 === 'number' ? arg4 : 1024;
+    height = typeof arg5 === 'number' ? arg5 : width;
+  }
   const latRad = (Number(midLat) * Math.PI) / 180;
   const degLatPerMeter = 1 / 111320;
   const degLngPerMeter = 1 / Math.max(1e-6, 111320 * Math.cos(latRad));
@@ -680,7 +787,7 @@ export function metersToFogPixels(radiusMeters, bounds, midLat = 49.6, width = 1
   const lngSpan = Math.max(1e-6, bounds.east - bounds.west);
   const py = (r * degLatPerMeter / latSpan) * height;
   const px = (r * degLngPerMeter / lngSpan) * width;
-  return Math.max(4, Math.round((px + py) / 2));
+  return Math.max(1, Math.round((px + py) / 2));
 }
 
 /**
@@ -745,22 +852,41 @@ export function renderFogTextureToCanvas(canvas, options = {}) {
   const midLat = fogBounds ? (fogBounds.north + fogBounds.south) / 2 : 49.6;
   const radPx = metersToFogPixels(revealRadiusM, fogBounds, midLat, width, height);
 
+  // DÁVKA 2 (P0 Bod 5.2): Prostorové filtrování historie pro vysoký výkon (rozšířené o 100 m ~ 0.001°)
+  const bufDeg = 0.0015;
+  const filterWest = fogBounds ? fogBounds.west - bufDeg : -180;
+  const filterEast = fogBounds ? fogBounds.east + bufDeg : 180;
+  const filterSouth = fogBounds ? fogBounds.south - bufDeg : -90;
+  const filterNorth = fogBounds ? fogBounds.north + bufDeg : 90;
+
   const drawShapes = (expandPx = 0, alpha = 1.0) => {
     ctx.fillStyle = `rgba(0, 0, 0, ${alpha})`;
     ctx.strokeStyle = `rgba(0, 0, 0, ${alpha})`;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
-    ctx.lineWidth = Math.max(4, (radPx + expandPx) * 2);
+    ctx.lineWidth = Math.max(1, (radPx + expandPx) * 2);
 
-    // a) Prošlé segmenty chůze — KAŽDÝ ZVLÁŠŤ (výpadky GPS zanechávají skutečnou mezeru)
+    // a) Prošlé segmenty chůze — vyfiltrujeme segmenty mimo fogBounds (výpadky GPS zanechávají skutečnou mezeru)
     if (Array.isArray(walkSegments)) {
       for (const seg of walkSegments) {
         if (!Array.isArray(seg) || seg.length === 0) continue;
+        let hasAnyPtInBounds = false;
+        for (let j = 0; j < seg.length; j++) {
+          const rawPt = seg[j];
+          const lat = Number(rawPt?.lat ?? rawPt?.[0]);
+          const lng = Number(rawPt?.lng ?? rawPt?.[1]);
+          if (lat >= filterSouth && lat <= filterNorth && lng >= filterWest && lng <= filterEast) {
+            hasAnyPtInBounds = true;
+            break;
+          }
+        }
+        if (!hasAnyPtInBounds) continue;
+
         if (seg.length === 1) {
           const pt = Array.isArray(seg[0]) ? { lat: seg[0][0], lng: seg[0][1] } : seg[0];
           const px = projectLngLatToFogPixels(pt.lng, pt.lat, fogBounds, width, height);
           ctx.beginPath();
-          ctx.arc(px.x, px.y, Math.max(4, radPx + expandPx), 0, Math.PI * 2);
+          ctx.arc(px.x, px.y, Math.max(1, radPx + expandPx), 0, Math.PI * 2);
           ctx.fill();
         } else {
           ctx.beginPath();
@@ -775,16 +901,22 @@ export function renderFogTextureToCanvas(canvas, options = {}) {
       }
     }
 
-    // b) Odkryté buňky
+    // b) Odkryté buňky — prostorově filtrované podle aktuálního výřezu
     if (Array.isArray(cells) && cells.length > 0) {
       ctx.beginPath();
       for (const cid of cells) {
         try {
           const cCenter = cellCenter(cid);
-          if (cCenter) {
+          if (
+            cCenter &&
+            cCenter.lat >= filterSouth &&
+            cCenter.lat <= filterNorth &&
+            cCenter.lng >= filterWest &&
+            cCenter.lng <= filterEast
+          ) {
             const px = projectLngLatToFogPixels(cCenter.lng, cCenter.lat, fogBounds, width, height);
             ctx.moveTo(px.x + radPx + expandPx, px.y);
-            ctx.arc(px.x, px.y, Math.max(4, radPx + expandPx), 0, Math.PI * 2);
+            ctx.arc(px.x, px.y, Math.max(1, radPx + expandPx), 0, Math.PI * 2);
           }
         } catch {}
       }
@@ -1148,7 +1280,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     });
 
   root.innerHTML = `
-    <h1 tabindex="-1" class="visually-hidden">Mapa objevování a procházka · Czekpoint v2.2 (v2.1)</h1>
+    <h1 tabindex="-1" class="visually-hidden">Mapa objevování a procházka · Czekpoint v2.2.1</h1>
 
     <!-- Horní přehledový panel trasy: zobrazí se AŽ ve chvíli, kdy má uživatel vybraný alespoň 1 bod v trase -->
     <section class="phase1-top-bar" id="phase1-top-bar" hidden aria-label="Souhrn trasy, plán zastávek a spuštění výpravy">
@@ -1370,27 +1502,67 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       <!-- DÁVKA 4 (Bod 1.1): Chybový pruh při nedostupném WebGL nebo ztrátě grafického kontextu (nezakrývá telemetrii a nemaže data) -->
       <div id="webgl-error-banner" class="webgl-error-banner" role="alert" hidden></div>
 
-      <!-- DÁVKA 1 (Bod 1.1): Plovoucí stavový indikátor načítání a výpočtu přímo v mapě (z-index: 1200) -->
-      <div id="map-busy-indicator" class="map-busy-indicator" role="status" aria-live="polite" hidden>
-        <span class="map-spinner" aria-hidden="true"></span>
-        <span id="map-busy-text" class="map-busy-text">⏳ Pracuji…</span>
-      </div>
-
-      <!-- 2.2 Horní vyhledávací pole s lupou přímo v mapě (top: 12px; left: 12px; right: 12px; z-index: 800) -->
-      <div class="map-search-overlay" id="map-search-overlay" role="search" aria-label="Vyhledávání v mapě">
-        <div class="map-search-bar">
-          <span class="map-search-icon" aria-hidden="true">🔍</span>
-          <input
-            type="search"
-            id="map-lupa-search-input"
-            class="map-search-input"
-            placeholder="Hledat město, památku nebo rozcestí..."
-            aria-label="Hledat město, památku nebo rozcestí"
-            autocomplete="off"
-          />
-          <button type="button" id="map-lupa-search-clear" class="map-search-clear" hidden aria-label="Vymazat hledání">✕</button>
+      <!-- DÁVKA 3 (Bod 8.2): Sjednocená horní oblast mapy v odděleném flex sloupci (.map-top-overlays) -->
+      <div class="map-top-overlays" id="map-top-overlays">
+        <!-- 2.2 Horní vyhledávací pole s lupou přímo v mapě -->
+        <div class="map-search-overlay" id="map-search-overlay" role="search" aria-label="Vyhledávání v mapě">
+          <div class="map-search-bar">
+            <span class="map-search-icon" aria-hidden="true">🔍</span>
+            <input
+              type="search"
+              id="map-lupa-search-input"
+              class="map-search-input"
+              placeholder="Hledat město, památku nebo rozcestí..."
+              aria-label="Hledat město, památku nebo rozcestí"
+              autocomplete="off"
+            />
+            <button type="button" id="map-lupa-search-clear" class="map-search-clear" hidden aria-label="Vymazat hledání">✕</button>
+            <button type="button" id="map-lupa-search-submit" class="button small primary map-search-submit-btn" aria-label="Hledat">Hledat</button>
+          </div>
+          <div id="map-lupa-search-results" class="map-search-results" hidden role="listbox" aria-label="Výsledky vyhledávání"></div>
         </div>
-        <div id="map-lupa-search-results" class="map-search-results" hidden role="listbox" aria-label="Výsledky vyhledávání"></div>
+
+        <!-- DÁVKA 1 (Bod 1.1): Plovoucí stavový indikátor načítání a výpočtu přímo v mapě (z-index: 1200) -->
+        <div id="map-busy-indicator" class="map-busy-indicator" role="status" aria-live="polite" hidden>
+          <span class="map-spinner" aria-hidden="true"></span>
+          <span id="map-busy-text" class="map-busy-text">⏳ Pracuji…</span>
+        </div>
+
+        <!-- Řada s kompasem a odbočovacím ukazatelem pod vyhledáváním -->
+        <div class="map-top-subrow" id="map-top-subrow">
+          <!-- Aktivní otočný kompas -->
+          <div class="active-compass-widget compass-widget" id="active-compass-widget" title="Aktivní kompas výpravy" role="button" tabindex="0">
+            <div class="compass-dial compass-rose-svg" id="compass-dial">
+              <svg viewBox="0 0 100 100" class="compass-dial-svg" id="compass-rose-svg">
+                <circle cx="50" cy="50" r="47" fill="#1e2d24" stroke="#d8b25c" stroke-width="3"/>
+                <circle cx="50" cy="50" r="41" fill="#f7f2e4" stroke="#6e5332" stroke-width="1.5"/>
+                <text x="50" y="21" text-anchor="middle" font-size="13" font-weight="900" fill="#b82518">S</text>
+                <text x="83" y="55" text-anchor="middle" font-size="12" font-weight="800" fill="#2d2012">V</text>
+                <text x="50" y="88" text-anchor="middle" font-size="12" font-weight="800" fill="#2d2012">J</text>
+                <text x="17" y="55" text-anchor="middle" font-size="12" font-weight="800" fill="#2d2012">Z</text>
+                <line x1="50" y1="8" x2="50" y2="13" stroke="#b82518" stroke-width="2.5"/>
+                <circle cx="50" cy="50" r="5" fill="#b58938" stroke="#1e2d24" stroke-width="1.5"/>
+              </svg>
+              <div class="compass-needle" id="compass-needle">
+                <div class="needle-north"></div>
+                <div class="needle-south"></div>
+              </div>
+            </div>
+            <div class="compass-target-arrow" id="compass-target-arrow">
+              <div class="target-gem" title="Směr k další zastávce">◆</div>
+            </div>
+            <div class="compass-dist-badge" id="compass-dist-badge">-- m</div>
+          </div>
+
+          <!-- Odbočovací navigace u kompasu (.turn-nav-pill) -->
+          <div class="turn-nav-pill" id="turn-nav-pill" role="status" aria-live="polite" hidden>
+            <span class="turn-nav-icon" id="turn-nav-icon">↑</span>
+            <span class="turn-nav-text" id="turn-nav-text">Trasa připravena</span>
+            <button type="button" class="voice-nav-pill-btn ${voiceNavEnabled ? 'active' : ''}" id="btn-voice-nav-pill" title="Zapnout/vypnout českou hlasovou navigaci" aria-pressed="${voiceNavEnabled}">
+              ${voiceNavEnabled ? '🔊 Hlas ZAP' : '🔈 Hlas'}
+            </button>
+          </div>
+        </div>
       </div>
 
       <!-- Ukazatel uložení offline oblasti -->
@@ -1406,39 +1578,6 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       <button type="button" id="btn-return-to-gps" class="return-to-gps-btn" hidden aria-hidden="true" tabindex="-1">
         🎯 Zpět ke mně
       </button>
-
-      <!-- Aktivní otočný kompas -->
-      <div class="active-compass-widget compass-widget" id="active-compass-widget" title="Aktivní kompas výpravy" role="button" tabindex="0">
-        <div class="compass-dial compass-rose-svg" id="compass-dial">
-          <svg viewBox="0 0 100 100" class="compass-dial-svg" id="compass-rose-svg">
-            <circle cx="50" cy="50" r="47" fill="#1e2d24" stroke="#d8b25c" stroke-width="3"/>
-            <circle cx="50" cy="50" r="41" fill="#f7f2e4" stroke="#6e5332" stroke-width="1.5"/>
-            <text x="50" y="21" text-anchor="middle" font-size="13" font-weight="900" fill="#b82518">S</text>
-            <text x="83" y="55" text-anchor="middle" font-size="12" font-weight="800" fill="#2d2012">V</text>
-            <text x="50" y="88" text-anchor="middle" font-size="12" font-weight="800" fill="#2d2012">J</text>
-            <text x="17" y="55" text-anchor="middle" font-size="12" font-weight="800" fill="#2d2012">Z</text>
-            <line x1="50" y1="8" x2="50" y2="13" stroke="#b82518" stroke-width="2.5"/>
-            <circle cx="50" cy="50" r="5" fill="#b58938" stroke="#1e2d24" stroke-width="1.5"/>
-          </svg>
-          <div class="compass-needle" id="compass-needle">
-            <div class="needle-north"></div>
-            <div class="needle-south"></div>
-          </div>
-        </div>
-        <div class="compass-target-arrow" id="compass-target-arrow">
-          <div class="target-gem" title="Směr k další zastávce">◆</div>
-        </div>
-        <div class="compass-dist-badge" id="compass-dist-badge">-- m</div>
-      </div>
-
-      <!-- Odbočovací navigace u kompasu (.turn-nav-pill) -->
-      <div class="turn-nav-pill" id="turn-nav-pill" role="status" aria-live="polite" hidden>
-        <span class="turn-nav-icon" id="turn-nav-icon">↑</span>
-        <span class="turn-nav-text" id="turn-nav-text">Trasa připravena</span>
-        <button type="button" class="voice-nav-pill-btn ${voiceNavEnabled ? 'active' : ''}" id="btn-voice-nav-pill" title="Zapnout/vypnout českou hlasovou navigaci" aria-pressed="${voiceNavEnabled}">
-          ${voiceNavEnabled ? '🔊 Hlas ZAP' : '🔈 Hlas'}
-        </button>
-      </div>
 
       <div class="quest-hud-panel collapsed" id="quest-hud-panel" hidden>
         <button type="button" class="quest-hud-header" id="quest-hud-toggle-btn" aria-expanded="false" aria-controls="quest-hud-content">
@@ -1496,6 +1635,11 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         <button type="button" class="map-right-btn active" id="walk-fog-toggle" hidden title="Přepnout pergamen / běžnou mapu">📜</button>
       </div>
 
+      <!-- DÁVKA 3 (Bod 9.2): Kompaktní atribuce mapových zdrojů trvale viditelná i ve fullscreenu (.zen-mode) -->
+      <div class="map-in-wrap-attribution" id="map-in-wrap-attribution" aria-label="Atribuce mapových podkladů">
+        <span class="attribution-text">© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> · <a href="https://waymarkedtrails.org" target="_blank" rel="noopener">Waymarked Trails</a> · AWS Terrarium DEM</span>
+      </div>
+
       <!-- TRVALE VIDITELNÁ AKČNÍ LIŠTA PŘÍMO U MAPY (.map-action-bar) -->
       <div class="map-action-bar" id="map-action-bar" role="region" aria-label="Hlavní ovládání výpravy">
         <!-- Stav 1 — Výprava ještě neběží (walkState === 'idle' | 'finished') -->
@@ -1508,6 +1652,10 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         <div class="mab-active-group" id="mab-active-group" hidden>
           <button type="button" class="button mab-btn mab-pause-btn" id="walk-pause">
             ⏸ Pauza
+          </button>
+          <!-- DÁVKA 2 (Bod 1.1) / DÁVKA 3 (Bod 8.2): Tlačítko Uložit vzpomínku uvnitř akční lišty -->
+          <button type="button" class="button mab-btn mab-memory-btn" id="walk-save-memory" title="Uložit vlastní soukromou vzpomínku na toto místo">
+            ✨ Uložit vzpomínku
           </button>
           <button type="button" class="button mab-btn mab-finish-btn" id="walk-finish">
             ⏹ Dokončit
@@ -1529,10 +1677,6 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
             </div>
           </div>
         </div>
-        <!-- DÁVKA 2 (Bod 1.1): Tlačítko „✨ Uložit vzpomínku“ (#walk-save-memory) přímo u mapy -->
-        <button type="button" class="button mab-btn mab-memory-btn" id="walk-save-memory" title="Uložit vlastní soukromou vzpomínku na toto místo">
-          ✨ Uložit vzpomínku
-        </button>
       </div>
 
       <!-- Kompatibilní skryté prvky pro Fázi 4 -->
@@ -1547,7 +1691,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
 
     <div class="map-sub-bar">
       <span class="trail-note" id="trail-info">Stopy pohorek za poslední chůzi: 0 kroků · Potvrzení zastávky podle GPS: pod ${STOP_CONFIRM_RADIUS_M} m (opakované vzorky)</span>
-      <span class="trail-note bg-record-note" id="bg-record-status">🔋 Záznam na pozadí: Běží i při zhasnutém displeji v kapse</span>
+      <span class="trail-note bg-record-note" id="bg-record-status">🔋 Záznam na pozadí: Čekám na GPS vzorek · Záznam při zamčené obrazovce závisí na omezeních vašeho telefonu a prohlížeče — pro nejspolehlivější záznam kontrolujte polohu při rozsvíceném displeji.</span>
       <span class="trail-note osm-trails-attribution" id="osm-trails-attribution">Mapový podklad a KČT trasy: © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> (ODbL)</span>
     </div>
     <div class="walk-test-strip" aria-label="Ukázka a testovací nástroje">
@@ -2013,16 +2157,6 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
 
   function getMapCameraPadding() {
     if (!map) return { top: 0, bottom: 0, left: 0, right: 0 };
-    const h = (typeof map.getContainer === 'function' ? map.getContainer()?.clientHeight : null) || 600;
-    if (is3dMode || is3DMode) {
-      // Posune Avatara do spodní části displeje, takže před ním je vidět dlouhý kus cesty (GTA styl)
-      return {
-        top: Math.round(h * 0.44),
-        bottom: zenMode ? 20 : Math.min(120, Math.round(getBottomSheetOverlapPx() * 0.4)),
-        left: 0,
-        right: 0,
-      };
-    }
     return {
       top: 20,
       bottom: zenMode ? 0 : Math.min(160, Math.round(getBottomSheetOverlapPx() * 0.5)),
@@ -2043,9 +2177,8 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       padding,
     };
     if (is3dMode || is3DMode) {
-      opts.pitch = 66;
-      opts.zoom = Math.max(typeof map.getZoom === 'function' ? map.getZoom() : 18.4, 18.4);
-      if (currentWalkHeadingDeg != null) {
+      opts.pitch = 45;
+      if (currentWalkHeadingDeg != null && followHeadingMode) {
         opts.bearing = currentWalkHeadingDeg;
       }
     }
@@ -2446,15 +2579,15 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       return;
     }
 
-    // Verze v2.2 (Bod 1.2): 512 × 512 px offscreen canvas pro 60 FPS (4× rychlejší toDataURL)
+    // DÁVKA 2 (P0 Bod 5.1): 1024 × 1024 px plátno pro přesný poloměr mlhy 65 metrů (~1.5 m/px)
     if (!fogTextureCanvas) {
       fogTextureCanvas = document.createElement('canvas');
-      fogTextureCanvas.width = 512;
-      fogTextureCanvas.height = 512;
+      fogTextureCanvas.width = 1024;
+      fogTextureCanvas.height = 1024;
     }
-    if (fogTextureCanvas.width !== 512) {
-      fogTextureCanvas.width = 512;
-      fogTextureCanvas.height = 512;
+    if (fogTextureCanvas.width !== 1024) {
+      fogTextureCanvas.width = 1024;
+      fogTextureCanvas.height = 1024;
     }
 
     const fogBounds = fogGeographicBounds.coordinates;
@@ -2467,8 +2600,8 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       activeLocalReveals,
       lastFix: activePlayerPos,
       revealRadiusM: FOG_REVEAL_RADIUS_M,
-      width: 512,
-      height: 512,
+      width: 1024,
+      height: 1024,
     });
 
     lastFogStateKey = fogStateKey;
@@ -2942,9 +3075,13 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
 
   function handleDeviceOrientation(event) {
     if (disposed) return;
-    // DÁVKA 3 (Bod 3.1): Pouze ověřený absolutní azimut vůči severu (žádné vymyšlené hodnoty)
-    const heading = extractAbsoluteCompassHeadingDeg(event);
-    if (heading != null && Number.isFinite(heading)) {
+    // DÁVKA 3 (Bod 3.1) & DÁVKA 1 v2.2.1: Skutečný kompas se započtením úhlu orientace obrazovky
+    const rawHeading = extractAbsoluteCompassHeadingDeg(event);
+    if (rawHeading != null && Number.isFinite(rawHeading)) {
+      const screenAngle = typeof window !== 'undefined'
+        ? (Number(window.screen?.orientation?.angle) || Number(window.orientation) || 0)
+        : 0;
+      const heading = (((rawHeading + screenAngle) % 360) + 360) % 360;
       updateCompassRotation(heading, true);
     }
   }
@@ -3249,6 +3386,11 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     }
 
     // Aktivní chůze (Fáze 3 & 4): nahoře běží odpočet času a metrů
+    if (plannedPlaces.length === 0) {
+      topText.innerHTML = `🥾 <strong>Volná chůze · Odkrývání mapy</strong>`;
+      return;
+    }
+
     const curPos = origin || lastFix || telemetry.lastKnownPosition || currentOrigin;
     const rem = computeRemainingFromSharedRoute({
       sharedRoute: lastRoutedGeometry,
@@ -3260,17 +3402,8 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       origin: currentOrigin,
     });
 
-    const remDistM = rem.remainingDistanceM != null ? rem.remainingDistanceM : 0;
-    const remMins = Math.max(1, Math.round((remDistM / 1000) / speedKmH * 60));
-    const remTimeStr = formatDurationCz(remMins);
-    const remDistStr = formatDistanceLabel(remDistM);
-
-    if (rem.nextStop) {
-      const nextDistStr = rem.nextStopDistanceM != null ? formatDistanceLabel(rem.nextStopDistanceM) : '';
-      topText.innerHTML = `Do cíle <strong>${e(remTimeStr)} (${e(remDistStr)})</strong> · 🎯 Další: <strong>${e(rem.nextStop.title)}</strong>${nextDistStr ? ` (${e(nextDistStr)})` : ''}`;
-    } else {
-      topText.innerHTML = `Do cíle <strong>${e(remTimeStr)} (${e(remDistStr)})</strong> · 🎉 Všechny zastávky navštíveny`;
-    }
+    const statusObj = getActiveWalkStopsStatus({ plannedPlaces, confirmedStopIds, rem, speedKmH });
+    topText.innerHTML = statusObj.textHtml;
   }
 
   function renderCompass(origin) {
@@ -3340,8 +3473,12 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       currentTargetPlace = null;
       currentTargetDist = Infinity;
       const widget = $('active-compass-widget');
-      if (widget) widget.title = 'Všechny zastávky navštíveny! Výborně.';
-      if ($('compass-dist-badge')) $('compass-dist-badge').textContent = 'Hotovo ✓';
+      if (widget) {
+        widget.title = plannedPlaces.length === 0 ? 'Volná chůze · Odkrývání mapy' : 'Všechny zastávky navštíveny! Výborně.';
+      }
+      if ($('compass-dist-badge')) {
+        $('compass-dist-badge').textContent = plannedPlaces.length === 0 ? 'Volná chůze' : 'Hotovo ✓';
+      }
       updateDirectionalIndicators();
     }
     updateTurnNavPill(origin);
@@ -3581,7 +3718,10 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     const visitedCount = plannedPlaces.filter(p => isStopVisited(p)).length;
     if ($('qhud-progress')) $('qhud-progress').textContent = `${visitedCount}/${plannedPlaces.length}`;
 
-    if (rem.nextStop) {
+    if (plannedPlaces.length === 0) {
+      if ($('qhud-next-name')) $('qhud-next-name').textContent = 'Volná chůze · Odkrývání mapy';
+      if ($('qhud-next-eta')) $('qhud-next-eta').textContent = 'Bez pevného cíle';
+    } else if (rem.nextStop) {
       const distStr = rem.nextStopDistanceM != null ? formatDistanceLabel(rem.nextStopDistanceM) : '—';
       const speedKmH = getCompanionSpeedKmH();
       const nextTimeMin = rem.nextStopDistanceM != null
@@ -4260,7 +4400,6 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     if (!map || !maplibregl) return;
 
     const nextUnvisitedStop = plannedPlaces.find(p => !isStopVisited(p));
-    const activeMapPlaceIds = new Set();
 
     // Přidáme také vlastní soukromé vzpomínky uživatele jako odlišené značky v mapě
     const memoryMapItems = personalMemories
@@ -4276,17 +4415,42 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         memoryObj: m,
       }));
 
-    // U DOM markerů míst (placeMarkersById) nikdy nemažeme existující markery míst při posunu mapy (moveend);
-    // odstraníme pouze tehdy, pokud uživatel výslovně smazal vlastní vzpomínku ze seznamu personalMemories.
-    for (const p of mapPlaces) {
+    // DÁVKA 2 (P1 Bod 7.2): Při zoom < 14 omezíme počet současně vykreslených DOM značek,
+    // aby nevznikal nečitelný shluk překrývajících se ikon. Plánované body zůstávají vždy.
+    const curZoom = (map && typeof map.getZoom === 'function') ? map.getZoom() : 15;
+    let displayMapPlaces = mapPlaces;
+    if (curZoom < 14) {
+      const maxNormalPlaces = curZoom < 12 ? 8 : 16;
+      const mustHave = [];
+      const others = [];
+      for (const p of mapPlaces) {
+        if (plannedPlaceIds.has(p.id) || p.pointKind === 'route-start') {
+          mustHave.push(p);
+        } else {
+          others.push(p);
+        }
+      }
+      others.sort((a, b) => (a.distanceM || 9999) - (b.distanceM || 9999));
+      displayMapPlaces = [...mustHave, ...others.slice(0, Math.max(0, maxNormalPlaces - mustHave.length))];
+    }
+
+    const activeMapPlaceIds = new Set();
+    for (const p of displayMapPlaces) {
       activeMapPlaceIds.add(p.id);
     }
     for (const m of memoryMapItems) {
       activeMapPlaceIds.add(m.id);
     }
+    // Aktivní zastávky v plannedRoute.selectedPlaceIds ponecháme vždy
+    for (const id of plannedPlaceIds) {
+      activeMapPlaceIds.add(id);
+    }
+
+    // DÁVKA 2 (P1 Bod 7.2): Odstraníme z placeMarkersById a z mapy všechny neaktivní značky,
+    // které již nejsou v aktuálním displayMapPlaces (ponecháme aktivní zastávky v trase a vzpomínky)
     for (const [existingId, entry] of placeMarkersById.entries()) {
-      if (entry.place?.isUserMemory && !activeMapPlaceIds.has(existingId)) {
-        try { entry.marker.remove(); } catch {}
+      if (!activeMapPlaceIds.has(existingId)) {
+        try { entry.marker?.remove?.(); } catch {}
         placeMarkersById.delete(existingId);
       }
     }
@@ -4342,7 +4506,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     }
 
     // Aktualizujeme nebo vytvoříme markery bez blikání (in-place diffing, anchor: 'center')
-    for (const p of mapPlaces) {
+    for (const p of displayMapPlaces) {
       const visited = isStopVisitedInSession(p);
       const isRouteStart = p.pointKind === 'route-start';
       const isPlanned = plannedPlaceIds.has(p.id);
@@ -4818,6 +4982,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     { key: 'fogParchment', icon: '📜', title: 'Tajemný pergamen (odkrývání mlhy)', desc: 'Postupné odkrývání krajiny tam, kudy skutečně projdeš' },
     { key: 'kctTrails', icon: '🥾', title: 'Turistické značky KČT a stezky', desc: 'Červené, modré, zelené a žluté pěší trasy z dat OpenStreetMap' },
     { key: 'contours', icon: '⛰️', title: 'Vrstevnice a terén', desc: 'Zobrazení výškového reliéfu a kopců na mapě' },
+    { key: 'show3dBuildings', icon: '🏢', title: '🏢 Zobrazovat 3D budovy ve 3D pohledu', desc: 'Jemné 3D modely domů a památek (průhlednost 45 %) pro lepší prostorovou orientaci' },
     { key: 'footprints', icon: '👣', title: 'Stopy pohorek za mnou', desc: 'Střídavé otisky bot ve směru tvé chůze, které za tebou pomalu blednou' },
     { key: 'orbitalArrow', icon: '🎯', title: 'Zlatá směrová šipka u Avatara', desc: 'Šipka obíhající postavičku ukazující směr k další zastávce' },
     { key: 'voiceNav', icon: '🗣️', title: 'Česká hlasová navigace', desc: 'Hlasové hlášení odboček a cílů v českém jazyce' },
@@ -4865,6 +5030,11 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
 
     if (fogBadge) {
       fogBadge.innerHTML = `🗺️ Dosah odkrývání: <strong>${FOG_REVEAL_RADIUS_M} m</strong>`;
+    }
+
+    const bgStatusEl = $('bg-record-status');
+    if (bgStatusEl) {
+      bgStatusEl.textContent = formatBackgroundGpsStatus(fix?.timestamp || (fix ? Date.now() : null));
     }
 
     if (!gpsBadge) return;
@@ -5817,11 +5987,20 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       return;
     }
 
-    // Vzorek prošel všemi 4 kritérii -> vyhodnotíme případný kurz chůze z GPS (DÁVKA 3 Bod 3.2) a uložíme do lastAcceptedFix
+    // Vzorek prošel všemi 4 kritérii -> vyhodnotíme případný kurz chůze z GPS (DÁVKA 3 Bod 3.2 & Dávka 1) a uložíme do lastAcceptedFix
+    const coordsHeading = (coords.heading !== null && coords.heading !== undefined && coords.heading !== '' && Number.isFinite(Number(coords.heading)))
+      ? Number(coords.heading)
+      : null;
+    const coordsSpeed = (coords.speed !== null && coords.speed !== undefined && coords.speed !== '' && Number.isFinite(Number(coords.speed)))
+      ? Number(coords.speed)
+      : null;
     const gpsCourseRes = computeGpsWalkingCourseDeg(prevAcceptedFixForCourse || lastAcceptedFix, {
       ...cleanFix,
-      heading: Number.isFinite(Number(coords.heading)) ? Number(coords.heading) : null,
+      heading: coordsHeading,
+      speed: coordsSpeed,
     });
+    cleanFix.heading = coordsHeading;
+    cleanFix.speed = coordsSpeed;
     prevAcceptedFixForCourse = cleanFix;
     lastAcceptedFix = cleanFix;
     lastFix = cleanFix;
@@ -5987,6 +6166,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         accuracy: p.coords.accuracy,
         altitude: p.coords.altitude,
         speed: p.coords.speed,
+        heading: p.coords.heading,
         timestamp: p.timestamp,
         simulated: false,
       }),
@@ -6001,6 +6181,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         accuracy: p.coords.accuracy,
         altitude: p.coords.altitude,
         speed: p.coords.speed,
+        heading: p.coords.heading,
         timestamp: p.timestamp,
         simulated: false,
       }),
@@ -6656,12 +6837,12 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
           'source-layer': 'building',
           type: 'fill-extrusion',
           minzoom: 14,
-          layout: { visibility: is3dMode ? 'visible' : 'none' },
+          layout: { visibility: ((is3dMode || is3DMode) && appSettings.show3dBuildings) ? 'visible' : 'none' },
           paint: {
             'fill-extrusion-color': '#dfd8c8',
             'fill-extrusion-height': ['coalesce', ['get', 'render_height'], ['get', 'height'], 9],
             'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0],
-            'fill-extrusion-opacity': 0.85,
+            'fill-extrusion-opacity': 0.45,
           },
         });
       }
@@ -6733,6 +6914,17 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     } catch {}
   }
 
+  function sync3DBuildingsLayerState() {
+    if (!map || typeof map.getLayer !== 'function') return;
+    try {
+      if (map.getLayer('czekpoint-3d-buildings')) {
+        const visible = Boolean((is3dMode || is3DMode) && appSettings.show3dBuildings);
+        map.setLayoutProperty('czekpoint-3d-buildings', 'visibility', visible ? 'visible' : 'none');
+        map.setPaintProperty('czekpoint-3d-buildings', 'fill-extrusion-opacity', 0.45);
+      }
+    } catch {}
+  }
+
   function setMap3DMode(enable3D, opts = {}) {
     if (!map) return;
     const next3D = Boolean(enable3D);
@@ -6741,75 +6933,62 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     enableAllMapInteractions();
 
     if (next3D) {
-      // Verze v2.2 (Bod 2): Automatické sledování polohy i směru chůze
-      follow = true;
-      followHeadingMode = true;
+      // DÁVKA 1 (v2.2.1 P0 Bod 2): Přirozený 3D pohled — nezapínat automaticky follow/kompas ani nevynucovat zoom 18.4
       updateFollowUi();
       updateHeadingModeBannerUi();
 
       const curZoom = typeof map.getZoom === 'function' ? map.getZoom() : 16.5;
-      const targetZoom = curZoom < 18.2 ? 18.4 : curZoom;
-      const initialBearing = (Number.isFinite(currentWalkHeadingDeg) && currentWalkHeadingDeg !== null)
-        ? currentWalkHeadingDeg
-        : (Number.isFinite(targetBearing) ? targetBearing : ((typeof map.getBearing === 'function' ? map.getBearing() : 0) || 0));
-      camBearing = initialBearing;
-
-      const playerPos = getAvatarReferencePosition();
+      const targetBearing = typeof map.getBearing === 'function' ? map.getBearing() : 0;
+      const curCenter = typeof map.getCenter === 'function' ? map.getCenter() : null;
       const padding = getMapCameraPadding();
 
-      // DÁVKA 4 (Bod 1.2): Bezpečné přepnutí 2D/3D i během načítání stylu (!map.isStyleLoaded())
+      // Bezpečné přepnutí 2D/3D i během načítání stylu (!map.isStyleLoaded())
       const styleReady = typeof map.isStyleLoaded === 'function' ? map.isStyleLoaded() : true;
       if (!styleReady) {
         update3DUiState();
         try {
           map.easeTo({
-            pitch: 66,
-            zoom: targetZoom,
-            bearing: initialBearing,
-            center: playerPos ? [playerPos.lng, playerPos.lat] : undefined,
+            pitch: 45,
+            zoom: curZoom,
+            bearing: targetBearing,
+            center: curCenter ? [curCenter.lng, curCenter.lat] : undefined,
             padding,
-            duration: opts.instant ? 0 : 700,
+            duration: opts.instant ? 0 : 500,
           });
         } catch {}
         if (!opts.silent) {
-          status('🏔️ Zapnuto 3D zobrazení GTA (pohled zezadu, náklon 66°, zoom 18.4, načítám výškový model…).');
+          status('🏔️ Zapnuto 3D zobrazení (náklon 45°, terén 1.25×, načítám výškový model…).');
         }
         return;
       }
       try {
         ensureCustomMapSourcesAndLayers();
         if (appliedTerrain3D !== is3dMode) {
-          map.setTerrain({ source: 'terrain-dem', exaggeration: 1.8 });
+          map.setTerrain({ source: 'terrain-dem', exaggeration: 1.25 });
           appliedTerrain3D = true;
         }
         if (map.getLayer('terrain-hillshade')) {
           map.setLayoutProperty('terrain-hillshade', 'visibility', 'visible');
         }
-        if (map.getLayer('czekpoint-3d-buildings')) {
-          map.setLayoutProperty('czekpoint-3d-buildings', 'visibility', 'visible');
-        }
+        sync3DBuildingsLayerState();
         update3DUiState();
         map.easeTo({
-          pitch: 66, // původně pitch: 58, ve verzi v2.2 GTA náklon 66°
-          zoom: targetZoom,
-          bearing: initialBearing,
-          center: playerPos ? [playerPos.lng, playerPos.lat] : undefined,
+          pitch: 45,
+          zoom: curZoom,
+          bearing: targetBearing,
+          center: curCenter ? [curCenter.lng, curCenter.lat] : undefined,
           padding,
-          duration: opts.instant ? 0 : 700,
+          duration: opts.instant ? 0 : 500,
         });
         if (!opts.silent) {
-          status('🏔️ Zapnuto 3D zobrazení GTA (pohled zezadu, náklon 66°, zoom 18.4).');
+          status('🏔️ Zapnuto 3D zobrazení (náklon 45°, terén 1.25×).');
         }
       } catch {
         is3DMode = false;
         is3dMode = false;
         appliedTerrain3D = false;
         try { map.setTerrain(null); } catch {}
-        try {
-          if (map.getLayer('czekpoint-3d-buildings')) {
-            map.setLayoutProperty('czekpoint-3d-buildings', 'visibility', 'none');
-          }
-        } catch {}
+        sync3DBuildingsLayerState();
         try { map.easeTo({ pitch: 0, padding: getMapCameraPadding(), duration: 300 }); } catch {}
         update3DUiState();
         status('3D terén není momentálně dostupný, pokračuji ve 2D zobrazení.');
@@ -6822,16 +7001,14 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
           map.setTerrain(null);
           appliedTerrain3D = false;
         }
-        if (map.getLayer('czekpoint-3d-buildings')) {
-          map.setLayoutProperty('czekpoint-3d-buildings', 'visibility', 'none');
-        }
+        sync3DBuildingsLayerState();
       } catch {}
       update3DUiState();
       try {
         map.easeTo({
           pitch: 0,
           padding: getMapCameraPadding(),
-          duration: opts.instant ? 0 : 600,
+          duration: opts.instant ? 0 : 500,
         });
       } catch {}
       if (!opts.silent) {
@@ -6881,11 +7058,11 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         style: buildMapLibreStyle(config, { showContourLayer, showHikingTrails, is3dMode }),
         center: [center.lng, center.lat],
         zoom: 16.5,
-        pitch: is3dMode ? 58 : 0,
+        pitch: is3dMode ? 45 : 0,
         bearing: 0,
         minZoom: 3,
         maxZoom: 19,
-        maxPitch: 75,
+        maxPitch: 60,
         attributionControl: false,
       });
       appliedTerrain3D = false;
@@ -6982,7 +7159,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       if (appliedTerrain3D !== is3dMode) {
         try {
           if (is3dMode) {
-            map.setTerrain({ source: 'terrain-dem', exaggeration: 1.8 });
+            map.setTerrain({ source: 'terrain-dem', exaggeration: 1.25 });
             appliedTerrain3D = true;
           } else {
             map.setTerrain(null);
@@ -6994,9 +7171,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         if (map.getLayer('terrain-hillshade')) {
           map.setLayoutProperty('terrain-hillshade', 'visibility', 'visible');
         }
-        if (map.getLayer('czekpoint-3d-buildings')) {
-          map.setLayoutProperty('czekpoint-3d-buildings', 'visibility', is3dMode ? 'visible' : 'none');
-        }
+        sync3DBuildingsLayerState();
       } catch {}
       plannedRouteRenderKey = null;
       renderPlannedRouteOnMap(true);
@@ -7053,8 +7228,8 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       if (srcId === 'opentopo-raster' && showContourLayer && !contourFallbackTriggered) {
         contourFallbackTriggered = true;
         try {
-          if (map.getLayer('opentopo-layer')) {
-            map.setLayoutProperty('opentopo-layer', 'visibility', 'none');
+          if (map.getLayer('opentopo-raster-layer')) {
+            map.setLayoutProperty('opentopo-raster-layer', 'visibility', 'none');
           }
         } catch {}
         status('Podklad vrstevnic (OpenTopoMap) není dostupný — zachován standardní mapový podklad OSM.');
@@ -7111,22 +7286,34 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       renderTrail();
       renderPlaces({ skipListRebuild: true });
     });
-    // KRITICKÁ OPRAVA 1 & v2.1: Okamžité uvolnění mapy při dotyku uživatele (isUserTouchingMap)
+    // DÁVKA 1 (v2.2.1 P0 Bod 4): Zákaz odpojování follow při pouhém kliknutí — odpojení pouze při posunu > 12 px
+    let mapTouchStartPointer = null;
+
     map.on('dragstart', (e) => {
       if (!e || e.originalEvent) {
         isUserTouchingMap = true;
         follow = false;
         updateRecenterButtonVisibility();
+        updateFollowUi();
+      }
+    });
+    map.on('drag', (e) => {
+      if (!e || e.originalEvent) {
+        follow = false;
+        updateRecenterButtonVisibility();
+        updateFollowUi();
       }
     });
     map.on('dragend', () => {
       isUserTouchingMap = false;
+      mapTouchStartPointer = null;
     });
     map.on('pitchstart', (e) => {
       if (!e || e.originalEvent) {
         isUserTouchingMap = true;
         follow = false;
         updateRecenterButtonVisibility();
+        updateFollowUi();
       }
     });
     map.on('pitchend', () => {
@@ -7135,22 +7322,48 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     map.on('mousedown', (e) => {
       if (e && e.originalEvent) {
         isUserTouchingMap = true;
-        follow = false;
-        updateRecenterButtonVisibility();
+        const oe = e.originalEvent;
+        mapTouchStartPointer = { x: oe.clientX, y: oe.clientY };
+      }
+    });
+    map.on('mousemove', (e) => {
+      if (isUserTouchingMap && mapTouchStartPointer && e && e.originalEvent) {
+        const oe = e.originalEvent;
+        const dx = oe.clientX - mapTouchStartPointer.x;
+        const dy = oe.clientY - mapTouchStartPointer.y;
+        if (Math.hypot(dx, dy) > 12) {
+          follow = false;
+          updateRecenterButtonVisibility();
+          updateFollowUi();
+        }
       }
     });
     map.on('mouseup', () => {
       isUserTouchingMap = false;
+      mapTouchStartPointer = null;
     });
     map.on('touchstart', (e) => {
       if (e && e.originalEvent) {
         isUserTouchingMap = true;
-        follow = false;
-        updateRecenterButtonVisibility();
+        const touch = e.originalEvent.touches?.[0] || e.originalEvent;
+        mapTouchStartPointer = { x: touch.clientX, y: touch.clientY };
+      }
+    });
+    map.on('touchmove', (e) => {
+      if (isUserTouchingMap && mapTouchStartPointer && e && e.originalEvent) {
+        const touch = e.originalEvent.touches?.[0] || e.originalEvent;
+        const dx = touch.clientX - mapTouchStartPointer.x;
+        const dy = touch.clientY - mapTouchStartPointer.y;
+        if (Math.hypot(dx, dy) > 12) {
+          follow = false;
+          updateRecenterButtonVisibility();
+          updateFollowUi();
+        }
       }
     });
     map.on('touchend', () => {
       isUserTouchingMap = false;
+      mapTouchStartPointer = null;
     });
     // DÁVKA 3 (Bod 2.2): Při otočení mapy (ve 2D, 3D i při ručním otočení) okamžitě přepočítáme směrovou šipku u Avatara a okrajový štítek
     map.on('rotate', () => {
@@ -7296,6 +7509,23 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       },
     });
 
+    $('walk-fake-gps-toggle')?.addEventListener('click', () => {
+      if (fakeGpsSim?.isOpen) {
+        fakeGpsSim.close();
+      } else {
+        fakeGpsSim?.open();
+      }
+    });
+
+    // DÁVKA 2 (P1 Bod 7.1): Pokud byl odkaz otevřen z nastavení se sim=1 nebo actions.sim, automaticky otevřeme simulátor
+    if (actions.sim || (typeof location !== 'undefined' && (location.hash.includes('sim=1') || location.search.includes('sim=1')))) {
+      setTimeout(() => {
+        if (!disposed && fakeGpsSim && !fakeGpsSim.isOpen) {
+          fakeGpsSim.open();
+        }
+      }, 120);
+    }
+
     loadAndRenderHikingTrails();
 
     // v2.1 (Bod 2.1): Okamžité zaměření polohy při otevření mapy
@@ -7314,7 +7544,8 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
               lng: norm.lng,
               accuracy: Number.isFinite(pos?.coords?.accuracy) ? pos.coords.accuracy : 15,
               altitude: pos?.coords?.altitude ?? null,
-              speed: pos?.coords?.speed ?? 0,
+              speed: Number.isFinite(pos?.coords?.speed) ? pos.coords.speed : null,
+              heading: Number.isFinite(pos?.coords?.heading) ? pos.coords.heading : null,
               timestamp: pos?.timestamp || Date.now(),
               simulated: false,
             };
@@ -8414,13 +8645,54 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     }
   });
 
-  // 2.2 Lupa vyhledávání přímo v mapě (#map-lupa-search-input)
-  async function performInMapLupaSearch(rawQuery) {
+  // DÁVKA 2 (P1 Bod 6): Lupa vyhledávání přímo v mapě s respektováním Nominatim pravidel,
+  // rate limitem 1 dotaz/s, bez falešných výsledků a bez automatického posouvání mapy.
+  let lupaAbortController = null;
+  let lastNominatimCallAt = 0;
+  let lupaRequestId = 0;
+
+  async function performInMapLupaSearch(rawQuery, isExplicitSubmit = false) {
     const resultsBox = $('map-lupa-search-results');
     const clearBtn = $('map-lupa-search-clear');
     const q = String(rawQuery || '').trim();
     if (clearBtn) clearBtn.hidden = q.length === 0;
     if (!resultsBox) return;
+
+    const currentReqId = ++lupaRequestId;
+
+    // 1. Když je pole prázdné: zobrazíme místní tipy v okolí
+    if (!q) {
+      const presets = CZECH_PLACE_PRESETS.slice(0, 6).map(p => ({
+        id: p.id,
+        title: p.label,
+        sub: 'Místní tip v okolí (výchozí bod)',
+        lat: p.lat,
+        lng: p.lng,
+      }));
+      lastLupaResults = presets;
+      resultsBox.hidden = false;
+      resultsBox.innerHTML = `
+        <div class="map-search-header-note" style="padding:6px 12px;font-size:0.78rem;font-weight:700;color:#94a3b8;border-bottom:1px solid rgba(255,255,255,0.08)">📍 Místní tipy v okolí:</div>
+        ${presets.map((item, idx) => `
+          <div class="map-search-item" role="option" data-lupa-idx="${idx}">
+            <div class="map-search-item-head">
+              <strong class="map-search-item-title">${e(item.title)}</strong>
+              <span class="map-search-item-sub">${e(item.sub || '')}</span>
+            </div>
+            <div class="map-search-item-actions">
+              <button type="button" class="button small map-search-action-btn start-here" data-lupa-action="start" data-lupa-idx="${idx}">
+                📍 Začít zde
+              </button>
+              <button type="button" class="button small map-search-action-btn add-stop" data-lupa-action="add" data-lupa-idx="${idx}">
+                + Přidat
+              </button>
+            </div>
+          </div>
+        `).join('')}
+      `;
+      return;
+    }
+
     if (q.length < 2) {
       resultsBox.hidden = true;
       resultsBox.innerHTML = '';
@@ -8430,36 +8702,113 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     const qNorm = normalizeSearchQuery(q);
     const localCandidates = [
       ...CZECH_PLACE_PRESETS.map(p => ({ id: p.id, title: p.label, lat: p.lat, lng: p.lng, sub: 'Město / oblast v ČR' })),
-      ...getAllAvailablePlaces().map(p => ({ id: p.id, title: p.title, lat: p.lat, lng: p.lng, sub: 'Zajímavé místo v okolí', kind: p.kind, category: p.category })),
+      ...getAllAvailablePlaces().map(p => ({ id: p.id, title: p.title, lat: p.lat, lng: p.lng, sub: 'Místo v paměti / v okolí', kind: p.kind, category: p.category })),
     ].filter(item => normalizeSearchQuery(item.title).includes(qNorm));
 
-    let nominatimItems = [];
-    if (localCandidates.length < 5) {
-      try {
-        const nom = await searchPlaceNominatim(q, aborter.signal);
-        nominatimItems = (nom || []).map((n, i) => ({
-          id: `nom-${Date.now()}-${i}`,
-          title: n.label.split(',')[0].trim(),
-          sub: n.label,
-          lat: n.lat,
-          lng: n.lng,
-          kind: 'culture',
-          category: 'views',
-        }));
-      } catch {}
+    // Pokud uživatel pouze píše (není explicitní submit Enter / Hledat):
+    // Při psaní filtrujeme VÝHRADNĚ lokální místa v paměti (dodržení pravidel Nominatim API)
+    if (!isExplicitSubmit) {
+      lastLupaResults = localCandidates.slice(0, 8);
+      resultsBox.hidden = false;
+      if (lastLupaResults.length === 0) {
+        resultsBox.innerHTML = `
+          <div class="map-search-item">
+            <span class="map-search-item-sub">V lokální paměti nenalezeno. Pro celosvětové hledání stiskni <strong>Enter</strong> nebo tlačítko <strong>Hledat</strong>.</span>
+          </div>
+        `;
+      } else {
+        resultsBox.innerHTML = `
+          ${lastLupaResults.map((item, idx) => `
+            <div class="map-search-item" role="option" data-lupa-idx="${idx}">
+              <div class="map-search-item-head">
+                <strong class="map-search-item-title">${e(item.title)}</strong>
+                <span class="map-search-item-sub">${e(item.sub || '')}</span>
+              </div>
+              <div class="map-search-item-actions">
+                <button type="button" class="button small map-search-action-btn start-here" data-lupa-action="start" data-lupa-idx="${idx}">
+                  📍 Začít zde
+                </button>
+                <button type="button" class="button small map-search-action-btn add-stop" data-lupa-action="add" data-lupa-idx="${idx}">
+                  + Přidat
+                </button>
+              </div>
+            </div>
+          `).join('')}
+          <div class="map-search-footer-hint" style="padding:6px 12px;font-size:0.75rem;color:#94a3b8;border-top:1px solid rgba(255,255,255,0.08)">
+            Pro celosvětové hledání mimo paměť stiskni <strong>Enter</strong> nebo tlačítko <strong>Hledat</strong>.
+          </div>
+        `;
+      }
+      return;
     }
 
-    const combined = [...localCandidates, ...nominatimItems].slice(0, 8);
-    lastLupaResults = combined;
+    // Uživatel výslovně potvrdil odeslání (Enter nebo klik na tlačítko Hledat)
+    // Zrušíme předchozí běžící dotaz (AbortController)
+    if (lupaAbortController) {
+      try { lupaAbortController.abort(); } catch {}
+    }
+    lupaAbortController = new AbortController();
 
-    if (combined.length === 0) {
+    // Dodržíme limit max 1 dotaz za sekundu (Nominatim Usage Policy)
+    const now = Date.now();
+    const elapsed = now - lastNominatimCallAt;
+    if (elapsed < 1000) {
+      await new Promise(r => setTimeout(r, 1000 - elapsed));
+      if (currentReqId !== lupaRequestId || disposed) return;
+    }
+    lastNominatimCallAt = Date.now();
+
+    resultsBox.hidden = false;
+    resultsBox.innerHTML = `<div class="map-search-item"><span class="map-search-item-sub">🔍 Hledám „${e(q)}“…</span></div>`;
+
+    let onlineItems = [];
+    let fetchError = false;
+    try {
+      const nom = await searchPlaceNominatim(q, {
+        signal: lupaAbortController.signal,
+        fetchImpl: typeof fetch !== 'undefined' ? fetch : null,
+      });
+      if (currentReqId !== lupaRequestId || disposed) return;
+      onlineItems = (nom || []).map((n, i) => ({
+        id: n.id || `nom-${Date.now()}-${i}`,
+        title: n.label.split(',')[0].trim(),
+        sub: n.label,
+        lat: n.lat,
+        lng: n.lng,
+        kind: 'culture',
+        category: 'views',
+      }));
+    } catch (err) {
+      if (currentReqId !== lupaRequestId || disposed) return;
+      if (err?.name !== 'AbortError') {
+        fetchError = true;
+      }
+    }
+
+    // Sloučíme lokální shody a online výsledky (bez duplicit)
+    const seenMap = new Set();
+    const combined = [];
+    for (const item of [...localCandidates, ...onlineItems]) {
+      const key = `${Math.round(item.lat * 1000)},${Math.round(item.lng * 1000)}`;
+      if (!seenMap.has(key)) {
+        seenMap.add(key);
+        combined.push(item);
+      }
+    }
+    const finalItems = combined.slice(0, 10);
+    lastLupaResults = finalItems;
+
+    if (finalItems.length === 0) {
       resultsBox.hidden = false;
-      resultsBox.innerHTML = `<div class="map-search-item"><span class="map-search-item-sub">Nic nenalezeno pro „${e(q)}“. Zkus jiný název města nebo památky.</span></div>`;
+      const msg = fetchError
+        ? 'Chyba připojení při vyhledávání.'
+        : `Žádné odpovídající místo nebylo nalezeno pro „${e(q)}“.`;
+      resultsBox.innerHTML = `<div class="map-search-item"><span class="map-search-item-sub">${e(msg)}</span></div>`;
       return;
     }
 
     resultsBox.hidden = false;
-    resultsBox.innerHTML = combined.map((item, idx) => `
+    resultsBox.innerHTML = finalItems.map((item, idx) => `
       <div class="map-search-item" role="option" data-lupa-idx="${idx}">
         <div class="map-search-item-head">
           <strong class="map-search-item-title">${e(item.title)}</strong>
@@ -8467,7 +8816,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         </div>
         <div class="map-search-item-actions">
           <button type="button" class="button small map-search-action-btn start-here" data-lupa-action="start" data-lupa-idx="${idx}">
-            📍 Začít výpravu zde
+            📍 Začít zde
           </button>
           <button type="button" class="button small map-search-action-btn add-stop" data-lupa-action="add" data-lupa-idx="${idx}">
             + Přidat do trasy
@@ -8477,20 +8826,33 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     `).join('');
   }
 
+  $('map-lupa-search-input')?.addEventListener('focus', () => {
+    const inp = $('map-lupa-search-input');
+    if (inp && !inp.value.trim()) {
+      performInMapLupaSearch('', false);
+    }
+  });
+
   $('map-lupa-search-input')?.addEventListener('input', (ev) => {
     const val = ev.target.value;
     if (lupaSearchTimer) clearTimeout(lupaSearchTimer);
     lupaSearchTimer = setTimeout(() => {
-      performInMapLupaSearch(val);
-    }, 240);
+      performInMapLupaSearch(val, false);
+    }, 200);
   });
 
   $('map-lupa-search-input')?.addEventListener('keydown', (ev) => {
     if (ev.key === 'Enter') {
       ev.preventDefault();
       if (lupaSearchTimer) clearTimeout(lupaSearchTimer);
-      performInMapLupaSearch(ev.currentTarget.value);
+      performInMapLupaSearch(ev.currentTarget.value, true);
     }
+  });
+
+  $('map-lupa-search-submit')?.addEventListener('click', () => {
+    const inp = $('map-lupa-search-input');
+    if (lupaSearchTimer) clearTimeout(lupaSearchTimer);
+    performInMapLupaSearch(inp ? inp.value : '', true);
   });
 
   $('map-lupa-search-clear')?.addEventListener('click', () => {
@@ -8835,13 +9197,18 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     playTick(stateObj.soundEnabled);
   });
 
-  $('walk-more-settings')?.addEventListener('click', () => {
+  $('walk-more-settings')?.addEventListener('click', (ev) => {
+    ev?.stopPropagation?.();
     moreMenuOpen = false;
     if ($('walk-more-menu')) $('walk-more-menu').hidden = true;
     $('walk-more-btn')?.setAttribute('aria-expanded', 'false');
     appSettingsModalOpen = true;
     const modal = $('app-settings-modal');
-    if (modal) modal.hidden = false;
+    if (modal) {
+      modal.hidden = false;
+      const firstFocusable = modal.querySelector('button, [tabindex="0"]');
+      firstFocusable?.focus();
+    }
     renderAppSettingsModalUi();
     playTick(stateObj.soundEnabled);
   });
@@ -8892,8 +9259,8 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     if ($('wiz-chk-contours')) $('wiz-chk-contours').checked = showContourLayer;
     if (!map) return;
     try {
-      if (map.getLayer('opentopo-layer')) {
-        map.setLayoutProperty('opentopo-layer', 'visibility', showContourLayer ? 'visible' : 'none');
+      if (map.getLayer('opentopo-raster-layer')) {
+        map.setLayoutProperty('opentopo-raster-layer', 'visibility', showContourLayer ? 'visible' : 'none');
       }
     } catch {}
   }
@@ -9570,7 +9937,11 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     if ($('app-settings-modal') && !$('app-settings-modal').hidden) {
       const clickedOpenSettings =
         t.closest('#btn-open-settings-modal') ||
-        t.closest('#btn-top-settings');
+        t.closest('#btn-top-settings') ||
+        t.closest('#walk-more-settings') ||
+        t.closest('#walk-more-options') ||
+        t.closest('#walk-more-menu') ||
+        t.closest('#walk-more-btn');
       if (!t.closest('.edit-walk-modal-card') && !clickedOpenSettings) {
         appSettingsModalOpen = false;
         $('app-settings-modal').hidden = true;
@@ -9765,6 +10136,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       saveAppState();
       if (key === 'kctTrails') syncHikingTrailsLayerState();
       if (key === 'contours') setContourLayer(val);
+      if (key === 'show3dBuildings') sync3DBuildingsLayerState();
       if (key === 'fogParchment') {
         fogMode = val ? 'explore' : 'none';
         updateFogToggleLabel();
@@ -10143,6 +10515,19 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
   renderQuestHud(plannedRoute.origin);
   renderPhase1AndPhase4Ui(lastFix || plannedRoute.origin);
 
+  const handleVisualViewportChange = () => {
+    if (typeof window === 'undefined' || !window.visualViewport) return;
+    const vpHeight = window.visualViewport.height;
+    const rightBar = root.querySelector('.map-right-toolbar');
+    if (rightBar) {
+      rightBar.style.maxHeight = `calc(${Math.round(vpHeight)}px - 140px)`;
+    }
+  };
+  if (typeof window !== 'undefined' && window.visualViewport) {
+    window.visualViewport.addEventListener('resize', handleVisualViewportChange, { signal: aborter.signal });
+    window.visualViewport.addEventListener('scroll', handleVisualViewportChange, { signal: aborter.signal });
+  }
+
   return () => {
     disposed = true;
     document.body?.classList?.remove('nav-active');
@@ -10161,6 +10546,12 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     stopWatchdog();
     pauseSession();
     aborter.abort();
+    if (typeof window !== 'undefined' && window.visualViewport) {
+      try {
+        window.visualViewport.removeEventListener('resize', handleVisualViewportChange);
+        window.visualViewport.removeEventListener('scroll', handleVisualViewportChange);
+      } catch {}
+    }
     window.removeEventListener('keydown', onEscapeKey);
     window.removeEventListener('resize', handleViewportChange);
     window.removeEventListener('orientationchange', handleViewportChange);

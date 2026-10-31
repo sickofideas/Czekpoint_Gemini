@@ -1,4 +1,4 @@
-# Czekpoint — Osobní atlas procházek a objevování krajiny (`v2.0-final`)
+# Czekpoint — Osobní atlas procházek a objevování krajiny (`v2.3.0` / `v2.3`)
 
 Czekpoint je česká webová aplikace (PWA) pro plánování pěších procházek, objevování okolí s geograficky ukotvenou mlhou na 2D/3D terénu (MapLibre GL JS), sbírání ověřených GPS razítek, ukládání vlastních soukromých vzpomínek a generování ilustrovaných pohlednic.
 
@@ -63,3 +63,30 @@ Pro přímé statické nasazení na GitHub Pages nahrajte do repozitáře tyto s
 - **Dvoustupňová ochrana soukromí na pohlednici:**
   1. **🔒 Skrýt začátek a konec trasy (±150 m)** — ve výchozím stavu zapnuto; ořízne prvních a posledních 150 m trasy a skryje přesný čas.
   2. **🛡️ Maximální soukromí (Bez mapy)** — zcela skryje zákres trasy i souřadnice a na pohlednici ponechá pouze koláž, statistiky a počet nově odkrytých dílků.
+
+---
+
+## 5. Verze v2.3 (v2.3.0) — Mobilní rozložení, záznam na pozadí a testování
+
+### Klíčové úpravy ve verzi v2.3.0:
+1. **Pravdivý stav volné chůze (`🥾 Volná chůze · Odkrývání mapy`):**
+   - Při procházce bez vybraných zastávek se nezobrazuje matoucí hláška o splněných cílech ani odpočet 0 m.
+2. **Přizpůsobení mobilním displejům (320, 360, 390 px) a klávesnici:**
+   - Spodní akční lišta `#mab-active-group` je uspořádána do 2sloupcového gridu (`grid-template-columns: repeat(2, minmax(0, 1fr))`) s tlačítky výšky min. 44 px, takže žádné tlačítko nepřetéká.
+   - Pravý ovládací sloupec `.map-right-toolbar` má `max-height: calc(100% - 140px)` se scrollováním bez lišty a dynamicky reaguje na změnu `window.visualViewport` při otevřené virtuální klávesnici.
+   - Horní překryvy mapy (vyhledávací pole `#map-search-overlay`, indikátor výpočtu `#map-busy-indicator` a kompas) jsou uspořádány do sloupce `.map-top-overlays` a vzájemně se nepřekrývají.
+3. **Pravdivé informace o záznamu na pozadí a atribuce:**
+   - Stavový řádek `#bg-record-status` zobrazuje reálný čas a stáří posledního přijatého GPS vzorku spolu s poctivým upozorněním ohledně limitů operačního systému.
+   - Kompaktní štítek mapové atribuce (`© OpenStreetMap · Waymarked Trails · AWS Terrarium DEM`) je umístěn přímo v mapovém kontejneru a zůstává viditelný i v celoobrazovkovém režimu (`.zen-mode`).
+4. **Bezpečný Service Worker (`sw.js`):**
+   - V události `activate` se mažou pouze mezipaměti začínající prefixem `czekpoint-` (nemažou se cizí cache na doméně).
+   - Doplněny všechny moduly ze `src/` a soubory MapLibre GL JS, verze cache povýšena na `czekpoint-app-shell-v2.3`.
+
+### Postup otestování na fyzickém telefonu (Android / iPhone) při chůzi venku:
+1. Otevřete aplikaci v mobilním prohlížeči (Chrome na Androidu nebo Safari na iOS).
+2. Povolte přístup k poloze GPS.
+3. Klikněte na **▶ Vyrazit**.
+4. Zkontrolujte stav v horní liště — při volné chůzi bez plánu svítí **`🥾 Volná chůze · Odkrývání mapy`**.
+5. Ujděte alespoň 50–100 metrů venku:
+   - Ověřte, že se za postavičkou objevují otisky pohorek a kruh odkrývání mlhy odpovídá skutečnému dosahu 65 m.
+   - Při zhasnutí obrazovky na 2–3 minuty a následném rozsvícení ověřte čas posledního vzorku a plynulé navázání trasy.

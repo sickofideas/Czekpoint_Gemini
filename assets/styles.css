@@ -703,4 +703,12 @@ body.nav-active .site-header-logo-icon {
   animation: none !important;
 }
 
+dialog:not([open]) {
+  display: none !important;
+}
+
+#session-summary-container:empty {
+  display: none !important;
+}
+
 

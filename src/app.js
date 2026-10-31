@@ -1256,7 +1256,12 @@ async function renderPage({ focus = false } = {}) {
   void main.offsetWidth;
   main.classList.add('page-enter');
   const renderId = ++state.renderId;
-  const parts = location.hash.replace(/^#\/?/, '').split('/');
+  const rawHash = location.hash.replace(/^#\/?/, '');
+  const [hashPath, hashQuery] = rawHash.split('?');
+  const searchParams = new URLSearchParams(location.search || '');
+  const hashParams = new URLSearchParams(hashQuery || '');
+  const isSimRequested = searchParams.get('sim') === '1' || hashParams.get('sim') === '1';
+  const parts = (hashPath || '').split('/').filter(Boolean);
   const view = parts[0] || '';
   state.view = (view === '' || view === 'prochazka') ? 'walk' : view === 'katalog' ? 'catalog' : view === 'pas' ? 'passport' : view === 'nastaveni' ? 'settings' : view === 'o-projektu' ? 'about' : view === 'trasa' ? 'detail' : 'unknown';
   document.title = 'Czekpoint — Začni cestu s přehledem';
@@ -1272,6 +1277,7 @@ async function renderPage({ focus = false } = {}) {
     await renderDetail(id, renderId);
   } else if (view === '' || view === 'prochazka') {
     disposeWalk = mountWalk(main, state.routes, CONFIG, {
+      sim: isSimRequested,
       onAddVisit: async (id) => {
         await state.repo.addVisit(id);
         await refreshPersonal();
