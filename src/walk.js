@@ -345,6 +345,13 @@ export function renderPlayerAvatarMarkerHtml(arg1 = 'liska', arg2 = 0, arg3 = fa
   const imgSrc = avatarUrl(avatarId);
   const avatarMeta = ALLOWED_AVATARS.find(a => a.id === avatarId) || ALLOWED_AVATARS[0];
   const showArrow = opts.orbitalArrow !== false && opts.showOrbitalArrow !== false;
+  const profileBg = opts.profile?.bgColor || opts.bgColor;
+  const profileRing = opts.profile?.ringColor || opts.ringColor;
+  const coreStyle = [
+    profileBg ? `background: ${profileBg};` : '',
+    profileRing ? `border-color: ${profileRing};` : '',
+  ].filter(Boolean).join(' ');
+
   return `
     <div class="player-avatar-marker ${isWalking ? 'is-walking' : 'is-idle'} ${is3D ? 'is-3d-avatar' : ''}" data-avatar-id="${e(avatarMeta.id)}">
       <div class="avatar-ground-shadow" aria-hidden="true"></div>
@@ -354,7 +361,7 @@ export function renderPlayerAvatarMarkerHtml(arg1 = 'liska', arg2 = 0, arg3 = fa
           <path d="M12 1 L21 18 L12 14 L3 18 Z" fill="#ffd25a" stroke="#1a120b" stroke-width="2" stroke-linejoin="round"/>
         </svg>
       </div>
-      <div class="avatar-medallion-core player-avatar-inner">
+      <div class="avatar-medallion-core player-avatar-inner" style="${e(coreStyle)}">
         <img src="${e(imgSrc)}" alt="${e(avatarMeta.name)}" width="58" height="58" class="player-avatar-img">
       </div>
     </div>
@@ -4164,7 +4171,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
 
           return `
             <div class="basket-item ${visitedToday ? 'is-visited' : ''} ${isNext ? 'is-next-target' : ''}" data-stop-index="${idx}" data-stop-id="${e(p.id)}">
-              <div class="basket-item-main">
+              <div class="basket-item-main" data-focus-stop-id="${e(p.id)}" style="cursor:pointer" title="Zobrazit detail v mapě">
                 <span class="basket-index">${idx + 1}.</span>
                 <div class="basket-title-wrap">
                   <strong class="basket-title">${e(p.title)}</strong>
@@ -7170,8 +7177,8 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
 
     const playerEl = document.createElement('div');
     playerEl.className = 'player-avatar-marker-anchor';
-    playerEl.style.width = '54px';
-    playerEl.style.height = '54px';
+    playerEl.style.width = '86px';
+    playerEl.style.height = '86px';
     playerEl.style.pointerEvents = 'none';
     playerEl.style.opacity = (active || demo || simSandboxActive || lastFix) ? '1' : '0';
     playerEl.style.zIndex = '45';
@@ -9108,7 +9115,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
           updateFollowUi();
           setMapView(place.lat, place.lng, Math.max(map.getZoom?.() || 15, 15), true);
         }
-        renderSelectedPlaceDetail(place);
+        openPlaceDetail(place);
         playTick(stateObj.soundEnabled);
       }
       return;
@@ -9120,6 +9127,24 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         follow = false;
         updateFollowUi();
         setMapView(orig.lat, orig.lng, Math.max(map.getZoom?.() || 14, 14), true);
+        playTick(stateObj.soundEnabled);
+      }
+    }
+  });
+
+  // Kliknutí na zastávku v košíku pod mapou vycentruje mapu na bod a otevře detail místo chyby
+  $('planner-basket-list')?.addEventListener('click', (ev) => {
+    const focusEl = ev.target.closest('[data-focus-stop-id]');
+    if (focusEl && !ev.target.closest('.basket-item-controls')) {
+      const stopId = focusEl.dataset.focusStopId;
+      const place = getAllAvailablePlaces().find(p => p.id === stopId);
+      if (place) {
+        if (map) {
+          follow = false;
+          updateFollowUi();
+          setMapView(place.lat, place.lng, Math.max(map.getZoom?.() || 16, 16), true);
+        }
+        openPlaceDetail(place);
         playTick(stateObj.soundEnabled);
       }
     }

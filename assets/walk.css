@@ -4977,4 +4977,104 @@
   display: none !important;
 }
 
+/* ==========================================================================
+   ČISTÉ SROVNÁNÍ ROZLOŽENÍ A VYHLAZENÍ PRVKŮ (DÁVKA 1 & DÁVKA 2)
+   ========================================================================== */
+
+.p1-gamemode-btn {
+  min-height: 42px !important;
+  padding: 6px 12px !important;
+  font-size: 14px !important;
+}
+
+.next-checkpoint-hero-card,
+#next-checkpoint-hero-card {
+  display: none !important;
+}
+
+.player-avatar-marker-anchor {
+  width: 86px !important;
+  height: 86px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background: transparent !important;
+  border: 0 !important;
+  pointer-events: none;
+}
+
+.player-avatar-marker.is-walking {
+  animation: none !important;
+}
+
+.player-avatar-marker.is-walking .avatar-medallion-core {
+  animation: avatarWalkBob 0.55s ease-in-out infinite alternate !important;
+}
+
+.map-3d-camera-controls {
+  width: 44px !important;
+  flex-direction: column !important;
+  gap: 4px !important;
+}
+
+.active-compass-widget {
+  margin-bottom: 14px !important;
+}
+
+.compass-dist-badge {
+  bottom: -12px !important;
+  z-index: 5 !important;
+}
+
+.pds-photo-source-badge {
+  position: static !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  margin-top: 4px !important;
+  padding: 3px 9px !important;
+  border-radius: 999px !important;
+  font-size: 0.72rem !important;
+  font-weight: 700 !important;
+}
+
+.place-detail-sheet {
+  bottom: 72px !important;
+  z-index: 1150 !important;
+}
+
+.stop-ctrl-btn {
+  padding: 8px 12px !important;
+  min-height: 42px !important;
+  min-width: 42px !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  border-radius: 10px !important;
+}
+
+#walk-places {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)) !important;
+  gap: 10px !important;
+  margin-top: 8px !important;
+}
+
+.nearby-place {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 12px !important;
+  background: #ffffff !important;
+  border: 1.5px solid #cfd9c8 !important;
+  border-radius: 14px !important;
+  padding: 10px 12px !important;
+}
+
+.toggle-plan-place-btn,
+.open-map-detail-btn {
+  min-height: 42px !important;
+  font-size: 13.5px !important;
+  font-weight: 700 !important;
+}
+
+
 
