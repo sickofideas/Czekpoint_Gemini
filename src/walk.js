@@ -803,8 +803,8 @@ export function renderFogTextureToCanvas(canvas, options = {}) {
     activeLocalReveals = [],
     lastFix = null,
     revealRadiusM = options.fogRevealRadiusM ?? FOG_REVEAL_RADIUS_M,
-    width = canvas.width || 1024,
-    height = canvas.height || 1024,
+    width = canvas.width || 512,
+    height = canvas.height || 512,
   } = options;
   const fogMode = options.fogMode || options.mode || 'explore';
   const fogBounds = options.fogBounds || options.bounds;
@@ -976,8 +976,7 @@ export function renderFogTextureToCanvas(canvas, options = {}) {
     }
   };
 
-  // Jemnější přechodový lem a plné jádro
-  drawShapes(Math.max(2, Math.round(radPx * 0.3)), 0.45);
+  // Jediný průchod pro maximální výkon bez 100ms záseku
   drawShapes(0, 1.0);
 
   ctx.restore();
@@ -1350,7 +1349,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
 
     <!-- DÁVKA 2 (Bod 3.3): Zpřístupněný panel „📊 Moje chůze a počasí“ přímo pod ovládáním (nadmořská výška při nedostupnosti jako —) -->
     <section class="map-command-bar" id="map-command-bar" aria-label="Moje chůze a počasí">
-      <div class="mcb-primary-row">
+      <div class="mcb-primary-row" hidden>
         <div class="mcb-section-heading">
           <strong>📊 Moje chůze a počasí</strong>
         </div>
@@ -1359,21 +1358,23 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
           <button type="button" id="walk-stop" class="button dark-ctrl-btn" disabled>II Pozastavit</button>
           <button type="button" id="walk-end" class="button danger-ctrl-btn" disabled>⏹ Ukončit</button>
         </div>
-
-        <div class="mcb-secondary-actions">
-          <button type="button" class="button edit-walk-trigger-btn" id="btn-open-settings-modal" title="Nastavení aplikace a herního stylu">
-            ⚙️ Nastavení
-          </button>
-          <button type="button" class="button edit-walk-trigger-btn" id="btn-open-edit-walk" aria-haspopup="dialog">
-            ✏️ Upravit zastávky
-          </button>
-          <a href="#/pas" class="mcb-passport-pill" id="compact-top-summary" title="Sbírky, hůl a hodnosti najdeš v Mém pasu">
-            ⭐ 0 b. · 🏅 Úroveň 1 · Můj pas →
-          </a>
-        </div>
       </div>
 
       <div class="tourist-main-hud" id="tourist-main-hud" aria-label="Hlavní ukazatele chůze">
+        <div class="tmh-header-row">
+          <strong class="tmh-section-title">📊 Moje chůze a počasí</strong>
+          <div class="mcb-secondary-actions">
+            <button type="button" class="button small edit-walk-trigger-btn" id="btn-open-settings-modal" title="Nastavení aplikace a herního stylu">
+              ⚙️ Nastavení
+            </button>
+            <button type="button" class="button small edit-walk-trigger-btn" id="btn-open-edit-walk" aria-haspopup="dialog">
+              ✏️ Upravit zastávky
+            </button>
+            <a href="#/pas" class="mcb-passport-pill" id="compact-top-summary" title="Sbírky, hůl a hodnosti najdeš v Mém pasu">
+              ⭐ 0 b. · 🏅 Úroveň 1 · Můj pas →
+            </a>
+          </div>
+        </div>
         <div class="tmh-metrics">
           <div class="tmh-metric">
             <span class="tmh-label">👣 Ušlá vzdálenost</span>
@@ -1505,7 +1506,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       <!-- DÁVKA 3 (Bod 8.2): Sjednocená horní oblast mapy v odděleném flex sloupci (.map-top-overlays) -->
       <div class="map-top-overlays" id="map-top-overlays">
         <!-- 2.2 Horní vyhledávací pole s lupou přímo v mapě -->
-        <div class="map-search-overlay" id="map-search-overlay" role="search" aria-label="Vyhledávání v mapě">
+        <div class="map-search-overlay" id="map-search-overlay" role="search" aria-label="Vyhledávání v mapě" hidden>
           <div class="map-search-bar">
             <span class="map-search-icon" aria-hidden="true">🔍</span>
             <input
@@ -1563,6 +1564,9 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
             </button>
           </div>
         </div>
+
+        <!-- Stavový štítek režimu Sledovat směr uvnitř .map-top-overlays -->
+        <div id="heading-mode-banner" class="heading-mode-banner" hidden role="status" aria-live="polite"></div>
       </div>
 
       <!-- Ukazatel uložení offline oblasti -->
@@ -1606,21 +1610,18 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         <span class="zen-fab-label" id="zen-follow-label">Sleduji polohu</span>
       </button>
 
-      <!-- DÁVKA 3 (Bod 2.2 & 3.2): Stavový štítek režimu Sledovat směr a okrajový ukazatel cíle mimo obrazovku -->
-      <div id="heading-mode-banner" class="heading-mode-banner" hidden role="status" aria-live="polite"></div>
+      <!-- Okrajový ukazatel cíle mimo obrazovku -->
       <div id="offscreen-target-indicator" class="offscreen-target-indicator" hidden role="status" aria-live="polite"></div>
 
-      <!-- DÁVKA 1–3 (v2.0): Sjednocená ovládací tlačítka mapy (>= 44 × 44 px) včetně 2D/3D, Sledovat směr a Severu nahoře -->
+      <!-- DÁVKA 1–3 (v2.0): Sjednocená ovládací tlačítka mapy (44 × 44 px) včetně 2D/3D, Sledovat směr a Severu nahoře -->
       <div class="walk-map-toolbar map-right-toolbar" role="toolbar" aria-label="Ovládání mapy">
         <button type="button" class="map-right-btn" id="walk-zoom-in" title="Přiblížit mapu (+)" aria-label="Přiblížit mapu">➕</button>
         <button type="button" class="map-right-btn" id="walk-zoom-out" title="Oddálit mapu (−)" aria-label="Oddálit mapu">➖</button>
         <button type="button" class="map-right-btn map-3d-toggle-btn" id="btn-toggle-3d" aria-pressed="false" title="Přepnout 2D a 3D zobrazení se skutečným terénem" aria-label="Přepnout 2D a 3D terén">
-          <span class="btn-3d-icon" id="btn-toggle-3d-icon" aria-hidden="true">🗺️</span>
           <span class="btn-3d-label" id="btn-toggle-3d-label">2D</span>
         </button>
         <button type="button" class="map-right-btn map-follow-heading-btn" id="btn-follow-heading" aria-pressed="false" title="Sledovat směr — otáčet mapu kolem Avatara podle natočení telefonu" aria-label="🧭 Sledovat směr">
           <span class="btn-follow-heading-icon" aria-hidden="true">🧭</span>
-          <span class="btn-follow-heading-label">Sledovat směr</span>
         </button>
         <button type="button" class="map-right-btn map-north-btn" id="btn-north-up" title="Sever nahoře (srovnat natočení mapy)" aria-label="Sever nahoře">⬆️</button>
         <div class="map-3d-camera-controls" id="map-3d-camera-controls" role="group" aria-label="Ovládání náklonu a otočení 3D kamery" hidden>
@@ -2579,15 +2580,15 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       return;
     }
 
-    // DÁVKA 2 (P0 Bod 5.1): 1024 × 1024 px plátno pro přesný poloměr mlhy 65 metrů (~1.5 m/px)
+    // DÁVKA 2 (Optimalizace výkonu): 512 × 512 px plátno pro bleskové generování mlhy bez záseku
     if (!fogTextureCanvas) {
       fogTextureCanvas = document.createElement('canvas');
-      fogTextureCanvas.width = 1024;
-      fogTextureCanvas.height = 1024;
+      fogTextureCanvas.width = 512;
+      fogTextureCanvas.height = 512;
     }
-    if (fogTextureCanvas.width !== 1024) {
-      fogTextureCanvas.width = 1024;
-      fogTextureCanvas.height = 1024;
+    if (fogTextureCanvas.width !== 512) {
+      fogTextureCanvas.width = 512;
+      fogTextureCanvas.height = 512;
     }
 
     const fogBounds = fogGeographicBounds.coordinates;
@@ -2600,8 +2601,8 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       activeLocalReveals,
       lastFix: activePlayerPos,
       revealRadiusM: FOG_REVEAL_RADIUS_M,
-      width: 1024,
-      height: 1024,
+      width: 512,
+      height: 512,
     });
 
     lastFogStateKey = fogStateKey;
@@ -2648,6 +2649,12 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       try { m.remove(); } catch {}
     }
     footprintMarkers = [];
+    try {
+      const fpSrc = map && typeof map.getSource === 'function' ? map.getSource('footprints-source') : null;
+      if (fpSrc && typeof fpSrc.setData === 'function') {
+        fpSrc.setData({ type: 'FeatureCollection', features: [] });
+      }
+    } catch {}
   }
 
   /**
@@ -2775,7 +2782,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     }
 
     const avatarPos = visualPlayerPos || lastFix || getRouteOriginPoint();
-    const footprints = computeDenseTrailFootprints(progress.walkSegments, avatarPos, 60);
+    const footprints = computeDenseTrailFootprints(progress.walkSegments, avatarPos, 45);
     const totalCount = footprints.length;
 
     if ($('trail-info')) {
@@ -2787,29 +2794,27 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     if (trailKey === lastTrailRenderKey) return;
     lastTrailRenderKey = trailKey;
 
-    clearFootprintMarkers();
-    if (!maplibregl) return;
-
-    for (let i = 0; i < totalCount; i++) {
-      const fp = footprints[i];
-      const el = document.createElement('div');
-      el.className = 'footprint-marker-anchor';
-      el.style.width = '26px';
-      el.style.height = '26px';
-      el.style.pointerEvents = 'none';
-      el.innerHTML = renderBootFootprintSvg(fp.side, fp.bearingDeg, fp.opacity);
-
-      // Ve 3D leží stopy přímo na zemi v terénu a míří ve směru chůze
-      const marker = new maplibregl.Marker({
-        element: el,
-        anchor: 'center',
-        rotationAlignment: 'map',
-        pitchAlignment: 'map',
-      })
-        .setLngLat([fp.lng, fp.lat])
-        .addTo(map);
-      footprintMarkers.push(marker);
-    }
+    ensureCustomMapSourcesAndLayers();
+    try {
+      const fpSrc = typeof map.getSource === 'function' ? map.getSource('footprints-source') : null;
+      if (fpSrc && typeof fpSrc.setData === 'function') {
+        fpSrc.setData({
+          type: 'FeatureCollection',
+          features: footprints.map(fp => ({
+            type: 'Feature',
+            properties: {
+              side: fp.side,
+              bearingDeg: fp.bearingDeg,
+              opacity: fp.opacity,
+            },
+            geometry: {
+              type: 'Point',
+              coordinates: [fp.lng, fp.lat],
+            },
+          })),
+        });
+      }
+    } catch {}
   }
 
   function getAllAvailablePlaces() {
@@ -2922,11 +2927,14 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
   function updateHeadingModeBannerUi() {
     const btn = $('btn-follow-heading');
     if (btn) {
-      btn.setAttribute('aria-pressed', String(Boolean(followHeadingMode)));
-      btn.classList.toggle('active', Boolean(followHeadingMode));
-      btn.innerHTML = followHeadingMode
-        ? `<span class="btn-follow-heading-icon" aria-hidden="true">🧭</span><span class="btn-follow-heading-label">Sledovat směr: ZAP</span>`
-        : `<span class="btn-follow-heading-icon" aria-hidden="true">🧭</span><span class="btn-follow-heading-label">Sledovat směr</span>`;
+      const isAct = Boolean(followHeadingMode);
+      btn.setAttribute('aria-pressed', String(isAct));
+      btn.classList.toggle('active', isAct);
+      btn.classList.toggle('is-active', isAct);
+      btn.innerHTML = `<span class="btn-follow-heading-icon" aria-hidden="true">🧭</span>`;
+      const label = isAct ? '🧭 Sledovat směr: ZAP' : '🧭 Sledovat směr';
+      btn.title = label;
+      btn.setAttribute('aria-label', label);
     }
     const banner = $('heading-mode-banner');
     if (!banner) return;
@@ -4119,8 +4127,11 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     `;
   }
 
+  let lastBasketRenderSig = '';
+
   function renderPlannerBasketAndXray() {
     const plannedPlaces = getPlannedPlaces();
+    lastBasketRenderSig = `${confirmedStopIds.size}|${(plannedRoute.selectedPlaceIds || []).join(',')}|${currentElevationProfile ? currentElevationProfile.gainM : 'none'}`;
     if ($('basket-count')) $('basket-count').textContent = String(plannedPlaces.length);
 
     const nextUnvisited = plannedPlaces.find(p => !isStopVisited(p));
@@ -5226,7 +5237,31 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     if ($('walk-demo-banner')) $('walk-demo-banner').hidden = !demo;
     if ($('walk-demo')) $('walk-demo').textContent = demo ? 'Ukončit ukázku' : 'Ukázka pohybu';
 
-    renderPlannerBasketAndXray();
+    const curBasketSig = `${confirmedStopIds.size}|${(plannedRoute.selectedPlaceIds || []).join(',')}|${currentElevationProfile ? currentElevationProfile.gainM : 'none'}`;
+    const walkedEl = $('xray-walked-dist');
+    if (curBasketSig !== lastBasketRenderSig || !walkedEl) {
+      renderPlannerBasketAndXray();
+    } else {
+      walkedEl.textContent = formatMetersCz(gainedM);
+      const remEl = $('xray-remaining-dist');
+      if (remEl) {
+        const plannedPlaces = getPlannedPlaces();
+        const isLoop = plannedRoute.routeType === 'loop' && plannedPlaces.length >= 2;
+        const currentPos = lastFix || telemetry.lastKnownPosition || plannedRoute.origin || { lat: 49.6014, lng: 13.8644 };
+        const remShared = computeRemainingFromSharedRoute({
+          sharedRoute: lastRoutedGeometry,
+          currentPos,
+          plannedPlaces,
+          confirmedStopIds,
+          companionMode: 'solo',
+          returnToOrigin: isLoop,
+          origin: getRouteOriginPoint(),
+        });
+        if (remShared.isRouteValid && remShared.remainingDistanceM != null) {
+          remEl.textContent = formatDistanceLabel(remShared.remainingDistanceM);
+        }
+      }
+    }
     renderNextCheckpointHero(lastFix || telemetry.lastKnownPosition);
     renderPhase1AndPhase4Ui(lastFix || telemetry.lastKnownPosition);
     updateMapActionBar();
@@ -6063,7 +6098,6 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     updateGpsTelemetryUi(cleanFix);
     renderCompass(cleanFix);
     refreshWeatherStrip(cleanFix);
-    updateTurnNavPill(cleanFix);
 
     if (walkState === 'running' || demo) {
       sample(cleanFix, coords.simulated ? fixTime : now);
@@ -6706,6 +6740,28 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         });
       }
 
+      if (!map.getSource('footprints-source')) {
+        map.addSource('footprints-source', {
+          type: 'geojson',
+          data: { type: 'FeatureCollection', features: [] },
+        });
+      }
+      if (!map.getLayer('footprints-layer')) {
+        map.addLayer({
+          id: 'footprints-layer',
+          type: 'circle',
+          source: 'footprints-source',
+          paint: {
+            'circle-radius': 4,
+            'circle-color': '#5c4028',
+            'circle-stroke-color': '#ffffff',
+            'circle-stroke-width': 1.2,
+            'circle-opacity': ['coalesce', ['get', 'opacity'], 0.75],
+            'circle-pitch-alignment': 'map',
+          },
+        });
+      }
+
       if (!map.getSource('planned-route-source')) {
         map.addSource('planned-route-source', {
           type: 'geojson',
@@ -6814,6 +6870,9 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
             id: 'terrain-hillshade',
             type: 'hillshade',
             source: 'terrain-dem',
+            layout: {
+              visibility: (is3dMode || is3DMode) ? 'visible' : 'none',
+            },
             paint: {
               'hillshade-exaggeration': 0.65,
               'hillshade-shadow-color': '#193e32',
@@ -6822,6 +6881,8 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
           },
           hillshadeBefore
         );
+      } else {
+        map.setLayoutProperty('terrain-hillshade', 'visibility', (is3dMode || is3DMode) ? 'visible' : 'none');
       }
 
       if (!map.getSource('openfreemap-v')) {
@@ -6890,9 +6951,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     if (toggleBtn) {
       toggleBtn.setAttribute('aria-pressed', String(is3DMode));
       toggleBtn.classList.toggle('active', is3DMode);
-      toggleBtn.innerHTML = is3DMode
-        ? `<span class="btn-3d-icon" aria-hidden="true">🏔️</span><span class="btn-3d-label">3D</span>`
-        : `<span class="btn-3d-icon" aria-hidden="true">🗺️</span><span class="btn-3d-label">2D</span>`;
+      toggleBtn.innerHTML = `<span class="btn-3d-label" id="btn-toggle-3d-label">${is3DMode ? '3D' : '2D'}</span>`;
       toggleBtn.title = is3DMode
         ? 'Přepnout zpět na plochou 2D mapu shora'
         : 'Přepnout na 3D zobrazení terénu, hor a 3D budov';
@@ -7001,6 +7060,9 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
           map.setTerrain(null);
           appliedTerrain3D = false;
         }
+        if (map.getLayer('terrain-hillshade')) {
+          map.setLayoutProperty('terrain-hillshade', 'visibility', 'none');
+        }
         sync3DBuildingsLayerState();
       } catch {}
       update3DUiState();
@@ -7055,7 +7117,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
 
       map = new maplibregl.Map({
         container: mapContainer,
-        style: buildMapLibreStyle(config, { showContourLayer, showHikingTrails, is3dMode }),
+        style: buildMapLibreStyle(config, { showContourLayer, showHikingTrails, is3dMode, show3dBuildings: appSettings.show3dBuildings }),
         center: [center.lng, center.lat],
         zoom: 16.5,
         pitch: is3dMode ? 45 : 0,
@@ -7169,7 +7231,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       }
       try {
         if (map.getLayer('terrain-hillshade')) {
-          map.setLayoutProperty('terrain-hillshade', 'visibility', 'visible');
+          map.setLayoutProperty('terrain-hillshade', 'visibility', (is3dMode || is3DMode) ? 'visible' : 'none');
         }
         sync3DBuildingsLayerState();
       } catch {}
@@ -9217,10 +9279,17 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
   });
 
   $('walk-search-toggle')?.addEventListener('click', () => {
-    const searchInput = $('map-lupa-search-input');
-    if (searchInput) {
-      searchInput.focus();
-      searchInput.select?.();
+    const searchOverlay = $('map-search-overlay');
+    if (searchOverlay) {
+      searchOverlay.hidden = !searchOverlay.hidden;
+      $('walk-search-toggle')?.classList.toggle('active', !searchOverlay.hidden);
+      if (!searchOverlay.hidden) {
+        const searchInput = $('map-lupa-search-input');
+        if (searchInput) {
+          searchInput.focus();
+          searchInput.select?.();
+        }
+      }
     }
     playTick(stateObj.soundEnabled);
   });

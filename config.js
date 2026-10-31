@@ -188,6 +188,9 @@ export function buildMapLibreStyle(cfg = config, options = {}) {
         id: 'terrain-hillshade',
         type: 'hillshade',
         source: 'terrain-dem',
+        layout: {
+          visibility: is3dMode ? 'visible' : 'none',
+        },
         paint: {
           'hillshade-exaggeration': 0.65,
           'hillshade-shadow-color': '#193e32',
@@ -227,7 +230,7 @@ export function buildMapLibreStyle(cfg = config, options = {}) {
         type: 'fill-extrusion',
         minzoom: 14,
         layout: {
-          visibility: is3dMode ? 'visible' : 'none',
+          visibility: (is3dMode && options.show3dBuildings) ? 'visible' : 'none',
         },
         paint: {
           'fill-extrusion-color': '#dfd8c8',
