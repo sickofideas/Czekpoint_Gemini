@@ -15,8 +15,8 @@ export const config = {
   terrainDemUrl: 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png',
   terrainEncoding: 'terrarium',
   terrainTileSize: 256,
-  terrainMaxZoom: 15,
-  terrainExaggeration: 1.25,
+  terrainMaxZoom: 14,
+  terrainExaggeration: 1.8,
   openFreeMapVectorUrl: 'https://tiles.openfreemap.org/planet',
   firebase: {
     enabled: false,
@@ -122,14 +122,20 @@ export function createGeoJsonCirclePolygon(center, radiusMeters, steps = 48) {
 
 /**
  * Sestaví čistý MapLibre GL styl (v8) s rastrovými vrstvami (OSM, OpenTopoMap, Waymarked Trails),
- * skutečným výškovým zdrojem `raster-dem` (`terrain-dem`), prostorovým stínováním svahů (`terrain-hillshade`)
- * a 3D budovami (`czekpoint-3d-buildings` z bezklíčového `openfreemap-v`).
+ * skutečným výškovým zdrojem `raster-dem` (`terrain-dem`), prostorovým stínováním svahů (`terrain-hillshade`),
+ * 3D lesy (`czekpoint-3d-forests`) a 3D budovami (`czekpoint-3d-buildings` z bezklíčového `openfreemap-v`).
  */
 export function buildMapLibreStyle(cfg = config, options = {}) {
   const showContourLayer = Boolean(options.showContourLayer);
   const showHikingTrails = options.showHikingTrails !== false;
-  const is3dMode = Boolean(options.is3dMode || options.is3DMode);
+  const is3dMode = options.is3dMode !== undefined
+    ? Boolean(options.is3dMode)
+    : options.is3DMode !== undefined
+    ? Boolean(options.is3DMode)
+    : true;
+  const show3dBuildings = options.show3dBuildings !== false;
   const hasMaptilerKey = Boolean(cfg?.maptilerApiKey && String(cfg.maptilerApiKey).trim());
+  const exaggeration = Number(cfg?.terrainExaggeration) || 1.8;
 
   const terrainDemSource = hasMaptilerKey
     ? {
@@ -142,12 +148,12 @@ export function buildMapLibreStyle(cfg = config, options = {}) {
         tiles: [cfg?.terrainDemUrl || 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
         encoding: cfg?.terrainEncoding || 'terrarium',
         tileSize: cfg?.terrainTileSize || 256,
-        maxzoom: cfg?.terrainMaxZoom || 15,
+        maxzoom: cfg?.terrainMaxZoom || 14,
       };
 
-  return {
+  const styleObj = {
     version: 8,
-    name: 'Czekpoint Outdoor MapLibre Style',
+    name: 'Czekpoint Outdoor 3D MapLibre Style',
     sources: {
       'osm-raster': {
         type: 'raster',
@@ -170,11 +176,26 @@ export function buildMapLibreStyle(cfg = config, options = {}) {
         maxzoom: 17,
         attribution: '&copy; <a href="https://hiking.waymarkedtrails.org">Waymarked Trails</a>',
       },
-      'terrain-dem': terrainDemSource,
+      'terrain-dem': { ...terrainDemSource },
+      'hillshade-dem': { ...terrainDemSource },
       'openfreemap-v': {
         type: 'vector',
         url: cfg?.openFreeMapVectorUrl || 'https://tiles.openfreemap.org/planet',
       },
+    },
+    terrain: is3dMode
+      ? {
+          source: 'terrain-dem',
+          exaggeration,
+        }
+      : undefined,
+    sky: {
+      'sky-color': '#bcdbf4',
+      'horizon-color': '#eef6fc',
+      'fog-color': '#dfeef9',
+      'sky-horizon-blend': 0.45,
+      'horizon-fog-blend': 0.5,
+      'fog-ground-blend': 0.25,
     },
     layers: [
       {
@@ -187,14 +208,15 @@ export function buildMapLibreStyle(cfg = config, options = {}) {
       {
         id: 'terrain-hillshade',
         type: 'hillshade',
-        source: 'terrain-dem',
+        source: 'hillshade-dem',
         layout: {
           visibility: is3dMode ? 'visible' : 'none',
         },
         paint: {
-          'hillshade-exaggeration': 0.65,
-          'hillshade-shadow-color': '#193e32',
-          'hillshade-accent-color': '#2d5a46',
+          'hillshade-exaggeration': 0.85,
+          'hillshade-shadow-color': '#0f291e',
+          'hillshade-highlight-color': '#fffef2',
+          'hillshade-accent-color': '#2d6a4f',
         },
       },
       {
@@ -207,7 +229,7 @@ export function buildMapLibreStyle(cfg = config, options = {}) {
           visibility: showContourLayer ? 'visible' : 'none',
         },
         paint: {
-          'raster-opacity': 0.85,
+          'raster-opacity': 0.78,
         },
       },
       {
@@ -224,21 +246,48 @@ export function buildMapLibreStyle(cfg = config, options = {}) {
         },
       },
       {
+        id: 'czekpoint-3d-forests',
+        source: 'openfreemap-v',
+        'source-layer': 'landcover',
+        type: 'fill-extrusion',
+        minzoom: 11,
+        filter: ['==', ['get', 'class'], 'wood'],
+        layout: {
+          visibility: is3dMode ? 'visible' : 'none',
+        },
+        paint: {
+          'fill-extrusion-color': '#2d6a4f',
+          'fill-extrusion-height': 12,
+          'fill-extrusion-base': 0,
+          'fill-extrusion-opacity': 0.58,
+        },
+      },
+      {
         id: 'czekpoint-3d-buildings',
         source: 'openfreemap-v',
         'source-layer': 'building',
         type: 'fill-extrusion',
-        minzoom: 14,
+        minzoom: 13,
         layout: {
-          visibility: (is3dMode && options.show3dBuildings) ? 'visible' : 'none',
+          visibility: (is3dMode && show3dBuildings) ? 'visible' : 'none',
         },
         paint: {
-          'fill-extrusion-color': '#dfd8c8',
-          'fill-extrusion-height': ['coalesce', ['get', 'render_height'], ['get', 'height'], 9],
+          'fill-extrusion-color': [
+            'interpolate',
+            ['linear'],
+            ['coalesce', ['get', 'render_height'], ['get', 'height'], 10],
+            0, '#e6dec8',
+            12, '#d8b48a',
+            25, '#c98a63',
+          ],
+          'fill-extrusion-height': ['coalesce', ['get', 'render_height'], ['get', 'height'], 10],
           'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0],
           'fill-extrusion-opacity': 0.85,
         },
       },
     ],
   };
+
+  return styleObj;
 }
+

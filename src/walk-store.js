@@ -23,7 +23,7 @@ export const DEFAULT_APP_SETTINGS = Object.freeze({
   autoSortStops: true,    // 🔄 Chytré řazení zastávek podle pěší trasy
   showExternalPhotos: true, // 🖼️ Zobrazovat externí fotografie míst (Wikipedie)
   mindfulnessPrompts: true, // 🍃 Jemné výzvy všímavosti během chůze
-  show3dBuildings: false,   // 🏢 Zobrazovat 3D budovy ve 3D pohledu
+  show3dBuildings: true,    // 🏢 Zobrazovat 3D budovy ve 3D pohledu (lze vypnout: show3dBuildings: false)
   gameMode: 'gamified',   // 'explorer' (Objevitel) | 'gamified' (Výprava s gamifikací) | 'casual' (Pohodová procházka)
 });
 

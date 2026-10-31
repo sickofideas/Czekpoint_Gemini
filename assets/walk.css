@@ -3544,17 +3544,21 @@ dialog:not([open]) {
 .map-action-bar > * {
   pointer-events: auto;
 }
-.mab-inactive-group {
+.mab-inactive-group[hidden],
+.mab-active-group[hidden] {
+  display: none !important;
+}
+.mab-inactive-group:not([hidden]) {
   display: flex;
   gap: 8px;
   width: 100%;
   align-items: center;
   justify-content: center;
 }
-.mab-active-group {
+.mab-active-group:not([hidden]) {
   display: grid !important;
-  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
-  gap: 6px !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 8px !important;
   width: 100% !important;
   box-sizing: border-box;
 }
