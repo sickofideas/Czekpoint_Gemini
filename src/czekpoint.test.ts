@@ -2367,9 +2367,10 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
     assert.ok(walkJs.includes('updateRecenterButtonVisibility'), 'Funkce updateRecenterButtonVisibility hlídá vzdálenost > 30 m a follow === false');
     assert.ok(walkCss.includes('#btn-recenter-avatar'), 'CSS definuje styl pro #btn-recenter-avatar (z-index: 1100, min-height: 46px)');
 
-    // 2. Zákaz mazání a znovuvytváření vrstev (konec problikávání)
-    assert.equal(walkJs.includes('map.removeLayer('), false, 'src/walk.js nikdy nesmí volat map.removeLayer(');
-    assert.equal(walkJs.includes('map.removeSource('), false, 'src/walk.js nikdy nesmí volat map.removeSource(');
+    // 2. Aktualizace tras přes setData (konec problikávání) a dynamická správa 3D vrstev v ensureCustomMapSourcesAndLayers
+    assert.equal(walkJs.includes("map.removeLayer('planned-route-line')"), false, 'src/walk.js nikdy nesmí mazat vrstvu planned-route-line');
+    assert.equal(walkJs.includes("map.removeLayer('walked-segments-line')"), false, 'src/walk.js nikdy nesmí mazat vrstvu walked-segments-line');
+    assert.ok(walkJs.includes("for (const layerId of ['czekpoint-3d-buildings', 'czekpoint-3d-forests', 'terrain-hillshade'])"), 'ensureCustomMapSourcesAndLayers dynamicky odstraňuje 3D vrstvy ve 2D režimu');
     assert.ok(walkJs.includes('appliedTerrain3D'), 'setTerrain je chráněn příznakem appliedTerrain3D pouze při změně 2D/3D');
 
     // 3. Skutečné 3D hory (terrain-dem + terrain-hillshade, exaggeration: 1.8, pitch: 58) a 3D budovy (openfreemap-v + czekpoint-3d-buildings)
@@ -2834,7 +2835,7 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
     assert.ok(appJs.includes("action === 'toggle-setting'"), 'Stránka nastavení zpracovává pilulkové přepínače');
     assert.ok(appJs.includes("action === 'reset-app-settings'"), 'Stránka nastavení zpracovává obnovu výchozího nastavení');
 
-    // e) Ověření výchozího 3D režimu (hory, budovy, lesy, okamžitý náklon kamery)
+    // e) Ověření výchozího 3D režimu (hory, budovy, lesy, okamžitý náklon kamery) a čistého 2D režimu bez 3D vrstev
     const default3dStyle = buildMapLibreStyle(appConfig, {});
     assert.ok(default3dStyle.terrain, 'Výchozí styl MapLibre má ihned aktivní 3D terrain');
     assert.equal(default3dStyle.terrain.source, 'terrain-dem');
@@ -2842,6 +2843,14 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
     assert.ok(default3dStyle.layers.some((l: any) => l.id === 'terrain-hillshade' && l.layout?.visibility === 'visible'), 'Stínování hor (terrain-hillshade) je ve 3D ihned viditelné');
     assert.ok(default3dStyle.layers.some((l: any) => l.id === 'czekpoint-3d-buildings' && l.layout?.visibility === 'visible'), '3D budovy (czekpoint-3d-buildings) jsou ve výchozím 3D režimu ihned viditelné');
     assert.ok(default3dStyle.layers.some((l: any) => l.id === 'czekpoint-3d-forests' && l.layout?.visibility === 'visible'), '3D lesy (czekpoint-3d-forests) jsou ve výchozím 3D režimu ihned viditelné');
+
+    const flat2dStyle = buildMapLibreStyle(appConfig, { is3dMode: false });
+    assert.equal(flat2dStyle.terrain, undefined, 'Ve 2D režimu je 3D terrain vypnutý');
+    assert.equal(flat2dStyle.sources['terrain-dem'], undefined, 'Ve 2D režimu se nevytváří zdroj terrain-dem');
+    assert.equal(flat2dStyle.sources['openfreemap-v'], undefined, 'Ve 2D režimu se nevytváří zdroj openfreemap-v');
+    assert.ok(!flat2dStyle.layers.some((l: any) => l.id === 'terrain-hillshade'), 'Ve 2D režimu se nevykresluje vrstva terrain-hillshade');
+    assert.ok(!flat2dStyle.layers.some((l: any) => l.id === 'czekpoint-3d-buildings'), 'Ve 2D režimu se nevykresluje vrstva czekpoint-3d-buildings');
+    assert.ok(walkJs.includes('lastApplied3DModeStateKey !== target3DStateKey'), 'ensureCustomMapSourcesAndLayers mění 3D zdroje a vrstvy pouze při přepnutí režimu');
   });
 });
 

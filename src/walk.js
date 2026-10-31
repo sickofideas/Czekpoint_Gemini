@@ -6693,8 +6693,10 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     }
   });
 
-  // Inicializace jediné mapy MapLibre GL JS (verze 4.7.1) — ve výchozím stavu 2D (pitch: 0, bearing: 0)
-  function ensureCustomMapSourcesAndLayers() {
+  let lastApplied3DModeStateKey = null;
+
+  // Inicializace jediné mapy MapLibre GL JS (verze 4.7.1) — 3D terén a 3D budovy se přidávají/odebírají striktně při přepnutí režimu
+  function ensureCustomMapSourcesAndLayers(options = {}) {
     if (!map || typeof map.getSource !== 'function') return;
     try {
       if (!map.getSource('radius-circle-source')) {
@@ -6879,98 +6881,6 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         });
       }
 
-      if (!map.getSource('terrain-dem')) {
-        map.addSource('terrain-dem', {
-          type: 'raster-dem',
-          tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
-          encoding: 'terrarium',
-          tileSize: 256,
-          maxzoom: 14,
-        });
-      }
-      if (!map.getSource('hillshade-dem')) {
-        map.addSource('hillshade-dem', {
-          type: 'raster-dem',
-          tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
-          encoding: 'terrarium',
-          tileSize: 256,
-          maxzoom: 14,
-        });
-      }
-      if (!map.getLayer('terrain-hillshade')) {
-        const hillshadeBefore = map.getLayer('opentopo-raster-layer')
-          ? 'opentopo-raster-layer'
-          : map.getLayer('waymarked-hiking-layer')
-          ? 'waymarked-hiking-layer'
-          : undefined;
-        map.addLayer(
-          {
-            id: 'terrain-hillshade',
-            type: 'hillshade',
-            source: 'hillshade-dem',
-            layout: {
-              visibility: (is3dMode || is3DMode) ? 'visible' : 'none',
-            },
-            paint: {
-              'hillshade-exaggeration': 0.85,
-              'hillshade-shadow-color': '#0f291e',
-              'hillshade-highlight-color': '#fffef2',
-              'hillshade-accent-color': '#2d6a4f',
-            },
-          },
-          hillshadeBefore
-        );
-      } else {
-        map.setLayoutProperty('terrain-hillshade', 'visibility', (is3dMode || is3DMode) ? 'visible' : 'none');
-      }
-
-      if (!map.getSource('openfreemap-v')) {
-        map.addSource('openfreemap-v', {
-          type: 'vector',
-          url: 'https://tiles.openfreemap.org/planet',
-        });
-      }
-      if (!map.getLayer('czekpoint-3d-forests')) {
-        map.addLayer({
-          id: 'czekpoint-3d-forests',
-          source: 'openfreemap-v',
-          'source-layer': 'landcover',
-          type: 'fill-extrusion',
-          minzoom: 11,
-          filter: ['==', ['get', 'class'], 'wood'],
-          layout: { visibility: (is3dMode || is3DMode) ? 'visible' : 'none' },
-          paint: {
-            'fill-extrusion-color': '#2d6a4f',
-            'fill-extrusion-height': 12,
-            'fill-extrusion-base': 0,
-            'fill-extrusion-opacity': 0.58,
-          },
-        });
-      }
-      if (!map.getLayer('czekpoint-3d-buildings')) {
-        map.addLayer({
-          id: 'czekpoint-3d-buildings',
-          source: 'openfreemap-v',
-          'source-layer': 'building',
-          type: 'fill-extrusion',
-          minzoom: 13,
-          layout: { visibility: ((is3dMode || is3DMode) && appSettings.show3dBuildings !== false) ? 'visible' : 'none' },
-          paint: {
-            'fill-extrusion-color': [
-              'interpolate',
-              ['linear'],
-              ['coalesce', ['get', 'render_height'], ['get', 'height'], 10],
-              0, '#e6dec8',
-              12, '#d8b48a',
-              25, '#c98a63',
-            ],
-            'fill-extrusion-height': ['coalesce', ['get', 'render_height'], ['get', 'height'], 10],
-            'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0],
-            'fill-extrusion-opacity': 0.85,
-          },
-        });
-      }
-
       if (!map.getSource('czekpoint-fog-source')) {
         const initCenter = lastFix || telemetry.lastKnownPosition || getRouteOriginPoint() || { lat: 49.6014, lng: 13.8644 };
         fogGeographicBounds = computeFogGeographicBounds(initCenter, {
@@ -7008,6 +6918,149 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
           beforeLayerId
         );
       }
+
+      const active3d = Boolean(is3dMode || is3DMode);
+      const want3dBuildings = Boolean(active3d && appSettings.show3dBuildings !== false);
+      const target3DStateKey = `${active3d ? '3d' : '2d'}:${want3dBuildings ? 'b1' : 'b0'}`;
+      const force3DSync = Boolean(options && options.force3DSync);
+
+      if (force3DSync || lastApplied3DModeStateKey !== target3DStateKey) {
+        if (active3d) {
+          if (!map.getSource('terrain-dem')) {
+            map.addSource('terrain-dem', {
+              type: 'raster-dem',
+              tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
+              encoding: 'terrarium',
+              tileSize: 256,
+              maxzoom: 14,
+            });
+          }
+          if (!map.getSource('hillshade-dem')) {
+            map.addSource('hillshade-dem', {
+              type: 'raster-dem',
+              tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
+              encoding: 'terrarium',
+              tileSize: 256,
+              maxzoom: 14,
+            });
+          }
+          if (!map.getLayer('terrain-hillshade')) {
+            const hillshadeBefore = map.getLayer('opentopo-raster-layer')
+              ? 'opentopo-raster-layer'
+              : map.getLayer('waymarked-hiking-layer')
+              ? 'waymarked-hiking-layer'
+              : map.getLayer('czekpoint-fog-layer')
+              ? 'czekpoint-fog-layer'
+              : undefined;
+            map.addLayer(
+              {
+                id: 'terrain-hillshade',
+                type: 'hillshade',
+                source: 'hillshade-dem',
+                minzoom: 0,
+                maxzoom: 22,
+                layout: {
+                  visibility: 'visible',
+                },
+                paint: {
+                  'hillshade-exaggeration': 0.85,
+                  'hillshade-shadow-color': '#0f291e',
+                  'hillshade-highlight-color': '#fffef2',
+                  'hillshade-accent-color': '#2d6a4f',
+                },
+              },
+              hillshadeBefore
+            );
+          }
+
+          if (!map.getSource('openfreemap-v')) {
+            map.addSource('openfreemap-v', {
+              type: 'vector',
+              url: 'https://tiles.openfreemap.org/planet',
+            });
+          }
+          const extrusionBefore = map.getLayer('planned-route-casing')
+            ? 'planned-route-casing'
+            : map.getLayer('walked-segments-casing')
+            ? 'walked-segments-casing'
+            : undefined;
+          if (!map.getLayer('czekpoint-3d-forests')) {
+            map.addLayer(
+              {
+                id: 'czekpoint-3d-forests',
+                source: 'openfreemap-v',
+                'source-layer': 'landcover',
+                type: 'fill-extrusion',
+                minzoom: 11,
+                maxzoom: 22,
+                filter: ['==', ['get', 'class'], 'wood'],
+                layout: { visibility: 'visible' },
+                paint: {
+                  'fill-extrusion-color': '#2d6a4f',
+                  'fill-extrusion-height': 12,
+                  'fill-extrusion-base': 0,
+                  'fill-extrusion-opacity': 0.58,
+                },
+              },
+              extrusionBefore
+            );
+          }
+          if (want3dBuildings) {
+            if (!map.getLayer('czekpoint-3d-buildings')) {
+              map.addLayer(
+                {
+                  id: 'czekpoint-3d-buildings',
+                  source: 'openfreemap-v',
+                  'source-layer': 'building',
+                  type: 'fill-extrusion',
+                  minzoom: 13,
+                  maxzoom: 22,
+                  layout: { visibility: 'visible' },
+                  paint: {
+                    'fill-extrusion-color': [
+                      'interpolate',
+                      ['linear'],
+                      ['coalesce', ['get', 'render_height'], ['get', 'height'], 10],
+                      0, '#e6dec8',
+                      12, '#d8b48a',
+                      25, '#c98a63',
+                    ],
+                    'fill-extrusion-height': ['coalesce', ['get', 'render_height'], ['get', 'height'], 10],
+                    'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0],
+                    'fill-extrusion-opacity': 0.85,
+                  },
+                },
+                extrusionBefore
+              );
+            }
+          } else if (map.getLayer('czekpoint-3d-buildings')) {
+            try { map.removeLayer('czekpoint-3d-buildings'); } catch {}
+          }
+
+          if (appliedTerrain3D !== true) {
+            try {
+              map.setTerrain({ source: 'terrain-dem', exaggeration: 1.8 });
+              appliedTerrain3D = true;
+            } catch {}
+          }
+        } else {
+          if (appliedTerrain3D || (typeof map.getTerrain === 'function' && map.getTerrain())) {
+            try { map.setTerrain(null); } catch {}
+            appliedTerrain3D = false;
+          }
+          for (const layerId of ['czekpoint-3d-buildings', 'czekpoint-3d-forests', 'terrain-hillshade']) {
+            if (map.getLayer(layerId)) {
+              try { map.removeLayer(layerId); } catch {}
+            }
+          }
+          for (const sourceId of ['openfreemap-v', 'hillshade-dem', 'terrain-dem']) {
+            if (map.getSource(sourceId)) {
+              try { map.removeSource(sourceId); } catch {}
+            }
+          }
+        }
+        lastApplied3DModeStateKey = target3DStateKey;
+      }
     } catch {}
   }
 
@@ -7040,17 +7093,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
 
   function sync3DBuildingsLayerState() {
     if (!map || typeof map.getLayer !== 'function') return;
-    try {
-      const active3d = Boolean(is3dMode || is3DMode);
-      if (map.getLayer('czekpoint-3d-forests')) {
-        map.setLayoutProperty('czekpoint-3d-forests', 'visibility', active3d ? 'visible' : 'none');
-      }
-      if (map.getLayer('czekpoint-3d-buildings')) {
-        const visible = Boolean(active3d && appSettings.show3dBuildings !== false);
-        map.setLayoutProperty('czekpoint-3d-buildings', 'visibility', visible ? 'visible' : 'none');
-        map.setPaintProperty('czekpoint-3d-buildings', 'fill-extrusion-opacity', 0.85);
-      }
-    } catch {}
+    ensureCustomMapSourcesAndLayers({ force3DSync: true });
   }
 
   function setMap3DMode(enable3D, opts = {}) {
@@ -7093,13 +7136,10 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         return;
       }
       try {
-        ensureCustomMapSourcesAndLayers();
+        ensureCustomMapSourcesAndLayers({ force3DSync: true });
         if (appliedTerrain3D !== is3dMode) {
           map.setTerrain({ source: 'terrain-dem', exaggeration: 1.8 });
           appliedTerrain3D = true;
-        }
-        if (map.getLayer('terrain-hillshade')) {
-          map.setLayoutProperty('terrain-hillshade', 'visibility', 'visible');
         }
         sync3DBuildingsLayerState();
         update3DUiState();
@@ -7119,8 +7159,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         is3DMode = false;
         is3dMode = false;
         appliedTerrain3D = false;
-        try { map.setTerrain(null); } catch {}
-        sync3DBuildingsLayerState();
+        ensureCustomMapSourcesAndLayers({ force3DSync: true });
         try { map.easeTo({ pitch: 0, padding: getMapCameraPadding(), duration: 300 }); } catch {}
         update3DUiState();
         status('3D terén není momentálně dostupný, pokračuji ve 2D zobrazení.');
@@ -7129,14 +7168,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       is3DMode = false;
       is3dMode = false;
       try {
-        if (appliedTerrain3D !== is3dMode) {
-          map.setTerrain(null);
-          appliedTerrain3D = false;
-        }
-        if (map.getLayer('terrain-hillshade')) {
-          map.setLayoutProperty('terrain-hillshade', 'visibility', 'none');
-        }
-        sync3DBuildingsLayerState();
+        ensureCustomMapSourcesAndLayers({ force3DSync: true });
         drawFog(true);
       } catch {}
       update3DUiState();
@@ -7233,7 +7265,13 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         const origGetElev = terrainObj.getElevationForLngLatZoom.bind(terrainObj);
         terrainObj.getElevationForLngLatZoom = function (lngLat, zoom) {
           const safeLl = ensureValidLngLat(lngLat);
-          const safeZoom = Number.isFinite(Number(zoom)) ? Number(zoom) : (Number(mapInstance.transform?.tileZoom) || 14);
+          const src = this.sourceCache?.getSource?.();
+          const maxSourceZoom = Number.isFinite(Number(src?.maxzoom)) ? Number(src.maxzoom) : 14;
+          const minSourceZoom = Number.isFinite(Number(src?.minzoom)) ? Number(src.minzoom) : 0;
+          const rawZoom = Number.isFinite(Number(zoom))
+            ? Math.floor(Number(zoom))
+            : Math.min(maxSourceZoom, Math.floor(Number(mapInstance.transform?.tileZoom) || 14));
+          const safeZoom = Math.max(minSourceZoom, Math.min(maxSourceZoom, rawZoom));
           try {
             const elev = origGetElev(safeLl, safeZoom);
             return Number.isFinite(Number(elev)) ? Number(elev) : 0;
@@ -7346,6 +7384,18 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       hardenTerrainInstance(mapInstance.terrain);
     }
 
+    if (typeof mapInstance.setTerrain === 'function' && !mapInstance.__czekpointSetTerrainHardened) {
+      const origSetTerrain = mapInstance.setTerrain.bind(mapInstance);
+      mapInstance.setTerrain = function (options) {
+        try {
+          const res = origSetTerrain(options);
+          if (this.terrain) hardenTerrainInstance(this.terrain);
+          return res;
+        } catch {}
+      };
+      mapInstance.__czekpointSetTerrainHardened = true;
+    }
+
     if (typeof mapInstance._finalizeElevation === 'function' && !mapInstance.__czekpointFinalizeElevHardened) {
       const origFinalizeElevation = mapInstance._finalizeElevation.bind(mapInstance);
       mapInstance._finalizeElevation = function () {
@@ -7434,6 +7484,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       const mapContainer = $('walk-map');
       if (mapContainer) mapContainer.innerHTML = '';
 
+      lastApplied3DModeStateKey = null;
       map = new maplibregl.Map({
         container: mapContainer,
         style: buildMapLibreStyle(config, { showContourLayer, showHikingTrails, is3dMode, show3dBuildings: appSettings.show3dBuildings !== false }),
@@ -7537,21 +7588,10 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
 
     const onStyleOrMapLoad = () => {
       if (disposed || !map) return;
+      hardenMapLibreInternals(map, center);
       enableAllMapInteractions();
-      ensureCustomMapSourcesAndLayers();
+      ensureCustomMapSourcesAndLayers({ force3DSync: true });
       try {
-        if (is3dMode || is3DMode) {
-          map.setTerrain({ source: 'terrain-dem', exaggeration: 1.8 });
-          appliedTerrain3D = true;
-        } else {
-          map.setTerrain(null);
-          appliedTerrain3D = false;
-        }
-      } catch {}
-      try {
-        if (map.getLayer('terrain-hillshade')) {
-          map.setLayoutProperty('terrain-hillshade', 'visibility', (is3dMode || is3DMode) ? 'visible' : 'none');
-        }
         sync3DBuildingsLayerState();
         update3DUiState();
       } catch {}
@@ -7566,7 +7606,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
 
     map.on('style.load', onStyleOrMapLoad);
     map.on('load', onStyleOrMapLoad);
-    ensureCustomMapSourcesAndLayers();
+    ensureCustomMapSourcesAndLayers({ force3DSync: true });
 
     // Události ztráty a obnovení grafického kontextu WebGL (webglcontextlost / webglcontextrestored)
     const mapCanvas = typeof map.getCanvas === 'function' ? map.getCanvas() : null;

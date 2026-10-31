@@ -136,6 +136,8 @@ export function buildMapLibreStyle(cfg = config, options = {}) {
   const show3dBuildings = options.show3dBuildings !== false;
   const hasMaptilerKey = Boolean(cfg?.maptilerApiKey && String(cfg.maptilerApiKey).trim());
   const exaggeration = Number(cfg?.terrainExaggeration) || 1.8;
+  const rawDemMaxZoom = Number(cfg?.terrainMaxZoom);
+  const safeDemMaxZoom = Number.isFinite(rawDemMaxZoom) ? Math.min(15, Math.max(0, Math.floor(rawDemMaxZoom))) : 14;
 
   const terrainDemSource = hasMaptilerKey
     ? {
@@ -148,128 +150,130 @@ export function buildMapLibreStyle(cfg = config, options = {}) {
         tiles: [cfg?.terrainDemUrl || 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
         encoding: cfg?.terrainEncoding || 'terrarium',
         tileSize: cfg?.terrainTileSize || 256,
-        maxzoom: cfg?.terrainMaxZoom || 14,
+        maxzoom: safeDemMaxZoom,
       };
 
-  const styleObj = {
-    version: 8,
-    name: 'Czekpoint Outdoor 3D MapLibre Style',
-    sources: {
-      'osm-raster': {
-        type: 'raster',
-        tiles: [cfg?.mapTileUrl || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
-        tileSize: 256,
-        maxzoom: 19,
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> (ODbL)',
+  const sources = {
+    'osm-raster': {
+      type: 'raster',
+      tiles: [cfg?.mapTileUrl || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+      tileSize: 256,
+      maxzoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> (ODbL)',
+    },
+    'opentopo-raster': {
+      type: 'raster',
+      tiles: [cfg?.openTopoMapUrl || 'https://a.tile.opentopomap.org/{z}/{x}/{y}.png'],
+      tileSize: 256,
+      maxzoom: 17,
+      attribution: 'Map data: &copy; OpenStreetMap, SRTM | Map style: &copy; OpenTopoMap (CC-BY-SA)',
+    },
+    'waymarked-hiking': {
+      type: 'raster',
+      tiles: [cfg?.waymarkedTrailsUrl || 'https://tile.waymarkedtrails.org/hiking/{z}/{x}/{y}.png'],
+      tileSize: 256,
+      maxzoom: 17,
+      attribution: '&copy; <a href="https://hiking.waymarkedtrails.org">Waymarked Trails</a>',
+    },
+  };
+
+  if (is3dMode) {
+    sources['terrain-dem'] = { ...terrainDemSource };
+    sources['hillshade-dem'] = { ...terrainDemSource };
+    sources['openfreemap-v'] = {
+      type: 'vector',
+      url: cfg?.openFreeMapVectorUrl || 'https://tiles.openfreemap.org/planet',
+    };
+  }
+
+  const layers = [
+    {
+      id: 'osm-raster-layer',
+      type: 'raster',
+      source: 'osm-raster',
+      minzoom: 0,
+      maxzoom: 22,
+    },
+  ];
+
+  if (is3dMode) {
+    layers.push({
+      id: 'terrain-hillshade',
+      type: 'hillshade',
+      source: 'hillshade-dem',
+      minzoom: 0,
+      maxzoom: 22,
+      layout: {
+        visibility: 'visible',
       },
-      'opentopo-raster': {
-        type: 'raster',
-        tiles: [cfg?.openTopoMapUrl || 'https://a.tile.opentopomap.org/{z}/{x}/{y}.png'],
-        tileSize: 256,
-        maxzoom: 17,
-        attribution: 'Map data: &copy; OpenStreetMap, SRTM | Map style: &copy; OpenTopoMap (CC-BY-SA)',
+      paint: {
+        'hillshade-exaggeration': 0.85,
+        'hillshade-shadow-color': '#0f291e',
+        'hillshade-highlight-color': '#fffef2',
+        'hillshade-accent-color': '#2d6a4f',
       },
-      'waymarked-hiking': {
-        type: 'raster',
-        tiles: [cfg?.waymarkedTrailsUrl || 'https://tile.waymarkedtrails.org/hiking/{z}/{x}/{y}.png'],
-        tileSize: 256,
-        maxzoom: 17,
-        attribution: '&copy; <a href="https://hiking.waymarkedtrails.org">Waymarked Trails</a>',
+    });
+  }
+
+  layers.push(
+    {
+      id: 'opentopo-raster-layer',
+      type: 'raster',
+      source: 'opentopo-raster',
+      minzoom: 0,
+      maxzoom: 22,
+      layout: {
+        visibility: showContourLayer ? 'visible' : 'none',
       },
-      'terrain-dem': { ...terrainDemSource },
-      'hillshade-dem': { ...terrainDemSource },
-      'openfreemap-v': {
-        type: 'vector',
-        url: cfg?.openFreeMapVectorUrl || 'https://tiles.openfreemap.org/planet',
+      paint: {
+        'raster-opacity': 0.78,
       },
     },
-    terrain: is3dMode
-      ? {
-          source: 'terrain-dem',
-          exaggeration,
-        }
-      : undefined,
-    sky: {
-      'sky-color': '#bcdbf4',
-      'horizon-color': '#eef6fc',
-      'fog-color': '#dfeef9',
-      'sky-horizon-blend': 0.45,
-      'horizon-fog-blend': 0.5,
-      'fog-ground-blend': 0.25,
-    },
-    layers: [
-      {
-        id: 'osm-raster-layer',
-        type: 'raster',
-        source: 'osm-raster',
-        minzoom: 0,
-        maxzoom: 22,
+    {
+      id: 'waymarked-hiking-layer',
+      type: 'raster',
+      source: 'waymarked-hiking',
+      minzoom: 0,
+      maxzoom: 19,
+      layout: {
+        visibility: showHikingTrails ? 'visible' : 'none',
       },
-      {
-        id: 'terrain-hillshade',
-        type: 'hillshade',
-        source: 'hillshade-dem',
-        layout: {
-          visibility: is3dMode ? 'visible' : 'none',
-        },
-        paint: {
-          'hillshade-exaggeration': 0.85,
-          'hillshade-shadow-color': '#0f291e',
-          'hillshade-highlight-color': '#fffef2',
-          'hillshade-accent-color': '#2d6a4f',
-        },
+      paint: {
+        'raster-opacity': 0.92,
       },
-      {
-        id: 'opentopo-raster-layer',
-        type: 'raster',
-        source: 'opentopo-raster',
-        minzoom: 0,
-        maxzoom: 22,
-        layout: {
-          visibility: showContourLayer ? 'visible' : 'none',
-        },
-        paint: {
-          'raster-opacity': 0.78,
-        },
+    }
+  );
+
+  if (is3dMode) {
+    layers.push({
+      id: 'czekpoint-3d-forests',
+      source: 'openfreemap-v',
+      'source-layer': 'landcover',
+      type: 'fill-extrusion',
+      minzoom: 11,
+      maxzoom: 22,
+      filter: ['==', ['get', 'class'], 'wood'],
+      layout: {
+        visibility: 'visible',
       },
-      {
-        id: 'waymarked-hiking-layer',
-        type: 'raster',
-        source: 'waymarked-hiking',
-        minzoom: 0,
-        maxzoom: 19,
-        layout: {
-          visibility: showHikingTrails ? 'visible' : 'none',
-        },
-        paint: {
-          'raster-opacity': 0.92,
-        },
+      paint: {
+        'fill-extrusion-color': '#2d6a4f',
+        'fill-extrusion-height': 12,
+        'fill-extrusion-base': 0,
+        'fill-extrusion-opacity': 0.58,
       },
-      {
-        id: 'czekpoint-3d-forests',
-        source: 'openfreemap-v',
-        'source-layer': 'landcover',
-        type: 'fill-extrusion',
-        minzoom: 11,
-        filter: ['==', ['get', 'class'], 'wood'],
-        layout: {
-          visibility: is3dMode ? 'visible' : 'none',
-        },
-        paint: {
-          'fill-extrusion-color': '#2d6a4f',
-          'fill-extrusion-height': 12,
-          'fill-extrusion-base': 0,
-          'fill-extrusion-opacity': 0.58,
-        },
-      },
-      {
+    });
+
+    if (show3dBuildings) {
+      layers.push({
         id: 'czekpoint-3d-buildings',
         source: 'openfreemap-v',
         'source-layer': 'building',
         type: 'fill-extrusion',
         minzoom: 13,
+        maxzoom: 22,
         layout: {
-          visibility: (is3dMode && show3dBuildings) ? 'visible' : 'none',
+          visibility: 'visible',
         },
         paint: {
           'fill-extrusion-color': [
@@ -284,8 +288,29 @@ export function buildMapLibreStyle(cfg = config, options = {}) {
           'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0],
           'fill-extrusion-opacity': 0.85,
         },
-      },
-    ],
+      });
+    }
+  }
+
+  const styleObj = {
+    version: 8,
+    name: 'Czekpoint Outdoor 3D MapLibre Style',
+    sources,
+    terrain: is3dMode
+      ? {
+          source: 'terrain-dem',
+          exaggeration,
+        }
+      : undefined,
+    sky: {
+      'sky-color': '#bcdbf4',
+      'horizon-color': '#eef6fc',
+      'fog-color': '#dfeef9',
+      'sky-horizon-blend': 0.45,
+      'horizon-fog-blend': 0.5,
+      'fog-ground-blend': 0.25,
+    },
+    layers,
   };
 
   return styleObj;
