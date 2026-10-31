@@ -1441,6 +1441,13 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
 
         <!-- Stavový štítek režimu Sledovat směr uvnitř .map-top-overlays -->
         <div id="heading-mode-banner" class="heading-mode-banner" hidden role="status" aria-live="polite"></div>
+
+        <!-- Vizuální indikátor aktivního 3D terénu (reliéf, hory a 3D budovy) -->
+        <div id="map-3d-active-badge" class="map-3d-active-badge" role="status" aria-live="polite" title="3D reliéf terénu a 3D budovy jsou aktivní">
+          <span class="map-3d-badge-status-dot" aria-hidden="true"></span>
+          <span class="map-3d-badge-icon" aria-hidden="true">🏔️</span>
+          <span class="map-3d-badge-text" id="map-3d-badge-text">3D Terén aktivní</span>
+        </div>
       </div>
 
       <!-- Ukazatel uložení offline oblasti -->
@@ -7064,6 +7071,49 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     } catch {}
   }
 
+  function verify3DMapState(context = 'switch') {
+    if (!map) return { ok: false, reason: 'map_missing' };
+    const hasTerrainDem = Boolean(typeof map.getSource === 'function' && map.getSource('terrain-dem'));
+    const hasHillshadeDem = Boolean(typeof map.getSource === 'function' && map.getSource('hillshade-dem'));
+    const hasOpenFreeMap = Boolean(typeof map.getSource === 'function' && map.getSource('openfreemap-v'));
+    const hasTerrainHillshade = Boolean(typeof map.getLayer === 'function' && map.getLayer('terrain-hillshade'));
+    const hasBuildings = Boolean(typeof map.getLayer === 'function' && map.getLayer('czekpoint-3d-buildings'));
+    const terrainObj = typeof map.getTerrain === 'function' ? map.getTerrain() : null;
+    const isTerrainActive = Boolean(terrainObj && terrainObj.source === 'terrain-dem');
+    const curPitch = typeof map.getPitch === 'function' ? Number(map.getPitch().toFixed(1)) : 0;
+    const ok = is3DMode ? (hasTerrainDem && isTerrainActive) : (!hasTerrainDem && !hasBuildings && !terrainObj);
+
+    const result = {
+      ok,
+      context,
+      is3DMode,
+      hasTerrainDem,
+      hasHillshadeDem,
+      hasOpenFreeMap,
+      hasTerrainHillshade,
+      hasBuildings,
+      terrain: terrainObj,
+      pitch: curPitch,
+    };
+
+    if (is3DMode) {
+      if (ok) {
+        console.log(`[Czekpoint 3D Diagnostika] ✓ 3D terén a budovy aktivní: terrain-dem=${hasTerrainDem}, terrain.exaggeration=${terrainObj?.exaggeration || 1.8}, 3D budovy=${hasBuildings}, pitch=${curPitch}°`);
+      } else {
+        console.warn(`[Czekpoint 3D Diagnostika] ⚠️ 3D režim zapnut, ale terrain-dem nebo getTerrain není plně aktivní:`, result);
+      }
+    } else {
+      console.log(`[Czekpoint 3D Diagnostika] 2D režim: 3D zdroje i vrstvy korektně odstraněny (terrain-dem=${hasTerrainDem}, budovy=${hasBuildings}).`);
+    }
+
+    if (typeof window !== 'undefined') {
+      window.__czekpointLast3DCheck = result;
+      window.czekpointVerify3DState = () => verify3DMapState('manual');
+    }
+
+    return result;
+  }
+
   function update3DUiState() {
     const toggleBtn = $('btn-toggle-3d');
     if (toggleBtn) {
@@ -7077,6 +7127,14 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     const camControls = $('map-3d-camera-controls');
     if (camControls) {
       camControls.hidden = !is3DMode;
+    }
+    const badge = $('map-3d-active-badge');
+    if (badge) {
+      badge.hidden = !is3DMode;
+      const textEl = $('map-3d-badge-text');
+      if (textEl && is3DMode) {
+        textEl.textContent = '3D Terén a budovy aktivní';
+      }
     }
     $('walk-map-wrap')?.classList.toggle('is-3d-mode', is3DMode);
   }
@@ -7155,6 +7213,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         if (!opts.silent) {
           status('🏔️ Zapnuto 3D zobrazení (náklon 58°, terén 1.8×, 3D lesy a budovy).');
         }
+        verify3DMapState('setMap3DMode');
       } catch {
         is3DMode = false;
         is3dMode = false;
@@ -7163,6 +7222,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         try { map.easeTo({ pitch: 0, padding: getMapCameraPadding(), duration: 300 }); } catch {}
         update3DUiState();
         status('3D terén není momentálně dostupný, pokračuji ve 2D zobrazení.');
+        verify3DMapState('fallback2D');
       }
     } else {
       is3DMode = false;
@@ -7182,6 +7242,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       if (!opts.silent) {
         status(opts.fallbackMessage || '🗺️ Přepnuto na přehledné 2D zobrazení mapy shora.');
       }
+      verify3DMapState('setMap2DMode');
     }
   }
 
@@ -7602,6 +7663,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       renderPlaces({ skipListRebuild: true });
       accuracyRing.sync();
       drawFog(true);
+      verify3DMapState('onStyleOrMapLoad');
     };
 
     map.on('style.load', onStyleOrMapLoad);

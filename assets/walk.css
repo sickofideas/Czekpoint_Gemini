@@ -4871,6 +4871,43 @@ dialog:not([open]) {
   color: #fff4d2;
 }
 
+/* Vizuální indikátor aktivního 3D terénu v mapě */
+.map-3d-active-badge {
+  position: relative;
+  align-self: flex-start;
+  z-index: 640;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: rgba(18, 44, 34, 0.92);
+  color: #e5f2bc;
+  border: 1.5px solid #2d6a4f;
+  font-size: 0.72rem;
+  font-weight: 750;
+  line-height: 1.25;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.28);
+  pointer-events: none;
+}
+
+.map-3d-active-badge .map-3d-badge-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #52b788;
+  box-shadow: 0 0 6px #52b788;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.map-3d-active-badge .map-3d-badge-icon {
+  font-size: 0.82rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
 .offscreen-target-indicator {
   position: absolute;
   z-index: 635;

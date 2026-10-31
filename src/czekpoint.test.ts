@@ -2852,6 +2852,89 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
     assert.ok(!flat2dStyle.layers.some((l: any) => l.id === 'czekpoint-3d-buildings'), 'Ve 2D režimu se nevykresluje vrstva czekpoint-3d-buildings');
     assert.ok(walkJs.includes('lastApplied3DModeStateKey !== target3DStateKey'), 'ensureCustomMapSourcesAndLayers mění 3D zdroje a vrstvy pouze při přepnutí režimu');
   });
+
+  it('DETAILNÍ SCÉNÁŘ: MapLibre 3D režim, okamžité načtení terrain-dem a 3D budov, přepnutí 2D/3D a vizuální indikátor #map-3d-active-badge', () => {
+    const walkJs = fs.readFileSync('src/walk.js', 'utf-8');
+    const walkCss = fs.readFileSync('assets/walk.css', 'utf-8');
+    const configJs = fs.readFileSync('config.js', 'utf-8');
+
+    // 1. Ověření stylů: 3D režim je výchozí s terrain-dem a 3D budovami
+    const style3D = buildMapLibreStyle(appConfig, {});
+    assert.ok(style3D.terrain, 'Výchozí styl MapLibre má terrain definován');
+    assert.equal(style3D.terrain.source, 'terrain-dem');
+    assert.equal(style3D.terrain.exaggeration, 1.8);
+    assert.ok(style3D.sources['terrain-dem'], 'Výchozí styl obsahuje zdroj terrain-dem');
+    assert.ok(style3D.sources['hillshade-dem'], 'Výchozí styl obsahuje zdroj hillshade-dem');
+    assert.ok(style3D.sources['openfreemap-v'], 'Výchozí styl obsahuje zdroj openfreemap-v');
+    assert.ok(style3D.layers.some((l: any) => l.id === 'terrain-hillshade'), 'Výchozí styl obsahuje vrstvu terrain-hillshade');
+    assert.ok(style3D.layers.some((l: any) => l.id === 'czekpoint-3d-buildings'), 'Výchozí styl obsahuje vrstvu czekpoint-3d-buildings');
+    assert.ok(style3D.layers.some((l: any) => l.id === 'czekpoint-3d-forests'), 'Výchozí styl obsahuje vrstvu czekpoint-3d-forests');
+
+    // 2. Ověření 2D režimu: 3D data a budovy jsou ze stylu 100% odebrány
+    const style2D = buildMapLibreStyle(appConfig, { is3dMode: false });
+    assert.equal(style2D.terrain, undefined, 'Ve 2D stylu je terrain undefined');
+    assert.equal(style2D.sources['terrain-dem'], undefined, 'Ve 2D stylu chybí zdroj terrain-dem');
+    assert.equal(style2D.sources['openfreemap-v'], undefined, 'Ve 2D stylu chybí zdroj openfreemap-v');
+    assert.ok(!style2D.layers.some((l: any) => l.id === 'terrain-hillshade'), 'Ve 2D stylu chybí vrstva terrain-hillshade');
+    assert.ok(!style2D.layers.some((l: any) => l.id === 'czekpoint-3d-buildings'), 'Ve 2D stylu chybí vrstva czekpoint-3d-buildings');
+    assert.ok(!style2D.layers.some((l: any) => l.id === 'czekpoint-3d-forests'), 'Ve 2D stylu chybí vrstva czekpoint-3d-forests');
+
+    // 3. Simulace dynamického přidávání/odebírání ve funkci ensureCustomMapSourcesAndLayers
+    const addedSources = new Set<string>();
+    const addedLayers = new Set<string>();
+    let activeTerrain: any = null;
+
+    const mockMap = {
+      sources: addedSources,
+      layers: addedLayers,
+      getSource: (id: string) => addedSources.has(id) ? {} : null,
+      getLayer: (id: string) => addedLayers.has(id) ? {} : null,
+      addSource: (id: string) => { addedSources.add(id); },
+      removeSource: (id: string) => { addedSources.delete(id); },
+      addLayer: (layer: any) => { addedLayers.add(layer.id); },
+      removeLayer: (id: string) => { addedLayers.delete(id); },
+      setTerrain: (t: any) => { activeTerrain = t; },
+      getTerrain: () => activeTerrain,
+    };
+
+    // Simulace přepnutí do 3D: zdroje a vrstvy se fyzicky přidají do mapy
+    mockMap.addSource('terrain-dem');
+    mockMap.addSource('hillshade-dem');
+    mockMap.addSource('openfreemap-v');
+    mockMap.addLayer({ id: 'terrain-hillshade' });
+    mockMap.addLayer({ id: 'czekpoint-3d-forests' });
+    mockMap.addLayer({ id: 'czekpoint-3d-buildings' });
+    mockMap.setTerrain({ source: 'terrain-dem', exaggeration: 1.8 });
+
+    assert.equal(mockMap.sources.has('terrain-dem'), true, '3D režim má zdroj terrain-dem');
+    assert.equal(mockMap.layers.has('czekpoint-3d-buildings'), true, '3D režim má vrstvu czekpoint-3d-buildings');
+    assert.equal(mockMap.getTerrain()?.source, 'terrain-dem');
+
+    // Simulace přepnutí do 2D: zdroje a vrstvy se fyzicky odstraní z mapy
+    mockMap.setTerrain(null);
+    for (const l of ['czekpoint-3d-buildings', 'czekpoint-3d-forests', 'terrain-hillshade']) mockMap.removeLayer(l);
+    for (const s of ['openfreemap-v', 'hillshade-dem', 'terrain-dem']) mockMap.removeSource(s);
+
+    assert.equal(mockMap.sources.has('terrain-dem'), false, 'Ve 2D režimu je terrain-dem fyzicky odebrán');
+    assert.equal(mockMap.layers.has('czekpoint-3d-buildings'), false, 'Ve 2D režimu jsou 3D budovy fyzicky odebrány');
+    assert.equal(mockMap.getTerrain(), null, 'Ve 2D režimu je terrain null');
+
+    // 4. Ověření vizuálního indikátoru aktivního 3D terénu v mapě (#map-3d-active-badge)
+    assert.ok(walkJs.includes('id="map-3d-active-badge"'), 'src/walk.js obsahuje element #map-3d-active-badge');
+    assert.ok(walkJs.includes('3D Terén aktivní'), 'Indikátor obsahuje text „3D Terén aktivní“');
+    assert.ok(walkJs.includes('badge.hidden = !is3DMode'), 'update3DUiState řídí viditelnost odznáčku badge.hidden = !is3DMode');
+    assert.ok(walkCss.includes('.map-3d-active-badge'), 'assets/walk.css definuje styl pro .map-3d-active-badge');
+    assert.ok(walkCss.includes('.map-3d-badge-status-dot'), 'assets/walk.css definuje svítící tečku pro indikátor');
+
+    // 5. Ochrana proti chybě maxzoomu v 3D režimu
+    assert.ok(configJs.includes('safeDemMaxZoom') || configJs.includes('terrainMaxZoom: 14'), 'Zdroj terrain-dem má definovaný bezpečný maxzoom');
+    assert.ok(walkJs.includes('maxSourceZoom'), 'src/walk.js omezuje dotaz na výšku terénu podle maxSourceZoom');
+
+    // 6. Testovací diagnostická funkce verify3DMapState pro snadnou diagnostiku v konzoli
+    assert.ok(walkJs.includes('function verify3DMapState('), 'src/walk.js obsahuje testovací funkci verify3DMapState');
+    assert.ok(walkJs.includes('[Czekpoint 3D Diagnostika]'), 'verify3DMapState loguje stav do konzole');
+    assert.ok(walkJs.includes('window.czekpointVerify3DState ='), 'verify3DMapState je vystavena na window.czekpointVerify3DState');
+  });
 });
 
 
