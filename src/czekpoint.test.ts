@@ -138,6 +138,7 @@ import {
   buildHikingTrailsGeoJson,
   computeFogGeographicBounds,
   isPointInsideFogSafeBounds,
+  isViewportInsideFogBounds,
   projectLngLatToFogPixels,
   metersToFogPixels,
   renderFogTextureToCanvas,
@@ -2934,6 +2935,71 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
     assert.ok(walkJs.includes('function verify3DMapState('), 'src/walk.js obsahuje testovací funkci verify3DMapState');
     assert.ok(walkJs.includes('[Czekpoint 3D Diagnostika]'), 'verify3DMapState loguje stav do konzole');
     assert.ok(walkJs.includes('window.czekpointVerify3DState ='), 'verify3DMapState je vystavena na window.czekpointVerify3DState');
+  });
+
+  it('DETAILNÍ SCÉNÁŘ: Dynamické pokrytí mlhy/pergamenu přes celý viewport a synchronizace herních stylů a tlačítek', () => {
+    const walkJs = fs.readFileSync('src/walk.js', 'utf-8');
+
+    // 1. Ověření computeFogGeographicBounds bez viewportBounds (výchozí chování zachováno)
+    const center = { lat: 49.6014, lng: 13.8644 };
+    const defaultBounds = computeFogGeographicBounds(center, {});
+    assert.ok(defaultBounds.north > defaultBounds.south, 'Výchozí hranice mají kladnou šířku');
+    assert.ok(defaultBounds.east > defaultBounds.west, 'Výchozí hranice mají kladnou délku');
+    assert.ok(defaultBounds.north - defaultBounds.south >= 0.015, 'Výchozí rozpětí na šířku je alespoň 0.015 (~1.6 km)');
+    assert.ok(defaultBounds.east - defaultBounds.west >= 0.022, 'Výchozí rozpětí na délku je alespoň 0.022 (~1.6 km)');
+
+    // 2. Ověření dynamického rozšíření mlhy podle zobrazeného viewportu (konec 500m čtverce a odkryté mapy)
+    const viewport = {
+      south: 49.5600,
+      north: 49.6450,
+      west: 13.8000,
+      east: 13.9300,
+    };
+    const expandedBounds = computeFogGeographicBounds(center, { viewportBounds: viewport });
+
+    // Hranice mlhy musí striktně a s rezervou (>= 45 %) přesahovat viditelný výřez
+    assert.ok(expandedBounds.south < viewport.south, 'Jižní okraj mlhy je bezpečně pod jižním okrajem obrazovky');
+    assert.ok(expandedBounds.north > viewport.north, 'Severní okraj mlhy je bezpečně nad severním okrajem obrazovky');
+    assert.ok(expandedBounds.west < viewport.west, 'Západní okraj mlhy je bezpečně před západním okrajem obrazovky');
+    assert.ok(expandedBounds.east > viewport.east, 'Východní okraj mlhy je bezpečně za východním okrajem obrazovky');
+
+    // Funkce isViewportInsideFogBounds potvrdí bezpečné pokrytí
+    assert.equal(isViewportInsideFogBounds(viewport, expandedBounds), true, 'Viditelný viewport se celý nachází uvnitř textury mlhy');
+
+    // Test detekce, kdy viewport přesahuje hranice mlhy (např. při prudkém posunu nebo oddálení)
+    const outsideViewport = {
+      south: 49.5000,
+      north: 49.6450,
+      west: 13.8000,
+      east: 13.9300,
+    };
+    assert.equal(isViewportInsideFogBounds(outsideViewport, expandedBounds), false, 'Detekuje viewport přesahující hranice');
+
+    // 3. Ověření, že drawFog zjišťuje map.getBounds(), kontroluje viewportExceedsFog a používá rozlišení 1024x1024
+    assert.ok(walkJs.includes('viewportBounds = {'), 'drawFog extrahuje viewportBounds z mapy');
+    assert.ok(walkJs.includes('viewportExceedsFog'), 'drawFog detekuje, zda viewport nepřesahuje stávající hranice mlhy');
+    assert.ok(walkJs.includes('fogTextureCanvas.width = 1024'), 'drawFog inicializuje canvas v rozlišení 1024x1024');
+    assert.ok(walkJs.includes("scheduleFog(80, true)"), 'zoomend vyvolá okamžité překreslení mlhy po oddálení/přiblížení');
+    assert.ok(walkJs.includes("scheduleFog(120)"), 'moveend vyvolá plynulou aktualizaci mlhy po posunu mapy');
+
+    // 4. Ověření výchozího stavu herních stylů a tlačítek: Výchozí je „Výprava s pergamenem“ ('gamified')
+    assert.equal(DEFAULT_APP_SETTINGS.gameMode, 'gamified', 'DEFAULT_APP_SETTINGS má gameMode nastaven na gamified');
+    assert.ok(walkJs.includes("const initialGameMode = (appSettings.gameMode === 'explorer' || appSettings.gameMode === 'casual') ? appSettings.gameMode : 'gamified'"), 'initialGameMode korektně padá na gamified');
+
+    // 5. Ověření HTML šablony: tlačítka mají active pouze tehdy, když odpovídají initialGameMode (žádné falešně zmáčknuté tlačítko)
+    assert.ok(walkJs.includes("initialGameMode === 'gamified' ? 'active' : ''"), 'Tlačítko Výprava s pergamenem má třídu active při gamified');
+    assert.ok(walkJs.includes("initialGameMode === 'casual' ? 'active' : ''"), 'Tlačítko Turistická mapa má třídu active pouze při casual');
+    assert.ok(walkJs.includes("initialGameMode === 'explorer' ? 'active' : ''"), 'Tlačítko Objevování má třídu active pouze při explorer');
+
+    // 6. Ověření chování přepnutí režimů v applyGameMode:
+    // a) 'casual' (Turistická mapa): mlha se vypne (none), vrstevnice a trasy jsou zapnuty
+    // b) 'explorer' (Objevování): mlha je plná (full), čára trasy skryta, vrstevnice vypnuty
+    // c) 'gamified' (Výprava s pergamenem): mlha je 'explore', trasa i vrstevnice zobrazeny
+    assert.ok(walkJs.includes("fogMode = 'none'"), 'V režimu casual je mlha vypnuta (none)');
+    assert.ok(walkJs.includes("fogMode = 'full'"), 'V režimu explorer je plná mlha (full)');
+    assert.ok(walkJs.includes("fogMode = appSettings.fogParchment === false ? 'none' : 'explore'"), 'V režimu gamified je nastavena mlha explore');
+    assert.ok(walkJs.includes("btn.dataset.p1Gamemode === mode"), 'applyGameMode přepíná třídu active i aria-pressed');
+    assert.ok(walkJs.includes("btn.dataset.modalGameMode === mode"), 'applyGameMode synchronizuje i modální tlačítka nastavení');
   });
 });
 

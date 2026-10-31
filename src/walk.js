@@ -715,6 +715,26 @@ export function computeFogGeographicBounds(center, options = {}) {
     west = mid - minSpanLng / 2;
   }
 
+  // Zohlednění viditelného výřezu mapy (viewportBounds) s velkorysým bezpečnostním přesahem 45 %:
+  // Zabraňuje oříznutí mlhy na malý čtverec ~500 m kolem hráče a odkrytí podkladové mapy na okrajích
+  if (options.viewportBounds) {
+    const vb = options.viewportBounds;
+    const s = Number(vb.south);
+    const n = Number(vb.north);
+    const w = Number(vb.west);
+    const e = Number(vb.east);
+    if (Number.isFinite(s) && Number.isFinite(n) && Number.isFinite(w) && Number.isFinite(e)) {
+      const vSpanLat = Math.max(0.01, Math.abs(n - s));
+      const vSpanLng = Math.max(0.015, Math.abs(e - w));
+      const vPadLat = Math.max(0.012, vSpanLat * 0.45);
+      const vPadLng = Math.max(0.018, vSpanLng * 0.45);
+      south = Math.min(south, s - vPadLat);
+      north = Math.max(north, n + vPadLat);
+      west = Math.min(west, w - vPadLng);
+      east = Math.max(east, e + vPadLng);
+    }
+  }
+
   west = Number(west.toFixed(6));
   east = Number(east.toFixed(6));
   south = Number(south.toFixed(6));
@@ -734,6 +754,19 @@ export function computeFogGeographicBounds(center, options = {}) {
     south,
     coordinates,
   };
+}
+
+/**
+ * Zjistí, zda se viditelný výřez mapy (viewportBounds) zcela nachází uvnitř aktuálních hranic mlhy.
+ */
+export function isViewportInsideFogBounds(viewportBounds, bounds) {
+  if (!viewportBounds || !bounds) return false;
+  return (
+    Number(viewportBounds.south) >= Number(bounds.south) &&
+    Number(viewportBounds.north) <= Number(bounds.north) &&
+    Number(viewportBounds.west) >= Number(bounds.west) &&
+    Number(viewportBounds.east) <= Number(bounds.east)
+  );
 }
 
 /**
@@ -1205,10 +1238,13 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
   let lastSpokenNavStepKey = '';
   let lastOffRouteRecalcAt = 0;
 
-  // 100% automatické nastavení enginu (Výprava s pergamenem + české turistické značky KČT)
-  let fogMode = 'explore';
-  showHikingTrails = true;
-  showContourLayer = false;
+  // 100% automatické nastavení enginu: Výchozí herní styl je Výprava s pergamenem ('gamified')
+  const initialGameMode = (appSettings.gameMode === 'explorer' || appSettings.gameMode === 'casual') ? appSettings.gameMode : 'gamified';
+  appSettings.gameMode = initialGameMode;
+  stateObj.gameMode = initialGameMode;
+  let fogMode = initialGameMode === 'explorer' ? 'full' : (initialGameMode === 'casual' ? 'none' : 'explore');
+  showHikingTrails = appSettings.kctTrails !== false;
+  showContourLayer = initialGameMode === 'explorer' ? false : (appSettings.contours !== false);
 
   // UI stavy a Průvodce výpravou
   let sheetCollapsed = false;
@@ -1324,13 +1360,13 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       <div class="p1-row">
         <span class="p1-row-label">1. Herní styl:</span>
         <div class="p1-btn-group p1-gamemode-row" role="group" aria-label="Výběr ze 3 herních stylů">
-          <button type="button" class="p1-choice-btn p1-gamemode-btn ${appSettings.gameMode === 'explorer' ? 'active' : ''}" data-p1-gamemode="explorer" aria-pressed="${appSettings.gameMode === 'explorer'}">
+          <button type="button" class="p1-choice-btn p1-gamemode-btn ${initialGameMode === 'explorer' ? 'active' : ''}" data-p1-gamemode="explorer" aria-pressed="${initialGameMode === 'explorer'}">
             🧭 Objevování
           </button>
-          <button type="button" class="p1-choice-btn p1-gamemode-btn ${(appSettings.gameMode || 'gamified') === 'gamified' ? 'active' : ''}" data-p1-gamemode="gamified" aria-pressed="${(appSettings.gameMode || 'gamified') === 'gamified'}">
+          <button type="button" class="p1-choice-btn p1-gamemode-btn ${initialGameMode === 'gamified' ? 'active' : ''}" data-p1-gamemode="gamified" aria-pressed="${initialGameMode === 'gamified'}">
             📜 Výprava s pergamenem
           </button>
-          <button type="button" class="p1-choice-btn p1-gamemode-btn ${appSettings.gameMode === 'casual' ? 'active' : ''}" data-p1-gamemode="casual" aria-pressed="${appSettings.gameMode === 'casual'}">
+          <button type="button" class="p1-choice-btn p1-gamemode-btn ${initialGameMode === 'casual' ? 'active' : ''}" data-p1-gamemode="casual" aria-pressed="${initialGameMode === 'casual'}">
             🗺️ Turistická mapa
           </button>
           <button type="button" class="p1-choice-btn" id="btn-open-settings-modal" title="Nastavení aplikace a herního stylu">⚙️ Nastavení</button>
@@ -2578,12 +2614,36 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     }
 
     const curCenter = (typeof map.getCenter === 'function' ? map.getCenter() : null) || lastFix || getRouteOriginPoint();
-    const outOfSafeBounds = !fogGeographicBounds || !isPointInsideFogSafeBounds(curCenter.lat, curCenter.lng, fogGeographicBounds, 0.65);
+    let viewportBounds = null;
+    if (map && typeof map.getBounds === 'function') {
+      try {
+        const b = map.getBounds();
+        if (b) {
+          viewportBounds = {
+            south: typeof b.getSouth === 'function' ? b.getSouth() : b._sw?.lat,
+            north: typeof b.getNorth === 'function' ? b.getNorth() : b._ne?.lat,
+            west: typeof b.getWest === 'function' ? b.getWest() : b._sw?.lng,
+            east: typeof b.getEast === 'function' ? b.getEast() : b._ne?.lng,
+          };
+        }
+      } catch {}
+    }
 
-    if (force || outOfSafeBounds || !fogGeographicBounds) {
+    const boundsMissing = !fogGeographicBounds || !Array.isArray(fogGeographicBounds.coordinates);
+    const centerOutOfSafe = !boundsMissing && !isPointInsideFogSafeBounds(curCenter.lat, curCenter.lng, fogGeographicBounds, 0.65);
+    const viewportExceedsFog = !boundsMissing && viewportBounds && (
+      Number(viewportBounds.south) < Number(fogGeographicBounds.south) ||
+      Number(viewportBounds.north) > Number(fogGeographicBounds.north) ||
+      Number(viewportBounds.west) < Number(fogGeographicBounds.west) ||
+      Number(viewportBounds.east) > Number(fogGeographicBounds.east)
+    );
+    const outOfSafeBounds = boundsMissing || centerOutOfSafe || viewportExceedsFog;
+
+    if (force || outOfSafeBounds) {
       fogGeographicBounds = computeFogGeographicBounds(curCenter, {
         walkSegments: progress.walkSegments,
         cells: progress.cells,
+        viewportBounds,
       });
     }
 
@@ -2611,15 +2671,15 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       return;
     }
 
-    // DÁVKA 2 (Optimalizace výkonu): 512 × 512 px plátno (dříve fogTextureCanvas.width = 1024) pro bleskové generování mlhy bez záseku
+    // Vykreslovací plátno 1024 × 1024 px pro ostrý pergamen pokrývající celý viditelný výřez i s rezervou
     if (!fogTextureCanvas) {
       fogTextureCanvas = document.createElement('canvas');
-      fogTextureCanvas.width = 512;
-      fogTextureCanvas.height = 512;
+      fogTextureCanvas.width = 1024;
+      fogTextureCanvas.height = 1024;
     }
-    if (fogTextureCanvas.width !== 512) {
-      fogTextureCanvas.width = 512;
-      fogTextureCanvas.height = 512;
+    if (fogTextureCanvas.width !== 1024) {
+      fogTextureCanvas.width = 1024;
+      fogTextureCanvas.height = 1024;
     }
 
     const fogBounds = fogGeographicBounds.coordinates;
@@ -2635,8 +2695,8 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       activeLocalReveals,
       lastFix: revealCenterPos,
       revealRadiusM: effectiveRevealRadiusM,
-      width: 512,
-      height: 512,
+      width: 1024,
+      height: 1024,
     });
 
     lastFogStateKey = fogStateKey;
@@ -4980,7 +5040,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     });
   }
 
-  function applyGameMode(mode) {
+  function applyGameMode(mode, opts = {}) {
     if (!['explorer', 'gamified', 'casual'].includes(mode)) mode = 'gamified';
     // DÁVKA 1 Bod 3.3: Přepnutím stylu za chůze nikdy nemaž postup a zachovej nezávislá nastavení zvuku a přístupnosti
     appSettings.gameMode = mode;
@@ -5001,12 +5061,13 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     }
     root.querySelectorAll('[data-p1-gamemode]').forEach(btn => {
       const isAct = btn.dataset.p1Gamemode === mode;
-      btn.classList.remove('active');
-      btn.setAttribute('aria-pressed', 'false');
-      if (isAct) {
-        btn.classList.add('active');
-        btn.setAttribute('aria-pressed', 'true');
-      }
+      btn.classList.toggle('active', isAct);
+      btn.setAttribute('aria-pressed', String(isAct));
+    });
+    root.querySelectorAll('[data-modal-game-mode]').forEach(btn => {
+      const isAct = btn.dataset.modalGameMode === mode;
+      btn.classList.toggle('active', isAct);
+      btn.setAttribute('aria-pressed', String(isAct));
     });
     stateObj.appSettings = { ...appSettings };
     saveAppState();
@@ -5019,8 +5080,10 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     renderTripWizardUi();
     renderAppSettingsModalUi();
     renderNextCheckpointHero(lastFix || telemetry.lastKnownPosition);
-    playStampChord(stateObj.soundEnabled);
-    status(`Herní styl přepnut: ${mode === 'explorer' ? '🧭 Objevování' : mode === 'casual' ? '🗺️ Turistická mapa' : '📜 Výprava s pergamenem'}.`);
+    if (!opts.silent) {
+      playStampChord(stateObj.soundEnabled);
+      status(`Herní styl přepnut: ${mode === 'explorer' ? '🧭 Objevování' : mode === 'casual' ? '🗺️ Turistická mapa' : '📜 Výprava s pergamenem'}.`);
+    }
   }
 
   const SETTINGS_ITEMS = [
@@ -7662,6 +7725,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       renderTrail();
       renderPlaces({ skipListRebuild: true });
       accuracyRing.sync();
+      applyGameMode(appSettings.gameMode || 'gamified', { silent: true });
       drawFog(true);
       verify3DMapState('onStyleOrMapLoad');
     };
@@ -7763,6 +7827,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       lastUserZoomAt = Date.now();
       renderTrail();
       renderPlaces({ skipListRebuild: true });
+      scheduleFog(80, true);
     });
     // DÁVKA 1 (v2.2.1 P0 Bod 4): Zákaz odpojování follow při pouhém kliknutí — odpojení pouze při posunu > 12 px
     let mapTouchStartPointer = null;
@@ -7856,10 +7921,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       updateScanMapAreaButtonState();
       scheduleMapPanAutoFetch();
       updateDirectionalIndicators();
-      const c = map.getCenter();
-      if (c && !isPointInsideFogSafeBounds(c.lat, c.lng, fogGeographicBounds, 0.65)) {
-        scheduleFog(600);
-      }
+      scheduleFog(120);
     });
 
     map.on('click', ev => {
