@@ -2823,6 +2823,16 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
     assert.ok(set3DFnChunk.includes('zoom: curZoom'), 'setMap3DMode zachovává stávající zoom uživatele');
     assert.ok(!set3DFnChunk.includes('followHeadingMode = true'), 'setMap3DMode samo o sobě nesmí zapnout otáčení za kompasem');
     assert.ok(!set3DFnChunk.includes('zoom: 18.4'), 'setMap3DMode nesmí vynucovat zoom 18.4');
+
+    // d) Ověření funkčnosti tlačítka GPS simulátoru (#walk-fake-gps-toggle) a tlačítek v Nastavení:
+    const simToggleListenerMatches = walkJs.match(/\$\('walk-fake-gps-toggle'\)\?\.addEventListener\('click'/g) || [];
+    assert.equal(simToggleListenerMatches.length, 1, 'Tlačítko #walk-fake-gps-toggle musí mít právě jeden click listener (žádné dvojité přepnutí)');
+    assert.ok(walkJs.includes('pitch: is3DMode ? 55 : 0'), 'restoreFollowOnPlayer správně používá is3DMode');
+
+    const appJs = fs.readFileSync('src/app.js', 'utf-8');
+    assert.ok(appJs.includes("closest('[data-setting-mode]')"), 'Stránka nastavení zpracovává přepnutí herního stylu');
+    assert.ok(appJs.includes("action === 'toggle-setting'"), 'Stránka nastavení zpracovává pilulkové přepínače');
+    assert.ok(appJs.includes("action === 'reset-app-settings'"), 'Stránka nastavení zpracovává obnovu výchozího nastavení');
   });
 });
 

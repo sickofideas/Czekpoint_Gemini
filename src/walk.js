@@ -1280,7 +1280,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     });
 
   root.innerHTML = `
-    <h1 tabindex="-1" class="visually-hidden">Mapa objevování a procházka · Czekpoint v2.2.1</h1>
+    <h1 tabindex="-1" class="visually-hidden">Mapa objevování a procházka · Czekpoint v2.3</h1>
 
     <!-- Horní přehledový panel trasy: zobrazí se AŽ ve chvíli, kdy má uživatel vybraný alespoň 1 bod v trase -->
     <section class="phase1-top-bar" id="phase1-top-bar" hidden aria-label="Souhrn trasy, plán zastávek a spuštění výpravy">
@@ -7243,6 +7243,13 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         if ($('tile-status')) $('tile-status').textContent = 'Mapový podklad se nenačetl. Průzkum funguje dál.';
       }
     });
+    if (fakeGpsSim) {
+      fakeGpsSim.unbindEvents();
+      fakeGpsSim.map = map;
+      if (fakeGpsSim.isOpen) {
+        fakeGpsSim.bindEvents();
+      }
+    }
     return true;
   }
 
@@ -7451,81 +7458,6 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       }
     });
 
-    const simStartPos = lastFix || plannedRoute?.origin || (progress.cells.length ? cellCenter(progress.cells.at(-1)) : ROZMITAL_CENTER);
-    fakeGpsSim = initGpsSimulator({
-      map,
-      container: $('simulator-test-zone'),
-      initialPosition: simStartPos,
-      onOpen: () => {
-        if ($('simulator-test-zone')) $('simulator-test-zone').hidden = false;
-        enterSimulatorSandbox();
-      },
-      onClose: () => {
-        if ($('simulator-test-zone')) $('simulator-test-zone').hidden = true;
-        exitSimulatorSandbox();
-      },
-      onAutopilotPause: (reason) => {
-        status(reason);
-      },
-      onFix: (fix, heading) => {
-        if (disposed) return;
-        enterSimulatorSandbox();
-        // DÁVKA 1 (Bod 2.3): Ve stavu 'paused' nesmí ani simulovaný vzorek polohy obnovit chůzi ani přičíst metry!
-        if (walkState === 'paused' || (currentExpedition && currentExpedition.state === 'paused')) {
-          return;
-        }
-        const simMoved = !lastFix || (haversineMeters(lastFix, fix) ?? 1) > 0.5;
-        if (walkState !== 'running' && walkState !== 'paused' && simMoved) {
-          startUnifiedExpedition('sim');
-        }
-        handleGpsFix({ ...fix, simulated: true });
-        if (heading != null && Number.isFinite(heading)) {
-          updateCompassRotation(heading);
-        }
-      },
-      onHeadingChange: (heading) => {
-        if (heading != null && Number.isFinite(heading)) {
-          updateCompassRotation(heading);
-        }
-      },
-      onResetAnchor: () => {
-        anchor = null;
-      },
-      onStopRealGps: () => {
-        stopWatchdog();
-        if (watch !== null) {
-          navigator.geolocation?.clearWatch?.(watch);
-          watch = null;
-        }
-      },
-      getPlannedWaypoints: () => {
-        return getPlannedPlaces();
-      },
-      getSharedWalkingRoute: () => {
-        return lastRoutedGeometry;
-      },
-      getCollectiblePlaces: () => {
-        return getAllAvailablePlaces().filter(p => p.collectible !== false);
-      },
-    });
-
-    $('walk-fake-gps-toggle')?.addEventListener('click', () => {
-      if (fakeGpsSim?.isOpen) {
-        fakeGpsSim.close();
-      } else {
-        fakeGpsSim?.open();
-      }
-    });
-
-    // DÁVKA 2 (P1 Bod 7.1): Pokud byl odkaz otevřen z nastavení se sim=1 nebo actions.sim, automaticky otevřeme simulátor
-    if (actions.sim || (typeof location !== 'undefined' && (location.hash.includes('sim=1') || location.search.includes('sim=1')))) {
-      setTimeout(() => {
-        if (!disposed && fakeGpsSim && !fakeGpsSim.isOpen) {
-          fakeGpsSim.open();
-        }
-      }, 120);
-    }
-
     loadAndRenderHikingTrails();
 
     // v2.1 (Bod 2.1): Okamžité zaměření polohy při otevření mapy
@@ -7585,7 +7517,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         <p style="margin:8px 0 0">Zobrazení interaktivní mapy a mapových vrstev není v tuto chvíli dostupné. Plánování zastávek, seznam míst a záznam GPS procházky zůstávají funkční.</p>
       </div>
     `;
-    ['walk-center', 'walk-fog-toggle', 'walk-trails-toggle', 'walk-zen-toggle', 'btn-toggle-3d', 'btn-follow-heading', 'btn-north-up', 'draft-btn-origin-map', 'walk-fake-gps-toggle'].forEach(btnId => {
+    ['walk-center', 'walk-fog-toggle', 'walk-trails-toggle', 'walk-zen-toggle', 'btn-toggle-3d', 'btn-follow-heading', 'btn-north-up', 'draft-btn-origin-map'].forEach(btnId => {
       const btn = $(btnId);
       if (btn) {
         btn.disabled = true;
@@ -7593,6 +7525,76 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       }
     });
   }
+
+  const simStartPos = lastFix || plannedRoute?.origin || (progress.cells.length ? cellCenter(progress.cells.at(-1)) : ROZMITAL_CENTER);
+  fakeGpsSim = initGpsSimulator({
+    map,
+    container: $('simulator-test-zone'),
+    initialPosition: simStartPos,
+    onOpen: () => {
+      const zone = $('simulator-test-zone');
+      if (zone) zone.hidden = false;
+      const toggleBtn = $('walk-fake-gps-toggle');
+      if (toggleBtn) {
+        toggleBtn.classList.add('active');
+        toggleBtn.setAttribute('aria-expanded', 'true');
+      }
+      enterSimulatorSandbox();
+    },
+    onClose: () => {
+      const zone = $('simulator-test-zone');
+      if (zone) zone.hidden = true;
+      const toggleBtn = $('walk-fake-gps-toggle');
+      if (toggleBtn) {
+        toggleBtn.classList.remove('active');
+        toggleBtn.setAttribute('aria-expanded', 'false');
+      }
+      exitSimulatorSandbox();
+    },
+    onAutopilotPause: (reason) => {
+      status(reason);
+    },
+    onFix: (fix, heading) => {
+      if (disposed) return;
+      enterSimulatorSandbox();
+      // DÁVKA 1 (Bod 2.3): Ve stavu 'paused' nesmí ani simulovaný vzorek polohy obnovit chůzi ani přičíst metry!
+      if (walkState === 'paused' || (currentExpedition && currentExpedition.state === 'paused')) {
+        return;
+      }
+      const simMoved = !lastFix || (haversineMeters(lastFix, fix) ?? 1) > 0.5;
+      if (walkState !== 'running' && walkState !== 'paused' && simMoved) {
+        startUnifiedExpedition('sim');
+      }
+      handleGpsFix({ ...fix, simulated: true });
+      if (heading != null && Number.isFinite(heading)) {
+        updateCompassRotation(heading);
+      }
+    },
+    onHeadingChange: (heading) => {
+      if (heading != null && Number.isFinite(heading)) {
+        updateCompassRotation(heading);
+      }
+    },
+    onResetAnchor: () => {
+      anchor = null;
+    },
+    onStopRealGps: () => {
+      stopWatchdog();
+      if (watch !== null) {
+        navigator.geolocation?.clearWatch?.(watch);
+        watch = null;
+      }
+    },
+    getPlannedWaypoints: () => {
+      return getPlannedPlaces();
+    },
+    getSharedWalkingRoute: () => {
+      return lastRoutedGeometry;
+    },
+    getCollectiblePlaces: () => {
+      return getAllAvailablePlaces().filter(p => p.collectible !== false);
+    },
+  });
 
   // DÁVKA 4 (Bod 1.1): Kliknutí na tlačítko „🔄 Znovu načíst mapu“ (#btn-reload-webgl-map) při chybě WebGL
   $('webgl-error-banner')?.addEventListener('click', (ev) => {
@@ -7975,24 +7977,25 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       if (zone) {
         zone.hidden = !fakeGpsSim.isOpen;
         if (fakeGpsSim.isOpen) {
-          zone.scrollIntoView({ behavior: 'smooth' });
+          zone.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
       }
     }
     playTick(stateObj.soundEnabled);
   });
 
-  if (location.hash.includes('sim=1') || location.search.includes('sim=1')) {
+  // DÁVKA 2 (P1 Bod 7.1): Pokud byl odkaz otevřen z nastavení se sim=1 nebo actions.sim, automaticky otevřeme simulátor
+  if (actions.sim || (typeof location !== 'undefined' && (location.hash.includes('sim=1') || location.search.includes('sim=1')))) {
     setTimeout(() => {
       if (!disposed && fakeGpsSim && !fakeGpsSim.isOpen) {
         fakeGpsSim.open();
         const zone = $('simulator-test-zone');
         if (zone) {
           zone.hidden = false;
-          zone.scrollIntoView({ behavior: 'smooth' });
+          zone.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
       }
-    }, 400);
+    }, 150);
   }
 
   $('walk-start')?.addEventListener('click', start);
@@ -9781,7 +9784,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         map.flyTo({
           center: [playerPos.lng, playerPos.lat],
           zoom: Math.max(map.getZoom(), 16.5),
-          pitch: is3dMode ? 55 : 0,
+          pitch: is3DMode ? 55 : 0,
           duration: 700,
         });
       } else {

@@ -1027,7 +1027,7 @@ function renderPassport() {
 }
 
 function renderAbout() {
-  main.innerHTML = `<div class="about-intro"><div class="eyebrow">${icon('leaf')}Osobní atlas procházek · v2.0-final</div><h1 tabindex="-1">Dobrá cesta začíná<br>dobrou informací.</h1><p>Czekpoint je osobní atlas procházek: vyjdi ven, odkrývej své okolí na 2D i 3D mapě, objev skutečné místo a odnes si ověřené GPS razítko a ilustrovanou pohlednici.</p></div>
+  main.innerHTML = `<div class="about-intro"><div class="eyebrow">${icon('leaf')}Osobní atlas procházek · v2.3</div><h1 tabindex="-1">Dobrá cesta začíná<br>dobrou informací.</h1><p>Czekpoint je osobní atlas procházek: vyjdi ven, odkrývej své okolí na 2D i 3D mapě, objev skutečné místo a odnes si ověřené GPS razítko a ilustrovanou pohlednici.</p></div>
     <div class="about-grid"><section class="panel">${icon('route')}<h2>Vyber. Podívej se. Vyraz.</h2><p>Na kartě najdeš známé údaje o cestě, její omezení a odkaz na původní zdroj. Navigaci otevřeš přímo v interaktivní mapě (MapLibre GL JS 4.7.1) nebo ve stávající mapové službě. Po návratu si místo můžeš uložit do pasu.</p></section>
     <section class="panel">${icon('shield')}<h2>Neznámé přiznáváme.</h2><p>Úvodní karty vycházejí z veřejných zdrojů. Terénní ověření probíhá postupně. Ilustrace nejsou fotografie skutečného stavu. Když chybí čas, převýšení nebo ověřená poloha, zobrazíme to jako neověřený údaj.</p></section>
     <section class="panel">${icon('pin')}<h2>Jedno GPS razítko místa (+30 b.).</h2><p>Razítko získáš osobní návštěvou u ověřeného místa (pod 20 m při opakovaném přesném měření GPS ≤ 40 m). Začátky okruhů razítka neudělují.</p></section>
@@ -1108,7 +1108,7 @@ function renderAbout() {
     </section>
 
     <div class="about-foot">
-      <p class="small-note">Bez sledovacích reklam a bez analytických měřicích skriptů. Toto je verze v2.0-final.</p>
+      <p class="small-note">Bez sledovacích reklam a bez analytických měřicích skriptů. Toto je verze v2.3.</p>
       <div class="data-actions">
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
           <button type="button" class="button small" data-action="export-state">${icon('arrow')}📥 Stáhnout zálohu do souboru (.json)</button>
@@ -1233,6 +1233,7 @@ function renderSettingsPage() {
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
             <button type="button" class="button small" data-action="export-state">${icon('arrow')}Exportovat zálohu průzkumu (JSON)</button>
             <button type="button" class="button small" data-action="import-state">${icon('book')}Obnovit průzkum ze zálohy (JSON)</button>
+            <input type="file" id="app-import-file" accept=".json,application/json" hidden>
           </div>
           <button type="button" class="button danger small" data-action="clear-local">${icon('trash')}Vymazat lokální data a resetovat průzkum</button>
         </div>
@@ -1449,6 +1450,32 @@ document.addEventListener('click', async event => {
     }
   }
 
+  if (state.view === 'settings') {
+    const settingModeBtn = event.target.closest('[data-setting-mode]');
+    if (settingModeBtn) {
+      let mode = settingModeBtn.dataset.settingMode || 'gamified';
+      if (!['explorer', 'gamified', 'casual'].includes(mode)) mode = 'gamified';
+      let s = loadState();
+      const cfg = { ...DEFAULT_APP_SETTINGS, ...(s.appSettings || {}) };
+      cfg.gameMode = mode;
+      if (mode === 'explorer') {
+        cfg.fogParchment = true;
+      } else if (mode === 'casual') {
+        cfg.fogParchment = false;
+      } else {
+        cfg.fogParchment = true;
+      }
+      s.gameMode = mode;
+      s.appSettings = cfg;
+      s = saveState(s);
+      playTick(s.soundEnabled);
+      renderSettingsPage();
+      const modeName = mode === 'explorer' ? '🧭 Objevování' : mode === 'casual' ? '🗺️ Turistická mapa' : '📜 Výprava s pergamenem';
+      toast(`Herní styl změněn: ${modeName}.`);
+      return;
+    }
+  }
+
   const button = event.target.closest('[data-action]');
   if (!button || !state.repo) return;
   const action = button.dataset.action;
@@ -1636,6 +1663,34 @@ document.addEventListener('click', async event => {
       a.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
       toast('Záloha osobního atlasu byla stažena do souboru.');
+      return;
+    }
+    if (action === 'toggle-setting') {
+      const key = button.dataset.key;
+      const val = button.dataset.val === 'true';
+      if (key) {
+        let s = loadState();
+        const cfg = { ...DEFAULT_APP_SETTINGS, ...(s.appSettings || {}) };
+        cfg[key] = val;
+        s.appSettings = cfg;
+        if (key === 'soundFx') s.soundEnabled = val;
+        if (key === 'voiceNav') s.voiceNavEnabled = val;
+        s = saveState(s);
+        playTick(s.soundEnabled);
+        if (state.view === 'settings') renderSettingsPage();
+      }
+      return;
+    }
+    if (action === 'reset-app-settings') {
+      let s = loadState();
+      s.appSettings = { ...DEFAULT_APP_SETTINGS };
+      s.gameMode = 'gamified';
+      s.soundEnabled = true;
+      s.voiceNavEnabled = true;
+      s = saveState(s);
+      playTick(s.soundEnabled);
+      if (state.view === 'settings') renderSettingsPage();
+      toast('Výchozí herní nastavení bylo obnoveno (vše zapnuto).');
       return;
     }
     if (action === 'import-state') {
