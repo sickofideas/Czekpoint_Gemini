@@ -21,30 +21,183 @@ export function getLastAutoPlacesStatus() {
 const OVERPASS_ENDPOINTS = [
   'https://overpass-api.de/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
+  'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
 ];
+
+/**
+ * Definice vizuálních kategorií bodů zájmu s unikátním tvarem, barvou a českým štítkem.
+ */
+export const POI_VISUAL_CATEGORIES = {
+  castles: {
+    key: 'castles',
+    kind: 'culture',
+    shape: 'shield',
+    shapeLabel: 'Štít',
+    label: 'Hrady, zámky a památky',
+    shortLabel: 'Památka / Hrad',
+    color: '#b91c1c',
+    bgLight: '#fef2f2',
+    borderColor: '#fde047',
+    textColor: '#ffffff',
+  },
+  sacral: {
+    key: 'sacral',
+    kind: 'culture',
+    shape: 'arch',
+    shapeLabel: 'Klenba',
+    label: 'Kapličky, kostely a křížky',
+    shortLabel: 'Kaplička / Křížek',
+    color: '#7e22ce',
+    bgLight: '#faf5ff',
+    borderColor: '#e9d5ff',
+    textColor: '#ffffff',
+  },
+  views: {
+    key: 'views',
+    kind: 'view',
+    shape: 'diamond',
+    shapeLabel: 'Kosočtverec',
+    label: 'Vyhlídky, vrcholy a skály',
+    shortLabel: 'Vyhlídka / Vrchol',
+    color: '#d97706',
+    bgLight: '#fffbeb',
+    borderColor: '#fef08a',
+    textColor: '#ffffff',
+  },
+  water: {
+    key: 'water',
+    kind: 'water',
+    shape: 'droplet',
+    shapeLabel: 'Kapka',
+    label: 'Voda, rybníky a studánky',
+    shortLabel: 'Voda / Studánka',
+    color: '#0284c7',
+    bgLight: '#f0f9ff',
+    borderColor: '#bae6fd',
+    textColor: '#ffffff',
+  },
+  nature: {
+    key: 'nature',
+    kind: 'forest',
+    shape: 'leaf',
+    shapeLabel: 'Lístek',
+    label: 'Příroda, lesy a stromy',
+    shortLabel: 'Příroda / Les',
+    color: '#15803d',
+    bgLight: '#f0fdf4',
+    borderColor: '#bbf7d0',
+    textColor: '#ffffff',
+  },
+  'route-start': {
+    key: 'route-start',
+    kind: 'route-start',
+    shape: 'hexagon',
+    shapeLabel: 'Šestiúhelník',
+    label: 'Začátek trasy / okruh',
+    shortLabel: 'Start trasy',
+    color: '#142f26',
+    bgLight: '#f4fce3',
+    borderColor: '#a3e635',
+    textColor: '#e5f2bc',
+  },
+};
+
+/**
+ * Určí vizuální kategorii (tvar, barvu, ikonu a český popis) pro libovolný bod zájmu.
+ */
+export function resolvePlaceVisualCategory(place) {
+  if (!place) return POI_VISUAL_CATEGORIES.nature;
+  if (place.pointKind === 'route-start' || place.kind === 'route-start') {
+    return POI_VISUAL_CATEGORIES['route-start'];
+  }
+  const rawTitle = String(place.title || '').toLowerCase();
+  // Odstraníme název města „pod třemšínem“, aby např. „Zámek Rožmitál pod Třemšínem“ nebyl považován za horu Třemšín
+  const title = rawTitle.replace(/rožmitál\w*\s+pod\s+třemšínem|pod\s+třemšínem/g, 'rozmital');
+  const subkind = String(place.subkind || '').toLowerCase();
+  const kind = String(place.kind || '').toLowerCase();
+  const cat = String(place.category || '').toLowerCase();
+  const tags = place.tags || {};
+  const hist = String(tags.historic || '').toLowerCase();
+  const amen = String(tags.amenity || '').toLowerCase();
+  const mm = String(tags.man_made || '').toLowerCase();
+
+  // 1. Sakrální památky (kapličky, kostely, křížky, boží muka, kláštery, synagogy)
+  if (
+    subkind === 'sacral' ||
+    cat === 'sacral' ||
+    /^(wayside_chapel|wayside_cross|wayside_shrine)$/.test(hist) ||
+    /^(place_of_worship|monastery)$/.test(amen) ||
+    mm === 'cross' ||
+    mm === 'belfry' ||
+    /kapl|kaplička|kostel|kříž|křížek|boží muka|klášter|synagog|svatá hora|zvonice|hrob\b|hřbitov/.test(title)
+  ) {
+    return POI_VISUAL_CATEGORIES.sacral;
+  }
+
+  // 2. Hrady, zámky, muzea a historické památky
+  if (
+    subkind === 'heritage' ||
+    kind === 'culture' ||
+    cat === 'castles' ||
+    cat === 'museums' ||
+    /^(castle|ruins|manor|memorial|monument|archaeological_site|fort|tower|milestone)$/.test(hist) ||
+    /hrad\b|hrádek|zámek|zámeček|tvrz|zřícenin|muzeum|skanzen|památník|mohyl|radnic|důl\b|štol|kovárn|mlýn|most\b|socha/.test(title)
+  ) {
+    return POI_VISUAL_CATEGORIES.castles;
+  }
+
+  // 3. Voda, rybníky, studánky a kašny
+  if (
+    kind === 'water' ||
+    cat === 'water' ||
+    /^(spring|water|waterfall)$/.test(String(tags.natural || '')) ||
+    /^(fountain|drinking_water)$/.test(amen) ||
+    /rybník|rybníky|nádrž|přehrad|jezero|studánk|pramen|vodopád|jez\b|tůň|potok|říčk|kašna/.test(title)
+  ) {
+    return POI_VISUAL_CATEGORIES.water;
+  }
+
+  // 4. Vyhlídky, vrcholy a skály
+  if (
+    kind === 'view' ||
+    cat === 'views' ||
+    tags.tourism === 'viewpoint' ||
+    /^(peak|rock|cliff|cave_entrance|stone|saddle)$/.test(String(tags.natural || '')) ||
+    /rozhledn|vyhlídk|vrch\b|vrchol|hora\b|skál|skalní|hřeben|kazateln|kopec|třemšín|štěrbin/.test(title)
+  ) {
+    return POI_VISUAL_CATEGORIES.views;
+  }
+
+  // 5. Příroda, lesy, památné stromy, přístřešky
+  return POI_VISUAL_CATEGORIES.nature;
+}
 
 /**
  * Classifies a Czech place title into Czekpoint category & kind.
  */
 export function classifyCzechPlaceTitle(rawTitle = '') {
-  const t = String(rawTitle || '').toLowerCase();
-  if (/rozhledn|vyhlídk|vrch\b|vrchol|hora\b|hory\b|skál|skalní|hřeben|kazateln|kopec|třemšín|třemošn|tok\b|praha\s*\(|štěrbin/.test(t)) {
-    return { category: 'views', kind: 'view', isTouristPoi: true };
+  const full = String(rawTitle || '').toLowerCase();
+  const t = full.replace(/rožmitál\w*\s+pod\s+třemšínem|pod\s+třemšínem/g, 'rozmital');
+  if (/rozhledn|vyhlídk|vrch\b|vrchol|hora\b|hory\b|skál|skalní|hřeben|kazateln|kopec|třemšín|třemošn|tok\b|praha\s*\(|štěrbin/.test(t) && !/svatá hora/.test(full)) {
+    return { category: 'views', kind: 'view', subkind: 'view', isTouristPoi: true };
   }
   if (/rybník|rybníky|nádrž|přehrad|jezero|studánk|pramen|vodopád|jez\b|tůň|lom\b|potok|říčk|voda/.test(t)) {
-    return { category: 'water', kind: 'water', isTouristPoi: true };
+    return { category: 'water', kind: 'water', subkind: 'water', isTouristPoi: true };
   }
-  if (/hrad\b|hrádek|zámek|zámeček|tvrz|zřícenin|muzeum|skanzen|památník|mohyl|kostel|kapl|klášter|synagog|poutní|svatá hora|důl\b|štol|kovárn|mlýn|most\b|socha|kříž/.test(t)) {
-    return { category: 'castles', kind: 'culture', isTouristPoi: true };
+  if (/kapl|kaplička|kostel|kříž|křížek|boží muka|klášter|synagog|poutní|svatá hora|zvonice/.test(full)) {
+    return { category: 'castles', kind: 'culture', subkind: 'sacral', isTouristPoi: true };
+  }
+  if (/hrad\b|hrádek|zámek|zámeček|tvrz|zřícenin|muzeum|skanzen|památník|mohyl|důl\b|štol|kovárn|mlýn|most\b|socha|radnic/.test(t)) {
+    return { category: 'castles', kind: 'culture', subkind: 'heritage', isTouristPoi: true };
   }
   if (/přírodní|rezervac|památk|lesopark|park\b|alej|stezk|údolí|les\b|bor\b|strom|lípa|dub\b|buk\b|obora|bažantnic|louk|stráň|drkolnov/.test(t)) {
-    return { category: 'nature', kind: 'forest', isTouristPoi: true };
+    return { category: 'nature', kind: 'forest', subkind: 'nature', isTouristPoi: true };
   }
   // Filter out non-tourist administrative or transport articles
-  if (/^(okres|kraj|správní obvod|železniční trať|silnice|dálnice|seznam|bitva|volby|fc |fk |tj |sk )/.test(t)) {
-    return { category: 'nature', kind: 'forest', isTouristPoi: false };
+  if (/^(okres|kraj|správní obvod|železniční trať|silnice|dálnice|seznam|bitva|volby|fc |fk |tj |sk )/.test(full)) {
+    return { category: 'nature', kind: 'forest', subkind: 'nature', isTouristPoi: false };
   }
-  return { category: 'nature', kind: 'forest', isTouristPoi: true };
+  return { category: 'nature', kind: 'forest', subkind: 'nature', isTouristPoi: true };
 }
 
 /**
@@ -66,12 +219,12 @@ export async function fetchPlacesFromWikipediaGeo(
     const lng = Number(centerPos.lng).toFixed(4);
     const url =
       `https://cs.wikipedia.org/w/api.php?action=query` +
-      `&list=geosearch&gscoord=${lat}%7C${lng}&gsradius=${safeRadius}&gslimit=45` +
-      `&generator=geosearch&ggscoord=${lat}%7C${lng}&ggsradius=${safeRadius}&ggslimit=45` +
+      `&list=geosearch&gscoord=${lat}%7C${lng}&gsradius=${safeRadius}&gslimit=80` +
+      `&generator=geosearch&ggscoord=${lat}%7C${lng}&ggsradius=${safeRadius}&ggslimit=80` +
       `&prop=pageimages&piprop=name|thumbnail&pithumbsize=520&format=json&origin=*`;
 
     const timer = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    const timeoutId = timer ? setTimeout(() => timer.abort(), 6500) : null;
+    const timeoutId = timer ? setTimeout(() => timer.abort(), 4500) : null;
     try {
       const res = await fetchImpl(url, { signal: timer ? timer.signal : signal });
       if (!res || !res.ok) return null;
@@ -94,6 +247,7 @@ export async function fetchPlacesFromWikipediaGeo(
             lng: Number(item.lon),
             category: cls.category,
             kind: cls.kind,
+            subkind: cls.subkind || null,
             pointKind: 'place',
             collectible: true,
             access: { stroller: 'unknown' },
@@ -264,7 +418,7 @@ export function setCachedGridTile(gridKey, places, storage = typeof localStorage
     const fullKey = GRID_CACHE_KEY_PREFIX + gridKey;
     const payload = JSON.stringify({
       cachedAt: Date.now(),
-      places: places.slice(0, 180),
+      places: places.slice(0, 260),
     });
     storage.setItem(fullKey, payload);
 
@@ -290,27 +444,137 @@ export function setCachedGridTile(gridKey, places, storage = typeof localStorage
 }
 
 /**
- * ZADÁNÍ #11 (Bod 2.2): Rozšířený Overpass dotaz s timeoutem 8000 ms a limitem 180 bodů.
- * Načítá kompletní síť skutečných bodů zájmu ve městech, vesnicích i přírodě bez vymýšlení falešných dat.
+ * Rychlé a bohaté načtení bodů zájmu z Overpass API:
+ * - Používá rychlé `node` a `way` dotazy (bez pomalých `relation`), timeout 6 s a limit 260 bodů.
+ * - Paralelně osloví dostupné Overpass mirrory (`Promise.any`) s timeoutem 4800 ms, takže pomalý primární server nikdy nezdržuje načítání.
  */
 async function fetchFromOverpassBbox(bbox, config = {}, signal = null, fetchImpl = null) {
   if (!fetchImpl) return [];
-  const query = `[out:json][timeout:12];(
-    nwr(${bbox})[tourism~"^(viewpoint|museum|attraction|picnic_site|artwork|gallery|theme_park|zoo|information)$"];
-    nwr(${bbox})[historic~"^(castle|ruins|manor|memorial|monument|wayside_chapel|wayside_cross|wayside_shrine|archaeological_site|fort|tower|milestone)$"];
-    nwr(${bbox})[natural~"^(peak|spring|rock|cliff|cave_entrance|stone|tree)$"];
-    nwr(${bbox})[amenity~"^(place_of_worship|shelter|fountain|drinking_water|monastery)$"];
-    nwr(${bbox})[man_made~"^(tower|watermill|windmill|mineshaft|adit|belfry|cross)$"];
-    nwr(${bbox})[leisure~"^(park|nature_reserve|garden)$"];
-  );out center 180;`;
+  const query = `[out:json][timeout:6];(
+    node(${bbox})[tourism~"^(viewpoint|museum|attraction|picnic_site|artwork|gallery|information|camp_site|alpine_hut|wilderness_hut)$"];
+    way(${bbox})[tourism~"^(viewpoint|museum|attraction|picnic_site|artwork|gallery)$"];
+    node(${bbox})[historic~"^(castle|ruins|manor|memorial|monument|wayside_chapel|wayside_cross|wayside_shrine|archaeological_site|fort|tower|milestone|boundary_stone|bunker|tomb)$"];
+    way(${bbox})[historic~"^(castle|ruins|manor|memorial|monument|wayside_chapel|archaeological_site|fort|tower)$"];
+    node(${bbox})[natural~"^(peak|spring|rock|cliff|cave_entrance|stone|tree|saddle|waterfall)$"];
+    node(${bbox})[amenity~"^(place_of_worship|shelter|fountain|drinking_water|monastery|hunting_stand)$"];
+    way(${bbox})[amenity~"^(place_of_worship|shelter|monastery)$"];
+    node(${bbox})[man_made~"^(tower|watermill|windmill|mineshaft|adit|belfry|cross|obelisk|survey_point)$"];
+    node(${bbox})[waterway~"^(waterfall|weir|dam)$"];
+    way(${bbox})[leisure~"^(park|nature_reserve|garden)$"];
+  );out center 260;`;
 
   const endpoints = config?.overpassEndpoint
     ? [config.overpassEndpoint, ...OVERPASS_ENDPOINTS.filter(u => u !== config.overpassEndpoint)]
     : OVERPASS_ENDPOINTS;
 
-  for (const endpoint of endpoints) {
+  const parseElements = (elements) => {
+    return elements
+      .filter(el => {
+        if (!['node', 'way', 'relation'].includes(el.type) || !el.tags) return false;
+        if (['private', 'no'].includes(el.tags?.access)) return false;
+        if (el.tags.tourism === 'information') {
+          const info = el.tags.information;
+          if (info === 'guidepost') return Boolean(el.tags.name);
+          if (info === 'board' || info === 'map') return true;
+          return false;
+        }
+        if (el.tags.natural === 'tree') {
+          return Boolean(el.tags.name || el.tags.denotation === 'natural_monument' || el.tags.monument === 'yes');
+        }
+        return true;
+      })
+      .map(el => {
+        const lat = el.lat ?? el.center?.lat;
+        const lng = el.lon ?? el.center?.lon;
+        const rawName = el.tags?.name?.trim();
+        if (!rawName && el.tags?.natural === 'water') return null;
+
+        let title = rawName;
+        if (!title) {
+          if (el.tags?.tourism === 'viewpoint') title = 'Vyhlídka';
+          else if (el.tags?.historic === 'castle') title = 'Hrad či zámek';
+          else if (el.tags?.historic === 'ruins') title = 'Zřícenina';
+          else if (el.tags?.historic === 'wayside_chapel') title = 'Výklenková kaplička';
+          else if (el.tags?.historic === 'wayside_cross' || el.tags?.man_made === 'cross') title = 'Křížek u cesty';
+          else if (el.tags?.historic === 'wayside_shrine') title = 'Boží muka';
+          else if (el.tags?.historic === 'memorial' || el.tags?.historic === 'monument') title = 'Památník';
+          else if (el.tags?.historic === 'boundary_stone' || el.tags?.historic === 'milestone') title = 'Historický mezník';
+          else if (el.tags?.natural === 'spring') title = 'Studánka';
+          else if (el.tags?.natural === 'peak') title = 'Vrchol';
+          else if (el.tags?.natural === 'rock' || el.tags?.natural === 'cliff' || el.tags?.natural === 'stone') title = 'Skalní útvar';
+          else if (el.tags?.natural === 'cave_entrance') title = 'Jeskyně / Štola';
+          else if (el.tags?.natural === 'waterfall' || el.tags?.waterway === 'waterfall') title = 'Vodopád / Kaskáda';
+          else if (el.tags?.waterway === 'weir' || el.tags?.waterway === 'dam') title = 'Jez / Hráz';
+          else if (el.tags?.amenity === 'place_of_worship') title = 'Kostel / Kaple';
+          else if (el.tags?.amenity === 'fountain') title = 'Kašna';
+          else if (el.tags?.amenity === 'drinking_water') title = 'Pítko / Pramen';
+          else if (el.tags?.tourism === 'information' && el.tags?.information === 'board') title = 'Naučná tabule';
+          else if (el.tags?.tourism === 'information' && el.tags?.information === 'map') title = 'Turistická mapa';
+          else if (el.tags?.natural === 'tree') title = 'Památný strom';
+          else if (el.tags?.tourism === 'picnic_site') title = 'Odpočinkové místo';
+          else if (el.tags?.amenity === 'shelter') title = 'Turistický přístřešek';
+          else if (el.tags?.amenity === 'hunting_stand') title = 'Lesní posed s výhledem';
+          else if (el.tags?.man_made === 'belfry') title = 'Zvonička';
+          else if (el.tags?.man_made === 'watermill') title = 'Vodní mlýn';
+          else if (el.tags?.man_made === 'mineshaft' || el.tags?.man_made === 'adit') title = 'Historické důlní dílo';
+          else title = 'Zajímavost v okolí';
+        }
+
+        let category = 'nature';
+        let kind = 'forest';
+        let subkind = 'nature';
+        const hist = el.tags?.historic || '';
+        const tour = el.tags?.tourism || '';
+        const nat = el.tags?.natural || '';
+        const amen = el.tags?.amenity || '';
+        const mm = el.tags?.man_made || '';
+        const ww = el.tags?.waterway || '';
+        const leis = el.tags?.leisure || '';
+
+        if (/^(wayside_chapel|wayside_cross|wayside_shrine)$/.test(hist) || /^(place_of_worship|monastery)$/.test(amen) || /^(belfry|cross)$/.test(mm)) {
+          category = 'castles';
+          kind = 'culture';
+          subkind = 'sacral';
+        } else if (/^(castle|ruins|manor|memorial|monument|archaeological_site|fort|tower|milestone|boundary_stone|bunker|tomb)$/.test(hist) || tour === 'museum' || tour === 'gallery' || /^(watermill|windmill|mineshaft|adit|obelisk)$/.test(mm)) {
+          category = 'castles';
+          kind = 'culture';
+          subkind = 'heritage';
+        } else if (tour === 'viewpoint' || /^(peak|rock|cliff|cave_entrance|stone|saddle)$/.test(nat) || (mm === 'tower' && !tour) || mm === 'survey_point') {
+          category = 'views';
+          kind = 'view';
+          subkind = 'view';
+        } else if (/^(spring|water|waterfall)$/.test(nat) || /^(fountain|drinking_water)$/.test(amen) || /^(waterfall|weir|dam)$/.test(ww)) {
+          category = 'water';
+          kind = 'water';
+          subkind = 'water';
+        } else if (/^(park|nature_reserve|garden)$/.test(leis) || tour === 'picnic_site' || amen === 'shelter' || amen === 'hunting_stand') {
+          category = 'nature';
+          kind = 'forest';
+          subkind = 'nature';
+        }
+
+        return {
+          id: `osm:${el.type}:${el.id}`,
+          title,
+          lat,
+          lng,
+          category,
+          kind,
+          subkind,
+          pointKind: 'place',
+          collectible: true,
+          access: { stroller: el.tags?.wheelchair === 'yes' ? 'yes' : 'unknown' },
+          surface: el.tags?.surface || null,
+          tags: el.tags,
+          url: `https://www.openstreetmap.org/${el.type}/${el.id}`,
+        };
+      })
+      .filter(p => p && Number.isFinite(p.lat) && Number.isFinite(p.lng));
+  };
+
+  const queryEndpoint = async (endpoint) => {
     const timer = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    const timeoutId = timer ? setTimeout(() => timer.abort(), 8000) : null;
+    const timeoutId = timer ? setTimeout(() => timer.abort(), 4800) : null;
     try {
       const response = await fetchImpl(endpoint, {
         method: 'POST',
@@ -318,98 +582,31 @@ async function fetchFromOverpassBbox(bbox, config = {}, signal = null, fetchImpl
         body: new URLSearchParams({ data: query }),
         signal: timer ? timer.signal : signal,
       });
-      if (!response || !response.ok) continue;
+      if (!response || !response.ok) {
+        throw new Error(`HTTP ${response?.status || 0}`);
+      }
       const data = await response.json();
-      if (!Array.isArray(data?.elements)) continue;
-
-      return data.elements
-        .filter(el => {
-          if (!['node', 'way', 'relation'].includes(el.type) || !el.tags) return false;
-          if (['private', 'no'].includes(el.tags?.access)) return false;
-          // ZADÁNÍ #11: U tourism=information bereme rozcestníky s názvem a naučné tabule
-          if (el.tags.tourism === 'information') {
-            const info = el.tags.information;
-            if (info === 'guidepost') return Boolean(el.tags.name);
-            if (info === 'board' || info === 'map') return true;
-            return false;
-          }
-          // U natural=tree bereme stromy s názvem nebo památné stromy (denotation=natural_monument)
-          if (el.tags.natural === 'tree') {
-            return Boolean(el.tags.name || el.tags.denotation === 'natural_monument' || el.tags.monument === 'yes');
-          }
-          return true;
-        })
-        .map(el => {
-          const lat = el.lat ?? el.center?.lat;
-          const lng = el.lon ?? el.center?.lon;
-          const rawName = el.tags?.name?.trim();
-          if (!rawName && el.tags?.natural === 'water') return null;
-
-          let title = rawName;
-          if (!title) {
-            if (el.tags?.tourism === 'viewpoint') title = 'Vyhlídka';
-            else if (el.tags?.historic === 'castle') title = 'Hrad či zámek';
-            else if (el.tags?.historic === 'ruins') title = 'Zřícenina';
-            else if (el.tags?.historic === 'wayside_chapel') title = 'Výklenková kaplička';
-            else if (el.tags?.historic === 'wayside_cross') title = 'Křížek u cesty';
-            else if (el.tags?.historic === 'wayside_shrine') title = 'Boží muka';
-            else if (el.tags?.natural === 'spring') title = 'Studánka';
-            else if (el.tags?.natural === 'rock' || el.tags?.natural === 'cliff') title = 'Skalní útvar';
-            else if (el.tags?.amenity === 'place_of_worship') title = 'Kostel / Kaple';
-            else if (el.tags?.amenity === 'fountain') title = 'Kašna';
-            else if (el.tags?.tourism === 'information' && el.tags?.information === 'board') title = 'Naučná tabule';
-            else if (el.tags?.natural === 'tree') title = 'Památný strom';
-            else if (el.tags?.tourism === 'picnic_site') title = 'Odpočinkové místo';
-            else if (el.tags?.amenity === 'shelter') title = 'Turistický přístřešek';
-            else title = 'Zajímavost v okolí';
-          }
-
-          let category = 'nature';
-          let kind = 'forest';
-          const hist = el.tags?.historic || '';
-          const tour = el.tags?.tourism || '';
-          const nat = el.tags?.natural || '';
-          const amen = el.tags?.amenity || '';
-          const mm = el.tags?.man_made || '';
-          const leis = el.tags?.leisure || '';
-
-          if (/^(castle|ruins|manor|memorial|monument|wayside_chapel|wayside_cross|wayside_shrine|archaeological_site|fort|tower|milestone)$/.test(hist) || tour === 'museum' || tour === 'gallery' || /^(place_of_worship|monastery)$/.test(amen) || /^(watermill|windmill|mineshaft|adit|belfry|cross)$/.test(mm)) {
-            category = 'castles';
-            kind = 'culture';
-          } else if (tour === 'viewpoint' || /^(peak|rock|cliff|cave_entrance|stone)$/.test(nat) || (mm === 'tower' && !tour)) {
-            category = 'views';
-            kind = 'view';
-          } else if (/^(spring|water)$/.test(nat) || /^(fountain|drinking_water)$/.test(amen)) {
-            category = 'water';
-            kind = 'water';
-          } else if (/^(park|nature_reserve|garden)$/.test(leis) || tour === 'picnic_site' || amen === 'shelter') {
-            category = 'nature';
-            kind = 'forest';
-          }
-
-          return {
-            id: `osm:${el.type}:${el.id}`,
-            title,
-            lat,
-            lng,
-            category,
-            kind,
-            pointKind: 'place',
-            collectible: true,
-            access: { stroller: el.tags?.wheelchair === 'yes' ? 'yes' : 'unknown' },
-            surface: el.tags?.surface || null,
-            tags: el.tags,
-            url: `https://www.openstreetmap.org/${el.type}/${el.id}`,
-          };
-        })
-        .filter(p => p && Number.isFinite(p.lat) && Number.isFinite(p.lng));
-    } catch {
-      // try next mirror
+      if (!Array.isArray(data?.elements)) {
+        throw new Error('Invalid Overpass payload');
+      }
+      return parseElements(data.elements);
     } finally {
       if (timeoutId) clearTimeout(timeoutId);
     }
+  };
+
+  try {
+    // Paralelní závod Overpass serverů — vyhrává nejrychlejší odpověď
+    return await Promise.any(endpoints.slice(0, 2).map(ep => queryEndpoint(ep)));
+  } catch {
+    // Záložní pokus na třetí mirror, pokud první dva selhaly
+    if (endpoints[2]) {
+      try {
+        return await queryEndpoint(endpoints[2]);
+      } catch {}
+    }
+    return null;
   }
-  return null;
 }
 
 /**
@@ -422,9 +619,10 @@ export function ensureRichLocalCoverage(places) {
 
 /**
  * Loads places for a ~10km area around centerPos anywhere in the Czech Republic:
- * 1. Immediately includes built-in curated places within 12 km.
+ * 1. Immediately includes built-in curated places within radiusM.
  * 2. Checks localStorage cache for grid tile (unless options.forceRefresh is true).
- * 3. Fetches live POIs from Overpass API (with fallback mirror) AND Czech Wikipedia GeoSearch in parallel.
+ * 3. Fetches live POIs from Overpass API (parallel mirror race) AND Czech Wikipedia GeoSearch in parallel,
+ *    with progressive rendering via options.onPartialPlaces.
  * Při výpadku sítě NIKDY nevymýšlí falešná místa, ponechá ověřená data.
  */
 export async function loadAutoPlacesForArea(
@@ -449,6 +647,7 @@ export async function loadAutoPlacesForArea(
 
   const radiusM = Number(effectiveOptions?.radiusM) > 0 ? Number(effectiveOptions.radiusM) : 11000;
   const forceRefresh = Boolean(effectiveOptions?.forceRefresh);
+  const onPartialPlaces = typeof effectiveOptions?.onPartialPlaces === 'function' ? effectiveOptions.onPartialPlaces : null;
 
   // 1. Built-in places within radiusM
   const builtIn = (routes || [])
@@ -459,7 +658,8 @@ export async function loadAutoPlacesForArea(
       lat: r.location.lat,
       lng: r.location.lng,
       kind: r.kind || 'forest',
-      category: r.kind === 'culture' ? 'castles' : r.kind === 'view' ? 'views' : r.kind === 'water' ? 'water' : 'nature',
+      subkind: r.subkind || null,
+      category: r.category || (r.kind === 'culture' ? 'castles' : r.kind === 'view' ? 'views' : r.kind === 'water' ? 'water' : 'nature'),
       pointKind: 'place',
       collectible: r.collectible !== false,
       access: r.access || {},
@@ -479,6 +679,14 @@ export async function loadAutoPlacesForArea(
     return combined.sort((a, b) => scoreAndRankPlace(b) - scoreAndRankPlace(a));
   }
 
+  // Okamžité předání lokálních bodů (0 ms), aby uživatel nečekal na síť
+  if (onPartialPlaces && builtIn.length > 0) {
+    try {
+      const immediateList = deduplicatePlaces([...builtIn, ...(cachedTile || [])]).sort((a, b) => scoreAndRankPlace(b) - scoreAndRankPlace(a));
+      onPartialPlaces(immediateList);
+    } catch {}
+  }
+
   if (!fetchImpl) {
     lastAutoPlacesStatus = {
       failed: true,
@@ -491,10 +699,10 @@ export async function loadAutoPlacesForArea(
     return fallbackValid;
   }
 
-  // Per-tile rate limit (10s unless forceRefresh)
+  // Per-tile rate limit (4s unless forceRefresh)
   const now = Date.now();
   const lastTileReq = lastTileRequestTime.get(gridKey) || 0;
-  if (!forceRefresh && now - lastTileReq < 10000 && builtIn.length >= 4) {
+  if (!forceRefresh && now - lastTileReq < 4000 && builtIn.length >= 12) {
     return builtIn.sort((a, b) => scoreAndRankPlace(b) - scoreAndRankPlace(a));
   }
   lastTileRequestTime.set(gridKey, now);
@@ -508,9 +716,19 @@ export async function loadAutoPlacesForArea(
     const eLng = Number((wLng + 0.1).toFixed(3));
     const bbox = `${sLat},${wLng},${nLat},${eLng}`;
 
+    const wikiPromise = fetchPlacesFromWikipediaGeo(centerPos, Math.min(10000, radiusM), signal, fetchImpl).then(res => {
+      if (onPartialPlaces && Array.isArray(res) && res.length > 0) {
+        try {
+          const fastCombined = deduplicatePlaces([...builtIn, ...res]).sort((a, b) => scoreAndRankPlace(b) - scoreAndRankPlace(a));
+          onPartialPlaces(fastCombined);
+        } catch {}
+      }
+      return res;
+    });
+
     const [overpassRes, wikiRes] = await Promise.allSettled([
       fetchFromOverpassBbox(bbox, config, signal, fetchImpl),
-      fetchPlacesFromWikipediaGeo(centerPos, Math.min(10000, radiusM), signal, fetchImpl),
+      wikiPromise,
     ]);
 
     const overpassOk = overpassRes.status === 'fulfilled' && Array.isArray(overpassRes.value);

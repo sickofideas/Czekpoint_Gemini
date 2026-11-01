@@ -157,6 +157,7 @@ import {
   toMapLibreLngLat,
   getActiveWalkStopsStatus,
   formatBackgroundGpsStatus,
+  renderCategoryMarkerGlyph,
 } from './walk.js';
 import {
   config as appConfig,
@@ -181,7 +182,15 @@ import {
   GpsSimulator,
 } from './gps-simulator.js';
 import { routes as PILOT_ROUTES } from './data.js';
-import { classifyCzechPlaceTitle, loadAutoPlacesForArea, deduplicatePlaces, ensureRichLocalCoverage, getLastAutoPlacesStatus } from './auto-places.js';
+import {
+  classifyCzechPlaceTitle,
+  loadAutoPlacesForArea,
+  deduplicatePlaces,
+  ensureRichLocalCoverage,
+  getLastAutoPlacesStatus,
+  POI_VISUAL_CATEGORIES,
+  resolvePlaceVisualCategory,
+} from './auto-places.js';
 import {
   isCommerciallyUsableLicense,
   getFallbackBitmapUrl,
@@ -3124,7 +3133,111 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
       (globalThis as any).window = prevWin;
     }
   });
+
+  it('Bohatá hustota bodů zájmu v okolí, rychlé paralelní/progresivní načítání a rozlišení značek tvarem a barvou podle kategorie', async () => {
+    const walkJs = fs.readFileSync('src/walk.js', 'utf-8');
+    const walkCss = fs.readFileSync('assets/walk.css', 'utf-8');
+
+    // 1. Ověření vizuálních kategorií (tvar + barva + ikona) pro všechny typy bodů zájmu
+    const castleCat = resolvePlaceVisualCategory({ title: 'Zámek Rožmitál pod Třemšínem', kind: 'culture', category: 'castles' });
+    assert.equal(castleCat.key, 'castles');
+    assert.equal(castleCat.shape, 'shield');
+    assert.equal(castleCat.color, '#b91c1c');
+
+    const sacralCat = resolvePlaceVisualCategory({ title: 'Kaplička sv. Jana Nepomuckého', kind: 'culture', subkind: 'sacral' });
+    assert.equal(sacralCat.key, 'sacral');
+    assert.equal(sacralCat.shape, 'arch');
+    assert.equal(sacralCat.color, '#7e22ce');
+
+    const viewCat = resolvePlaceVisualCategory({ title: 'Voltušská vyhlídka', kind: 'view', category: 'views' });
+    assert.equal(viewCat.key, 'views');
+    assert.equal(viewCat.shape, 'diamond');
+    assert.equal(viewCat.color, '#d97706');
+
+    const waterCat = resolvePlaceVisualCategory({ title: 'Králova studánka pod Štěrbinou', kind: 'water', category: 'water' });
+    assert.equal(waterCat.key, 'water');
+    assert.equal(waterCat.shape, 'droplet');
+    assert.equal(waterCat.color, '#0284c7');
+
+    const natureCat = resolvePlaceVisualCategory({ title: 'Rybova památná lípa', kind: 'forest', category: 'nature' });
+    assert.equal(natureCat.key, 'nature');
+    assert.equal(natureCat.shape, 'leaf');
+    assert.equal(natureCat.color, '#15803d');
+
+    const startCat = resolvePlaceVisualCategory({ title: 'Třemšínský okruh', pointKind: 'route-start' });
+    assert.equal(startCat.key, 'route-start');
+    assert.equal(startCat.shape, 'hexagon');
+
+    // Ověření SVG ikon pro všechny kategorie včetně sakrálních památek
+    for (const k of ['water', 'forest', 'view', 'culture', 'sacral', 'route-start']) {
+      const svg = renderCategoryMarkerGlyph(k, 'default');
+      assert.ok(svg.includes('<svg') && svg.includes('marker-glyph-svg'), `Kategorie ${k} má vlastní vektorové SVG`);
+    }
+
+    // 2. Ověření bohatého lokálního pokrytí v Rožmitále a okolí (ihned v 0 ms, bez čekání na síť)
+    const rozmitalCenter = { lat: 49.6014, lng: 13.8644 };
+    const partialSnapshots: number[] = [];
+    const mockFastFetch = async (url: string) => {
+      if (String(url).includes('wikipedia.org')) {
+        return {
+          ok: true,
+          json: async () => ({
+            query: {
+              geosearch: [
+                { pageid: 501, title: 'Kostel Povýšení svatého Kříže (Starý Rožmitál)', lat: 49.606, lon: 13.844 },
+                { pageid: 502, title: 'Podzámecký rybník (Rožmitál pod Třemšínem)', lat: 49.604, lon: 13.858 },
+              ],
+            },
+          }),
+        };
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          elements: [
+            { type: 'node', id: 901, lat: 49.602, lon: 13.861, tags: { historic: 'wayside_cross', name: 'Kamenný kříž u zámku' } },
+            { type: 'node', id: 902, lat: 49.599, lon: 13.852, tags: { natural: 'spring', name: 'Lesní studánka u aleje' } },
+          ],
+        }),
+      };
+    };
+
+    const loadedPlaces = await loadAutoPlacesForArea(
+      rozmitalCenter,
+      PILOT_ROUTES as any,
+      {},
+      null,
+      mockFastFetch as any,
+      null,
+      {
+        radiusM: 11000,
+        forceRefresh: true,
+        onPartialPlaces: (list: any[]) => partialSnapshots.push(list.length),
+      }
+    );
+
+    assert.ok(partialSnapshots.length >= 1 && partialSnapshots[0] >= 20, `Progresivní callback onPartialPlaces musí ihned předat alespoň 20 lokálních míst (předáno: ${partialSnapshots[0]})`);
+    assert.ok(loadedPlaces.length >= 24, `V okolí Rožmitálu je načteno alespoň 24 reálných bodů zájmu (načteno: ${loadedPlaces.length})`);
+
+    // Ověříme zastoupení všech 5 hlavních vizuálních kategorií v okolí Rožmitálu
+    const presentCats = new Set(loadedPlaces.map((p: any) => resolvePlaceVisualCategory(p).key));
+    for (const expectedKey of ['castles', 'sacral', 'views', 'water', 'nature']) {
+      assert.equal(presentCats.has(expectedKey), true, `V okolí je zastoupena kategorie ${expectedKey}`);
+    }
+
+    // 3. Ověření CSS tvarů a barev v assets/walk.css a šablony v src/walk.js
+    assert.ok(walkCss.includes('.czekpoint-marker-badge.shape-shield'), 'CSS obsahuje tvar štítu (.shape-shield)');
+    assert.ok(walkCss.includes('.czekpoint-marker-badge.shape-arch'), 'CSS obsahuje tvar gotické klenby (.shape-arch)');
+    assert.ok(walkCss.includes('.czekpoint-marker-badge.shape-diamond'), 'CSS obsahuje tvar kosočtverce (.shape-diamond)');
+    assert.ok(walkCss.includes('.czekpoint-marker-badge.shape-droplet'), 'CSS obsahuje tvar kapky (.shape-droplet)');
+    assert.ok(walkCss.includes('.czekpoint-marker-badge.shape-leaf'), 'CSS obsahuje tvar lístku (.shape-leaf)');
+    assert.ok(walkCss.includes('.poi-category-legend'), 'CSS obsahuje styly pro legendu kategorií .poi-category-legend');
+    assert.ok(walkJs.includes('id="poi-category-legend"'), 'src/walk.js vykresluje interaktivní legendu #poi-category-legend');
+    assert.ok(walkJs.includes('data-visual-cat='), 'src/walk.js nastavuje atribut data-visual-cat na mapových značkách i kartách');
+    assert.ok(walkJs.includes('data-shape='), 'src/walk.js nastavuje atribut data-shape na mapových značkách i kartách');
+  });
 });
+
 
 
 

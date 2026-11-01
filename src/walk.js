@@ -72,7 +72,12 @@ import {
   normalizeWalkSegments,
 } from './postcards.js';
 import { fetchNearby } from './nearby.js';
-import { loadAutoPlacesForArea, getLastAutoPlacesStatus } from './auto-places.js';
+import {
+  loadAutoPlacesForArea,
+  getLastAutoPlacesStatus,
+  POI_VISUAL_CATEGORIES,
+  resolvePlaceVisualCategory,
+} from './auto-places.js';
 import {
   getFallbackBitmapUrl,
   getCachedPlacePhoto,
@@ -280,21 +285,24 @@ export function formatBackgroundGpsStatus(lastFixTimestamp = /** @type {any} */ 
  * Vykreslí jemné vektorové SVG pro vnitřek mapové značky podle kategorie místa.
  * Samotná poloha značky na mapě zůstává výhradně v režii Leafletu; animuje se jen tento vnitřní prvek.
  */
-function renderCategoryMarkerGlyph(kind, state = 'default') {
+export function renderCategoryMarkerGlyph(kind, state = 'default') {
   if (state === 'visited') {
     return `<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" class="marker-glyph-svg"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
   }
   if (kind === 'water') {
     return `<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" class="marker-glyph-svg"><path class="glyph-wave-1" d="M3 10.5c2.2-1.8 4.5-1.8 6.7 0s4.5 1.8 6.7 0 3.4-1.4 4.6-.4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path class="glyph-wave-2" d="M3 15.5c2.2-1.8 4.5-1.8 6.7 0s4.5 1.8 6.7 0 3.4-1.4 4.6-.4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>`;
   }
-  if (kind === 'forest') {
+  if (kind === 'forest' || kind === 'nature') {
     return `<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" class="marker-glyph-svg"><g class="glyph-tree-crown"><polygon points="12,3 6,11 9.5,11 5.5,17 18.5,17 14.5,11 18,11" fill="currentColor"/></g><rect x="10.8" y="17" width="2.4" height="4" rx="1" fill="currentColor"/></svg>`;
   }
-  if (kind === 'view') {
+  if (kind === 'view' || kind === 'views') {
     return `<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" class="marker-glyph-svg"><path d="M2.5 18.5L9.5 7.5l4.2 6.2 2.8-4.2 5 9H2.5z" fill="currentColor"/><circle class="glyph-sun-glint" cx="17.5" cy="6" r="2.2" fill="currentColor"/></svg>`;
   }
-  if (kind === 'culture') {
-    return `<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" class="marker-glyph-svg"><path d="M5 19V8l3-3 4 3 4-3 3 3v11H5zm5-5v5h4v-5h-4z" fill="currentColor"/><circle class="glyph-sun-glint" cx="12" cy="4" r="1.6" fill="currentColor"/></svg>`;
+  if (kind === 'sacral') {
+    return `<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" class="marker-glyph-svg"><path d="M12 2v5M9.5 4.5h5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path d="M6 20V11l6-4.5L18 11v9H6zm4.2-5v5h3.6v-5a1.8 1.8 0 0 0-3.6 0z" fill="currentColor"/></svg>`;
+  }
+  if (kind === 'culture' || kind === 'castles') {
+    return `<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" class="marker-glyph-svg"><path d="M4 19V7h3v2h2V7h6v2h2V7h3v12H4zm6-5v5h4v-5a2 2 0 0 0-4 0z" fill="currentColor"/></svg>`;
   }
   if (kind === 'route-start') {
     return `<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" class="marker-glyph-svg"><line x1="6" y1="4" x2="6" y2="20" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path class="glyph-flag-cloth" d="M6 5h11l-2.4 3.8L17 12.5H6V5z" fill="currentColor"/></svg>`;
@@ -1796,11 +1804,13 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
           <div id="personal-memories-list" class="personal-memories-list" style="margin-top:8px"></div>
         </div>
 
-        <!-- 4. Místa v okolí seřazená striktně od nejbližšího s fotkou (88x72 px) -->
+        <!-- 4. Místa v okolí seřazená striktně od nejbližšího s fotkou (88x72 px) a legendou tvarů a barev -->
         <div class="planner-box" style="margin-top:4px">
           <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
             <span class="eyebrow">📍 Zajímavá místa v okolí (seřazeno od nejbližšího)</span>
+            <span id="nearby-places-count-badge" class="poi-total-count-badge"></span>
           </div>
+          <div id="poi-category-legend" class="poi-category-legend" role="group" aria-label="Rozlišení bodů zájmu podle tvaru a barvy kategorie"></div>
           <div id="nearby-status" role="status"></div>
           <p id="nearby-origin" class="small-note"></p>
           <div id="walk-places"></div>
@@ -4399,7 +4409,8 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
 
     // 1. Mapové značky:
     //    Zobrazíme všechny body, které leží ve viditelném výřezu mapy, jsou v naplánované trase,
-    //    nebo jsou do 8 km od uživatele (pokud je poloha známá).
+    //    nebo jsou do 9 km od uživatele (pokud je poloha známá).
+    const activeVisualCat = plannedRoute.visualCategoryFilter || 'all';
     const mapPlaces = all.filter(p => {
       if (plannedPlaceIds.has(p.id)) return true;
       if (
@@ -4409,19 +4420,25 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       ) {
         return false;
       }
-      if (map && isPointInExpandedMapBounds(p.lat, p.lng, 0.35)) return true;
-      if (normalized && (haversineMeters(normalized, p) ?? Infinity) < 8000) return true;
+      if (activeVisualCat !== 'all') {
+        const vCat = resolvePlaceVisualCategory(p);
+        if (vCat.key !== activeVisualCat) return false;
+      }
+      if (map && isPointInExpandedMapBounds(p.lat, p.lng, 0.42)) return true;
+      if (normalized && (haversineMeters(normalized, p) ?? Infinity) < 9500) return true;
       return false;
     });
 
     // 2. Seznam míst pod mapou (#walk-places):
     //    Striktně seřazený vzestupně podle vzdálenosti (distanceM od nejbližšího po nejvzdálenější)
     const refOrigin = normalized || plannedRoute.origin || viewCenter;
-    const sidebarList = all
+    const allWithDistance = all
       .map(p => {
         const distM = haversineMeters(refOrigin, p) ?? Infinity;
+        const visualCat = resolvePlaceVisualCategory(p);
         return {
           ...p,
+          visualCat,
           distanceM: distM,
           distanceFromUser: distM,
           distanceFromView: haversineMeters(viewCenter, p) ?? Infinity,
@@ -4436,11 +4453,15 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         ) {
           return false;
         }
-        if (map && isPointInExpandedMapBounds(p.lat, p.lng, 0.35)) return true;
+        if (map && isPointInExpandedMapBounds(p.lat, p.lng, 0.42)) return true;
         if (p.distanceM <= 30000) return true;
         return false;
       })
       .sort((a, b) => a.distanceM - b.distanceM);
+
+    const sidebarList = activeVisualCat === 'all'
+      ? allWithDistance
+      : allWithDistance.filter(p => plannedPlaceIds.has(p.id) || p.visualCat?.key === activeVisualCat);
 
     const formatBigDist = (m) => {
       if (!Number.isFinite(m)) return '—';
@@ -4448,15 +4469,52 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       return `${(m / 1000).toFixed(1).replace('.', ',')} km`;
     };
 
+    if (!skipListRebuild && $('poi-category-legend')) {
+      const catCounts = { all: allWithDistance.length, castles: 0, sacral: 0, views: 0, water: 0, nature: 0 };
+      for (const item of allWithDistance) {
+        const k = item.visualCat?.key || 'nature';
+        if (catCounts[k] !== undefined) catCounts[k] += 1;
+      }
+      const legendOrder = ['castles', 'sacral', 'views', 'water', 'nature'];
+      const allActive = activeVisualCat === 'all';
+      const chipsHtml = [
+        `<button type="button" class="poi-legend-chip ${allActive ? 'active' : ''}" data-visual-cat-filter="all" aria-pressed="${allActive ? 'true' : 'false'}">
+          <span class="poi-legend-all-dot">✦</span>
+          <span class="poi-legend-label">Všechny kategorie</span>
+          <span class="poi-legend-count">${catCounts.all}</span>
+        </button>`,
+        ...legendOrder.map(key => {
+          const catDef = POI_VISUAL_CATEGORIES[key];
+          const isAct = activeVisualCat === key;
+          const glyphSvg = renderCategoryMarkerGlyph(key === 'sacral' ? 'sacral' : catDef.kind, 'default');
+          return `<button type="button" class="poi-legend-chip cat-${e(key)} ${isAct ? 'active' : ''}" data-visual-cat-filter="${e(key)}" aria-pressed="${isAct ? 'true' : 'false'}" title="${e(`${catDef.label} (tvar: ${catDef.shapeLabel})`)}">
+            <span class="czekpoint-marker-badge legend-mini-badge cat-${e(key)} shape-${e(catDef.shape)}" data-kind="${e(catDef.kind)}" data-visual-cat="${e(key)}" data-shape="${e(catDef.shape)}">
+              <span class="czekpoint-marker-glyph kind-${e(catDef.kind)}">${glyphSvg}</span>
+            </span>
+            <span class="poi-legend-label">${e(catDef.shortLabel)}</span>
+            <span class="poi-legend-count">${catCounts[key] || 0}</span>
+          </button>`;
+        }),
+      ].join('');
+      $('poi-category-legend').innerHTML = chipsHtml;
+    }
+
+    if ($('nearby-places-count-badge')) {
+      $('nearby-places-count-badge').textContent = `${sidebarList.length} míst v okolí`;
+    }
+
     if (!skipListRebuild && $('walk-places')) {
       const extPhotosOn = appSettings.showExternalPhotos !== false;
-      $('walk-places').innerHTML = sidebarList.slice(0, 18).map(p => {
+      $('walk-places').innerHTML = sidebarList.slice(0, 40).map(p => {
         const visitedToday = isStopVisitedInSession(p);
         const nearbyToday = !visitedToday && nearbyRecordedIds.has(p.id);
         const earlierStamp = !visitedToday && hasLifetimeStamp(p);
         const isRouteStart = p.pointKind === 'route-start';
         const isPlanned = plannedPlaceIds.has(p.id);
         const bigDistStr = formatBigDist(p.distanceM);
+        const visualCat = p.visualCat || resolvePlaceVisualCategory(p);
+        const glyphKey = visualCat.key === 'sacral' ? 'sacral' : visualCat.kind;
+        const miniGlyph = renderCategoryMarkerGlyph(glyphKey, 'default');
         const photoInfo = getPlacePhotoSync(p, { showExternalPhotos: extPhotosOn });
         const photoSourceNote = photoInfo.isRealPhoto
           ? `📸 ${formatPhotoSourceLabel(photoInfo)}`
@@ -4469,9 +4527,9 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
           ? '📍 Potvrzeno podle GPS (z dřívější výpravy)'
           : isRouteStart
           ? '🥾 Začátek trasy'
-          : '📍 Zajímavé místo v okolí';
+          : `📍 ${visualCat.label}`;
 
-        return `<div class="nearby-place" data-distance-m="${Math.round(p.distanceM || 0)}" style="display:flex;gap:12px;align-items:center">
+        return `<div class="nearby-place cat-card-${e(visualCat.key)}" data-distance-m="${Math.round(p.distanceM || 0)}" data-visual-cat="${e(visualCat.key)}" data-shape="${e(visualCat.shape)}" style="display:flex;gap:12px;align-items:center">
           <img
             class="place-card-thumb"
             src="${e(photoInfo.photoUrl)}"
@@ -4485,7 +4543,15 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
               <strong style="font-size:1.02rem">${e(p.title)}</strong>
               <span class="place-distance-big">${e(bigDistStr)}</span>
             </div>
-            <span style="display:block;margin:3px 0;font-size:0.84rem">${e(statusText)}</span>
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:4px 0 2px">
+              <span class="place-cat-pill cat-${e(visualCat.key)}" data-shape="${e(visualCat.shape)}">
+                <span class="czekpoint-marker-badge legend-mini-badge cat-${e(visualCat.key)} shape-${e(visualCat.shape)}" data-kind="${e(visualCat.kind)}" data-visual-cat="${e(visualCat.key)}" data-shape="${e(visualCat.shape)}">
+                  <span class="czekpoint-marker-glyph kind-${e(visualCat.kind)}">${miniGlyph}</span>
+                </span>
+                <span>${e(visualCat.shortLabel)} · ${e(visualCat.shapeLabel)}</span>
+              </span>
+              <span style="font-size:0.82rem;color:#355245">${e(statusText)}</span>
+            </div>
             <small class="small-note" style="display:block;font-size:0.74rem">${e(photoSourceNote)}</small>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px">
               <button type="button" class="button small ${isPlanned ? 'ghost' : 'lime'} toggle-plan-place-btn" data-place-id="${e(p.id)}">
@@ -4497,7 +4563,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
             </div>
           </div>
         </div>`;
-      }).join('') || '<p class="small-note">V této části mapy zatím nejsou žádná místa. Posuň mapu nebo chvíli počkej na automatické načtení.</p>';
+      }).join('') || '<p class="small-note">V této části mapy zatím nejsou žádná místa pro zvolený filtr. Zkus přepnout kategorii na „Všechny kategorie“ nebo posuň mapu.</p>';
     }
 
     if (!map || !maplibregl) return;
@@ -4518,12 +4584,12 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         memoryObj: m,
       }));
 
-    // DÁVKA 2 (P1 Bod 7.2): Při zoom < 14 omezíme počet současně vykreslených DOM značek,
-    // aby nevznikal nečitelný shluk překrývajících se ikon. Plánované body zůstávají vždy.
+    // Při nižším přiblížení mapy zobrazíme bohatou sadu nejzajímavějších a nejbližších bodů,
+    // aby okolí nikdy nepůsobilo prázdně, ale zároveň se značky nepřekrývaly.
     const curZoom = (map && typeof map.getZoom === 'function') ? map.getZoom() : 15;
     let displayMapPlaces = mapPlaces;
     if (curZoom < 14) {
-      const maxNormalPlaces = curZoom < 12 ? 8 : 16;
+      const maxNormalPlaces = curZoom < 11 ? 28 : curZoom < 13 ? 52 : 85;
       const mustHave = [];
       const others = [];
       for (const p of mapPlaces) {
@@ -4618,7 +4684,9 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       const isFirstAppear = !appearedPlaceIds.has(p.id);
       if (isFirstAppear) appearedPlaceIds.add(p.id);
 
-      const categoryKey = isRouteStart ? 'route-start' : (p.kind || 'forest');
+      const visualCat = resolvePlaceVisualCategory(p);
+      const categoryKey = isRouteStart ? 'route-start' : (p.kind || visualCat.kind || 'forest');
+      const glyphKindKey = visualCat.key === 'sacral' ? 'sacral' : categoryKey;
       const tierClass = visited
         ? 'tier-visited'
         : isNextTarget
@@ -4638,7 +4706,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         ? `<span class="czekpoint-marker-order">${stopOrderIdx + 1}</span>`
         : '';
 
-      const glyphHtml = renderCategoryMarkerGlyph(categoryKey, visited ? 'visited' : 'default');
+      const glyphHtml = renderCategoryMarkerGlyph(glyphKindKey, visited ? 'visited' : 'default');
       const extPhotosOn = appSettings.showExternalPhotos !== false;
       const cachedPhoto = extPhotosOn ? getCachedPlacePhoto(p) : null;
       const hasRealPhoto = Boolean(extPhotosOn && cachedPhoto && cachedPhoto.photoUrl);
@@ -4647,13 +4715,13 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
             <span class="czekpoint-marker-photo-wrap">
               <img class="czekpoint-marker-photo-img" src="${e(cachedPhoto.photoUrl)}" alt="" onerror="this.parentElement.hidden=true;if(this.parentElement.nextElementSibling)this.parentElement.nextElementSibling.hidden=false;" />
             </span>
-            <span class="czekpoint-marker-glyph kind-${e(categoryKey)}" hidden>${glyphHtml}</span>
+            <span class="czekpoint-marker-glyph kind-${e(categoryKey)} visual-cat-${e(visualCat.key)}" hidden>${glyphHtml}</span>
           `
-        : `<span class="czekpoint-marker-glyph kind-${e(categoryKey)}">${glyphHtml}</span>`;
+        : `<span class="czekpoint-marker-glyph kind-${e(categoryKey)} visual-cat-${e(visualCat.key)}">${glyphHtml}</span>`;
 
-      const stateSig = `${p.lat},${p.lng}|${tierClass}|${animClass}|${stopOrderIdx}|${hasRealPhoto ? cachedPhoto.photoUrl : 'glyph'}`;
+      const stateSig = `${p.lat},${p.lng}|${visualCat.key}|${visualCat.shape}|${tierClass}|${animClass}|${stopOrderIdx}|${hasRealPhoto ? cachedPhoto.photoUrl : 'glyph'}`;
       const iconHtml = `
-        <span class="czekpoint-marker-badge ${tierClass} ${animClass} ${hasRealPhoto ? 'has-real-photo' : 'has-bitmap-glyph'}" data-kind="${e(categoryKey)}">
+        <span class="czekpoint-marker-badge cat-${e(visualCat.key)} shape-${e(visualCat.shape)} ${tierClass} ${animClass} ${hasRealPhoto ? 'has-real-photo' : 'has-bitmap-glyph'}" data-kind="${e(categoryKey)}" data-visual-cat="${e(visualCat.key)}" data-shape="${e(visualCat.shape)}" title="${e(`${p.title || ''} — ${visualCat.label}`)}">
           ${photoInnerHtml}
           ${orderBadgeHtml}
         </span>
@@ -8810,6 +8878,22 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     if (p1ScanBtn && !opts.silent) p1ScanBtn.classList.add('is-loading');
     const placesTaskId = opts.silent ? null : beginMapTask('⏳ Načítám místa v okolí…');
 
+    // Okamžitě vykreslíme lokální a uložená místa ještě před síťovým dotazem
+    renderPlaces();
+
+    const mergeAndRenderPartial = (partialPlaces) => {
+      if (disposed || !Array.isArray(partialPlaces) || partialPlaces.length === 0) return;
+      const mergedById = new Map();
+      for (const p of partialPlaces) {
+        if (p && p.id) mergedById.set(p.id, p);
+      }
+      for (const p of nearby) {
+        if (p && p.id && !mergedById.has(p.id)) mergedById.set(p.id, p);
+      }
+      nearby = [...mergedById.values()].slice(0, 800);
+      renderPlaces();
+    };
+
     try {
       const autoPlaces = await loadAutoPlacesForArea(
         originPos,
@@ -8818,7 +8902,11 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         aborter.signal,
         fetch,
         null,
-        { radiusM, forceRefresh: Boolean(opts.forceRefresh) }
+        {
+          radiusM,
+          forceRefresh: Boolean(opts.forceRefresh),
+          onPartialPlaces: mergeAndRenderPartial,
+        }
       );
       const loadStatus = getLastAutoPlacesStatus();
       if (!disposed && $('nearby-status')) {
@@ -8829,15 +8917,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         }
       }
       if (!disposed && Array.isArray(autoPlaces) && autoPlaces.length > 0) {
-        const mergedById = new Map();
-        for (const p of autoPlaces) {
-          if (p && p.id) mergedById.set(p.id, p);
-        }
-        for (const p of nearby) {
-          if (p && p.id && !mergedById.has(p.id)) mergedById.set(p.id, p);
-        }
-        nearby = [...mergedById.values()].slice(0, 800);
-        renderPlaces();
+        mergeAndRenderPartial(autoPlaces);
         if (myReqId === autoPlacesReqId && opts.autoPlan && !active && !demo) {
           applyPhase1QuickSelection(Boolean(opts.silent));
           status(`✨ V oblasti „${plannedRoute.origin?.label || 'mapa'}“ nalezeno ${autoPlaces.length} zajímavých míst — trasa byla navržena!`);
@@ -9620,6 +9700,16 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         playTick(stateObj.soundEnabled);
       }
     }
+  });
+
+  // Kliknutí na kategorii v legendě tvarů a barev (#poi-category-legend) filtruje body zájmu
+  $('poi-category-legend')?.addEventListener('click', (ev) => {
+    const chip = ev.target.closest('[data-visual-cat-filter]');
+    if (!chip) return;
+    const val = chip.dataset.visualCatFilter || 'all';
+    plannedRoute.visualCategoryFilter = (plannedRoute.visualCategoryFilter === val && val !== 'all') ? 'all' : val;
+    playTick(stateObj.soundEnabled);
+    renderPlaces();
   });
 
   // Tlačítka v horní liště (#phase1-top-bar): Celá obrazovka, Upravit zastávky, Nastavení, Pauza, Sbalit volby

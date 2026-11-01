@@ -410,8 +410,8 @@
 
 .czekpoint-marker-badge {
   position: relative;
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   display: inline-flex;
   align-items: center;
@@ -420,43 +420,141 @@
   color: #e5f2bc;
   border: 2px solid #ffffff;
   box-shadow: 0 2px 7px rgba(0, 0, 0, 0.38);
-  transition: transform 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease, border-radius 0.18s ease;
   pointer-events: auto;
+}
+
+/* ============================================================================
+   ROZLIŠENÍ BODŮ ZÁJMU TVAREM A BARVOU PODLE KATEGORIE
+   1. Hrady, zámky a památky (cat-castles / shape-shield) — karmínový erb se zlatým lemem
+   2. Kapličky, kostely a křížky (cat-sacral / shape-arch) — purpurová gotická klenba
+   3. Vyhlídky, vrcholy a skály (cat-views / shape-diamond) — jantarový kosočtverec
+   4. Voda, rybníky a studánky (cat-water / shape-droplet) — azurová kapka
+   5. Příroda, lesy a stromy (cat-nature / shape-leaf) — smaragdový lístek
+   6. Začátek trasy / okruh (cat-route-start / shape-hexagon) — tmavě zelený odznak
+   ============================================================================ */
+
+/* 1. Hrady, zámky a památky — Tvar štítu (erb) + královská karmínová */
+.czekpoint-marker-badge.cat-castles,
+.czekpoint-marker-badge[data-visual-cat="castles"] {
+  background: linear-gradient(145deg, #dc2626 0%, #991b1b 100%);
+  color: #fffbeb;
+  border-color: #fde047;
+  box-shadow: 0 2px 8px rgba(153, 27, 27, 0.5);
+}
+.czekpoint-marker-badge.shape-shield,
+.czekpoint-marker-badge[data-shape="shield"] {
+  border-radius: 5px 5px 15px 15px;
+}
+
+/* 2. Kapličky, kostely a křížky — Tvar gotické klenby (oblouk) + fialovo-purpurová */
+.czekpoint-marker-badge.cat-sacral,
+.czekpoint-marker-badge[data-visual-cat="sacral"] {
+  background: linear-gradient(145deg, #9333ea 0%, #6b21a8 100%);
+  color: #faf5ff;
+  border-color: #e9d5ff;
+  box-shadow: 0 2px 8px rgba(107, 33, 168, 0.5);
+}
+.czekpoint-marker-badge.shape-arch,
+.czekpoint-marker-badge[data-shape="arch"] {
+  border-radius: 15px 15px 5px 5px;
+}
+
+/* 3. Vyhlídky, vrcholy a skály — Tvar kosočtverce (diamant) + jantarově zlatooranžová */
+.czekpoint-marker-badge.cat-views,
+.czekpoint-marker-badge[data-visual-cat="views"] {
+  background: linear-gradient(145deg, #f59e0b 0%, #b45309 100%);
+  color: #ffffff;
+  border-color: #fef08a;
+  box-shadow: 0 2px 8px rgba(180, 83, 9, 0.52);
+}
+.czekpoint-marker-badge.shape-diamond,
+.czekpoint-marker-badge[data-shape="diamond"] {
+  border-radius: 6px;
+  transform: rotate(45deg);
+}
+.czekpoint-marker-badge.shape-diamond .czekpoint-marker-glyph,
+.czekpoint-marker-badge[data-shape="diamond"] .czekpoint-marker-glyph,
+.czekpoint-marker-badge.shape-diamond .czekpoint-marker-photo-wrap,
+.czekpoint-marker-badge[data-shape="diamond"] .czekpoint-marker-photo-wrap,
+.czekpoint-marker-badge.shape-diamond .czekpoint-marker-order,
+.czekpoint-marker-badge[data-shape="diamond"] .czekpoint-marker-order {
+  transform: rotate(-45deg);
+}
+
+/* 4. Voda, rybníky a studánky — Tvar kapky + blankytně modrá */
+.czekpoint-marker-badge.cat-water,
+.czekpoint-marker-badge[data-visual-cat="water"] {
+  background: linear-gradient(145deg, #0ea5e9 0%, #0369a1 100%);
+  color: #f0f9ff;
+  border-color: #bae6fd;
+  box-shadow: 0 2px 8px rgba(3, 105, 161, 0.5);
+}
+.czekpoint-marker-badge.shape-droplet,
+.czekpoint-marker-badge[data-shape="droplet"] {
+  border-radius: 50% 50% 50% 5px;
+}
+
+/* 5. Příroda, lesy a památné stromy — Tvar lístku + smaragdově zelená */
+.czekpoint-marker-badge.cat-nature,
+.czekpoint-marker-badge[data-visual-cat="nature"] {
+  background: linear-gradient(145deg, #22c55e 0%, #15803d 100%);
+  color: #f0fdf4;
+  border-color: #bbf7d0;
+  box-shadow: 0 2px 8px rgba(21, 128, 61, 0.48);
+}
+.czekpoint-marker-badge.shape-leaf,
+.czekpoint-marker-badge[data-shape="leaf"] {
+  border-radius: 14px 4px 14px 4px;
+}
+
+/* 6. Začátek trasy / okruh — Tvar šestiúhelníkového odznaku + tmavě zeleno-limetková */
+.czekpoint-marker-badge.cat-route-start,
+.czekpoint-marker-badge[data-visual-cat="route-start"] {
+  background: linear-gradient(145deg, #1e4638 0%, #142f26 100%);
+  color: #e5f2bc;
+  border-color: #a3e635;
+  box-shadow: 0 2px 8px rgba(20, 47, 38, 0.55);
+}
+.czekpoint-marker-badge.shape-hexagon,
+.czekpoint-marker-badge[data-shape="hexagon"] {
+  border-radius: 8px;
 }
 
 .czekpoint-marker-anchor:hover .czekpoint-marker-badge,
 .czekpoint-marker-anchor:focus-visible .czekpoint-marker-badge {
-  transform: scale(1.14);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+  transform: scale(1.16);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.48);
+}
+.czekpoint-marker-anchor:hover .czekpoint-marker-badge.shape-diamond,
+.czekpoint-marker-anchor:focus-visible .czekpoint-marker-badge.shape-diamond {
+  transform: rotate(45deg) scale(1.16);
 }
 
+/* Stavy v trase (plánováno / další cíl / navštíveno) zachovávají tvar kategorie a přidají výrazný prstenec */
 .czekpoint-marker-badge.tier-planned {
-  background: #fff3c4;
-  color: #2c1d0b;
-  border-color: #d49212;
-  box-shadow: 0 2px 8px rgba(212, 146, 18, 0.45);
+  border-color: #ffffff;
+  box-shadow: 0 0 0 3px #f59e0b, 0 3px 10px rgba(0, 0, 0, 0.45);
 }
 
 .czekpoint-marker-badge.tier-next-target {
-  background: #f5b82e;
-  color: #1b1105;
   border-color: #ffffff;
-  box-shadow: 0 0 0 3px rgba(245, 184, 46, 0.45), 0 3px 10px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 0 0 3.5px #fbbf24, 0 0 14px rgba(245, 184, 46, 0.85), 0 4px 12px rgba(0, 0, 0, 0.5);
 }
 
 .czekpoint-marker-badge.tier-visited {
-  background: #2f6f3e;
+  background: linear-gradient(145deg, #16a34a 0%, #14532d 100%);
   color: #ffffff;
   border-color: #d8e99e;
-  box-shadow: 0 2px 7px rgba(25, 62, 50, 0.4);
+  box-shadow: 0 0 0 2px #86efac, 0 2px 7px rgba(25, 62, 50, 0.45);
 }
 
 .czekpoint-marker-order {
   position: absolute;
-  top: -5px;
-  right: -5px;
-  min-width: 14px;
-  height: 14px;
+  top: -6px;
+  right: -6px;
+  min-width: 15px;
+  height: 15px;
   padding: 0 3px;
   border-radius: 999px;
   background: #142f26;
@@ -464,8 +562,158 @@
   border: 1.5px solid #ffffff;
   font-size: 9px;
   font-weight: 800;
-  line-height: 11px;
+  line-height: 12px;
   text-align: center;
+  z-index: 2;
+}
+
+/* Interaktivní legenda tvarů a barev kategorií (#poi-category-legend) */
+.poi-category-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 10px;
+  padding: 8px 10px;
+  background: rgba(243, 247, 238, 0.92);
+  border: 1px solid #c9d8be;
+  border-radius: 14px;
+}
+
+.poi-legend-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 4px 6px;
+  border-radius: 999px;
+  border: 1.5px solid #c5d4ba;
+  background: #ffffff;
+  color: #1c3b2f;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.poi-legend-chip:hover {
+  transform: translateY(-1px);
+  border-color: #6b967c;
+  box-shadow: 0 2px 6px rgba(20, 47, 38, 0.12);
+}
+
+.poi-legend-chip.active {
+  background: #17382c;
+  color: #f7f9f2;
+  border-color: #17382c;
+  box-shadow: 0 2px 8px rgba(20, 47, 38, 0.24);
+}
+
+.poi-legend-all-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #275c43;
+  color: #e5f2bc;
+  font-size: 11px;
+}
+
+.poi-legend-count {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(20, 47, 38, 0.09);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.poi-legend-chip.active .poi-legend-count {
+  background: rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+}
+
+.czekpoint-marker-badge.legend-mini-badge {
+  width: 20px;
+  height: 20px;
+  border-width: 1.5px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  flex-shrink: 0;
+}
+
+.czekpoint-marker-badge.legend-mini-badge .czekpoint-marker-glyph {
+  width: 12px;
+  height: 12px;
+}
+
+.czekpoint-marker-badge.legend-mini-badge .marker-glyph-svg {
+  width: 12px;
+  height: 12px;
+}
+
+.poi-total-count-badge {
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: #1e4638;
+  background: #e6f2d9;
+  border: 1px solid #b8d3a3;
+  padding: 2px 9px;
+  border-radius: 999px;
+}
+
+/* Odznak kategorie a tvaru na kartě místa v seznamu (#walk-places) */
+.place-cat-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px 2px 4px;
+  border-radius: 999px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  background: #f4f7f0;
+  color: #1c3b2f;
+}
+.place-cat-pill.cat-castles {
+  background: #fef2f2;
+  color: #991b1b;
+  border-color: #fecaca;
+}
+.place-cat-pill.cat-sacral {
+  background: #faf5ff;
+  color: #6b21a8;
+  border-color: #e9d5ff;
+}
+.place-cat-pill.cat-views {
+  background: #fffbeb;
+  color: #92400e;
+  border-color: #fde68a;
+}
+.place-cat-pill.cat-water {
+  background: #f0f9ff;
+  color: #075985;
+  border-color: #bae6fd;
+}
+.place-cat-pill.cat-nature {
+  background: #f0fdf4;
+  color: #166534;
+  border-color: #bbf7d0;
+}
+
+.nearby-place.cat-card-castles {
+  border-left: 4px solid #dc2626;
+}
+.nearby-place.cat-card-sacral {
+  border-left: 4px solid #9333ea;
+}
+.nearby-place.cat-card-views {
+  border-left: 4px solid #d97706;
+}
+.nearby-place.cat-card-water {
+  border-left: 4px solid #0284c7;
+}
+.nearby-place.cat-card-nature {
+  border-left: 4px solid #16a34a;
 }
 
 /* 4. Jemné animace všech kategorií ikon (Bod 23: animuje se pouze vnitřní grafika .czekpoint-marker-glyph) */
