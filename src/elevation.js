@@ -387,10 +387,20 @@ export function renderElevationProfileSvg(profile, stops = [], progressRatio = n
     `;
   }
 
+  // Interaktivní vzorkovací body pro najetí myší / dotyk v katalogu
+  const sampleDotsSvg = coordsSvg
+    .map(
+      (c, idx) =>
+        `<circle class="ele-sample-dot" data-sample-index="${idx}" data-dist-km="${c.distKm}" data-ele-m="${c.eleM}" cx="${c.x}" cy="${c.y}" r="3" fill="#476924" stroke="#fffdf7" stroke-width="1.2" opacity="0.85"><title>${c.distKm.toFixed(2).replace('.', ',')} km · ${c.eleM} m n. m.</title></circle>`
+    )
+    .join('');
+
   const totalKmLabel = `${totalKm.toFixed(1).replace('.', ',')} km`;
+  const midE = Math.round((minE + maxE) / 2);
+  const midY = Number((padTop + plotH / 2).toFixed(1));
 
   return `
-    <svg class="elevation-profile-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Výškový profil trasy: stoupání +${profile.gainM} m, klesání -${profile.lossM} m">
+    <svg class="elevation-profile-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Výškový profil trasy: stoupání +${profile.gainM} m, klesání -${profile.lossM} m, rozsah ${minE} až ${maxE} m n. m.">
       <defs>
         <linearGradient id="eleFillGrad" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stop-color="#6b8e3d" stop-opacity="0.52" />
@@ -399,8 +409,10 @@ export function renderElevationProfileSvg(profile, stops = [], progressRatio = n
       </defs>
       <!-- Pomocné výškové linky -->
       <line x1="${padLeft}" y1="${padTop}" x2="${width - padRight}" y2="${padTop}" stroke="#d6c6a5" stroke-width="1" stroke-dasharray="3,3" />
+      <line x1="${padLeft}" y1="${midY}" x2="${width - padRight}" y2="${midY}" stroke="#e5dac3" stroke-width="1" stroke-dasharray="2,3" />
       <line x1="${padLeft}" y1="${padTop + plotH}" x2="${width - padRight}" y2="${padTop + plotH}" stroke="#b8a27a" stroke-width="1.2" />
       <text x="${padLeft - 5}" y="${padTop + 4}" text-anchor="end" font-size="10" fill="#6b533b">${maxE} m</text>
+      <text x="${padLeft - 5}" y="${midY + 3}" text-anchor="end" font-size="9" fill="#8c7355">${midE} m</text>
       <text x="${padLeft - 5}" y="${padTop + plotH}" text-anchor="end" font-size="10" fill="#6b533b">${minE} m</text>
       <text x="${padLeft}" y="${height - 6}" text-anchor="start" font-size="10" fill="#6b533b">0 km</text>
       <text x="${width - padRight}" y="${height - 6}" text-anchor="end" font-size="10" fill="#6b533b">${totalKmLabel}</text>
@@ -409,6 +421,7 @@ export function renderElevationProfileSvg(profile, stops = [], progressRatio = n
       <path d="${areaPath}" fill="url(#eleFillGrad)" />
       <polyline fill="none" stroke="#476924" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" points="${linePoints}" />
 
+      ${sampleDotsSvg}
       ${stopMarkersSvg}
       ${playerMarkerSvg}
     </svg>
@@ -441,3 +454,369 @@ export function renderElevationProfileCardHtml(profile, stops = [], progressRati
     </div>
   `;
 }
+
+/**
+ * Sestaví geografické souřadnice a klíčové body (zastávky) pro položku v katalogu tras a míst,
+ * aby bylo možné vykreslit věrný výškový profil trasy v detailu katalogu.
+ */
+export function buildCatalogRouteCoordinates(route, allRoutes = []) {
+  if (!route) {
+    return {
+      coordinates: [
+        { lat: 49.6014, lng: 13.8644 },
+        { lat: 49.5938, lng: 13.8475 },
+      ],
+      stops: [],
+    };
+  }
+
+  if (Array.isArray(route.coordinates) && route.coordinates.length >= 2) {
+    const clean = route.coordinates.map(normalizeCoordPair).filter(Boolean);
+    if (clean.length >= 2) {
+      return {
+        coordinates: clean,
+        stops: Array.isArray(route.stops) ? route.stops : [{ title: route.title }],
+      };
+    }
+  }
+
+  if (Array.isArray(route.waypoints) && route.waypoints.length >= 2) {
+    const clean = route.waypoints.map(normalizeCoordPair).filter(Boolean);
+    if (clean.length >= 2) {
+      return {
+        coordinates: clean,
+        stops: Array.isArray(route.stops) ? route.stops : [{ title: route.title }],
+      };
+    }
+  }
+
+  // Známé katalogové okruhy s reálnými průjezdními body v Brdech a Rožmitále
+  if (route.id === 'tremsin-okruh') {
+    return {
+      coordinates: [
+        { lat: 49.6030, lng: 13.8629 }, // Start Rožmitál
+        { lat: 49.5938, lng: 13.8475 }, // U Drtiče
+        { lat: 49.5886, lng: 13.8378 }, // Voltušská vyhlídka
+        { lat: 49.5871, lng: 13.8380 }, // Mohyla J. J. Ryby
+        { lat: 49.5654, lng: 13.7780 }, // Třemšínská kaplička
+        { lat: 49.5673, lng: 13.7775 }, // Vrch Třemšín (827 m)
+        { lat: 49.5815, lng: 13.7885 }, // Kobylí hlava (757 m)
+        { lat: 49.5871, lng: 13.7777 }, // Hrad Hengst
+        { lat: 49.6030, lng: 13.8629 }, // Návrat Rožmitál
+      ],
+      stops: [
+        { title: 'Voltuš' },
+        { title: 'Třemšín (827 m)' },
+        { title: 'Kobylí hlava' },
+      ],
+    };
+  }
+
+  if (route.id === 'podzamecky-rybnik-okruh') {
+    return {
+      coordinates: [
+        { lat: 49.6023, lng: 13.8641 }, // Náměstí
+        { lat: 49.6037, lng: 13.8589 }, // Podzámecký rybník
+        { lat: 49.6024, lng: 13.8623 }, // Zámek Rožmitál
+        { lat: 49.6049, lng: 13.8563 }, // Alej Johanky
+        { lat: 49.6081, lng: 13.8510 }, // Kostel Povýšení sv. Kříže
+        { lat: 49.6064, lng: 13.8523 }, // Cvokařské muzeum
+        { lat: 49.6023, lng: 13.8641 }, // Náměstí
+      ],
+      stops: [
+        { title: 'Podzámecký ryb.' },
+        { title: 'Alej Johanky' },
+        { title: 'St. Rožmitál' },
+      ],
+    };
+  }
+
+  if (route.id === 'u-drtice-bila-skala') {
+    return {
+      coordinates: [
+        { lat: 49.5965, lng: 13.8535 }, // Bývalá kasárna
+        { lat: 49.5938, lng: 13.8475 }, // U Drtiče
+        { lat: 49.5912, lng: 13.8432 }, // Bílá skála / Štěrbina
+        { lat: 49.5961, lng: 13.8425 }, // Rybník Jez
+        { lat: 49.5965, lng: 13.8535 }, // Návrat
+      ],
+      stops: [
+        { title: 'U Drtiče' },
+        { title: 'Bílá skála' },
+        { title: 'Rybník Jez' },
+      ],
+    };
+  }
+
+  const loc = normalizeCoordPair(route.location) || { lat: 49.6014, lng: 13.8644 };
+  const distKm = Number.isFinite(Number(route.distanceKm)) && Number(route.distanceKm) > 0
+    ? Number(route.distanceKm)
+    : 1.8;
+
+  // Pro samostatné místo či trasu vytvoříme přístupový okruh přes cílový bod
+  const halfSpanDegLat = Math.max(0.003, Math.min(0.035, (distKm / 2.4) / 111.32));
+  const halfSpanDegLng = Math.max(0.004, Math.min(0.048, (distKm / 2.4) / 72.5));
+
+  // Najdeme případné blízko ležící místo z katalogu jako výchozí bod
+  const catalogList = Array.isArray(allRoutes) ? allRoutes : [];
+  let startPt = {
+    lat: Number((loc.lat - halfSpanDegLat * 0.75).toFixed(6)),
+    lng: Number((loc.lng + halfSpanDegLng * 0.65).toFixed(6)),
+  };
+  let midApproachPt = {
+    lat: Number((loc.lat - halfSpanDegLat * 0.32).toFixed(6)),
+    lng: Number((loc.lng + halfSpanDegLng * 0.25).toFixed(6)),
+  };
+  let returnPt = {
+    lat: Number((loc.lat + halfSpanDegLat * 0.45).toFixed(6)),
+    lng: Number((loc.lng - halfSpanDegLng * 0.4).toFixed(6)),
+  };
+
+  const nearbyCandidate = catalogList
+    .filter((r) => r && r.id !== route.id && r.location)
+    .map((r) => ({
+      item: r,
+      d: haversineMeters(loc, r.location) ?? Infinity,
+    }))
+    .filter((x) => x.d >= 350 && x.d <= 4500)
+    .sort((a, b) => a.d - b.d)[0];
+
+  if (nearbyCandidate && nearbyCandidate.item?.location) {
+    const nb = nearbyCandidate.item.location;
+    startPt = { lat: Number(nb.lat), lng: Number(nb.lng) };
+    midApproachPt = {
+      lat: Number(((startPt.lat + loc.lat) / 2 + 0.0012).toFixed(6)),
+      lng: Number(((startPt.lng + loc.lng) / 2 - 0.0015).toFixed(6)),
+    };
+  }
+
+  const coordinates = [
+    startPt,
+    midApproachPt,
+    loc,
+    returnPt,
+    startPt,
+  ];
+
+  const stops = [
+    ...(nearbyCandidate ? [{ title: nearbyCandidate.item.title }] : []),
+    { title: route.title || 'Cíl trasy' },
+  ];
+
+  return { coordinates, stops };
+}
+
+/**
+ * Upraví vzorky nadmořské výšky tak, aby v místě hlavního vrcholu/cíle respektovaly
+ * případnou ověřenou nadmořskou výšku z katalogu (`route.elevationM` nebo číselný údaj v názvu).
+ */
+function applyKnownRouteElevationAnchor(points, route) {
+  const arr = Array.isArray(points) ? points.map((p) => ({ ...p })) : [];
+  if (arr.length === 0 || !route) return arr;
+
+  let knownEle = Number.isFinite(Number(route.elevationM)) && Number(route.elevationM) > 100
+    ? Math.round(Number(route.elevationM))
+    : null;
+
+  if (knownEle == null && typeof route.title === 'string') {
+    const m = route.title.match(/\((\d{3,4})\s*m\)/i);
+    if (m && Number.isFinite(Number(m[1]))) {
+      knownEle = Math.round(Number(m[1]));
+    }
+  }
+
+  if (knownEle == null) return arr;
+
+  const loc = normalizeCoordPair(route.location);
+  let targetIdx = Math.floor(arr.length / 2);
+  if (loc) {
+    let bestDist = Infinity;
+    arr.forEach((pt, idx) => {
+      const d = haversineMeters(pt, loc) ?? Infinity;
+      if (d < bestDist) {
+        bestDist = d;
+        targetIdx = idx;
+      }
+    });
+  }
+
+  const delta = knownEle - arr[targetIdx].eleM;
+  const radius = Math.max(3, Math.round(arr.length * 0.25));
+  for (let i = 0; i < arr.length; i++) {
+    const distIdx = Math.abs(i - targetIdx);
+    if (distIdx <= radius) {
+      const weight = Math.cos((distIdx / (radius + 1)) * (Math.PI / 2));
+      const adjusted = Math.round(arr[i].eleM + delta * weight * weight);
+      arr[i].eleM = adjusted;
+      arr[i].elevation = adjusted;
+    }
+  }
+  arr[targetIdx].eleM = knownEle;
+  arr[targetIdx].elevation = knownEle;
+  return arr;
+}
+
+/**
+ * Synchronně sestaví kompletní výškový profil pro detail trasy/místa v katalogu.
+ */
+export function buildCatalogElevationProfile(route, allRoutes = [], sampleCount = 32) {
+  const { coordinates, stops } = buildCatalogRouteCoordinates(route, allRoutes);
+  const baseProfile = buildSyntheticElevationProfile(coordinates, sampleCount);
+  const anchoredPoints = applyKnownRouteElevationAnchor(baseProfile.points, route);
+  const metrics = computeElevationMetrics(anchoredPoints);
+
+  const rawDistKm = Number(route?.distanceKm);
+  const totalDistKm = Number.isFinite(rawDistKm) && rawDistKm > 0
+    ? rawDistKm
+    : baseProfile.totalDistKm > 0
+    ? baseProfile.totalDistKm
+    : 1.8;
+
+  // Přepočítáme distKm podle skutečné délky trasy
+  const normalizedPoints = anchoredPoints.map((pt, idx) => {
+    const ratio = anchoredPoints.length <= 1 ? 0 : idx / (anchoredPoints.length - 1);
+    return {
+      ...pt,
+      distKm: Number((ratio * totalDistKm).toFixed(3)),
+    };
+  });
+
+  const loc = normalizeCoordPair(route?.location);
+  const targetElevationM = Number.isFinite(Number(route?.elevationM)) && Number(route.elevationM) > 100
+    ? Math.round(Number(route.elevationM))
+    : loc
+    ? estimateCzechTerrainElevationM(loc.lat, loc.lng)
+    : metrics.maxEle;
+
+  return {
+    points: normalizedPoints,
+    samples: normalizedPoints,
+    gainM: metrics.gainM,
+    lossM: metrics.lossM,
+    minEle: metrics.minEle,
+    maxEle: metrics.maxEle,
+    minEleM: metrics.minEle,
+    maxEleM: metrics.maxEle,
+    elevationSpanM: Math.max(0, metrics.maxEle - metrics.minEle),
+    targetElevationM,
+    totalDistKm,
+    stops,
+    source: baseProfile.source || 'offline-model',
+  };
+}
+
+/**
+ * Asynchronně načte výškový profil pro detail trasy v katalogu (Open-Meteo DEM s offline fallbackem).
+ */
+export async function fetchCatalogRouteElevationProfile(route, options = {}) {
+  const allRoutes = Array.isArray(options.allRoutes) ? options.allRoutes : [];
+  const sampleCount = Math.max(25, Math.min(40, Number(options.sampleCount) || 32));
+  const { coordinates, stops } = buildCatalogRouteCoordinates(route, allRoutes);
+  const fetched = await fetchRouteElevationProfile(coordinates, {
+    ...options,
+    sampleCount,
+  });
+
+  const anchoredPoints = applyKnownRouteElevationAnchor(fetched.points, route);
+  const metrics = computeElevationMetrics(anchoredPoints);
+  const rawDistKm = Number(route?.distanceKm);
+  const totalDistKm = Number.isFinite(rawDistKm) && rawDistKm > 0
+    ? rawDistKm
+    : fetched.totalDistKm > 0
+    ? fetched.totalDistKm
+    : 1.8;
+
+  const normalizedPoints = anchoredPoints.map((pt, idx) => {
+    const ratio = anchoredPoints.length <= 1 ? 0 : idx / (anchoredPoints.length - 1);
+    return {
+      ...pt,
+      distKm: Number((ratio * totalDistKm).toFixed(3)),
+    };
+  });
+
+  const loc = normalizeCoordPair(route?.location);
+  const targetElevationM = Number.isFinite(Number(route?.elevationM)) && Number(route.elevationM) > 100
+    ? Math.round(Number(route.elevationM))
+    : loc
+    ? estimateCzechTerrainElevationM(loc.lat, loc.lng)
+    : metrics.maxEle;
+
+  return {
+    points: normalizedPoints,
+    samples: normalizedPoints,
+    gainM: metrics.gainM,
+    lossM: metrics.lossM,
+    minEle: metrics.minEle,
+    maxEle: metrics.maxEle,
+    minEleM: metrics.minEle,
+    maxEleM: metrics.maxEle,
+    elevationSpanM: Math.max(0, metrics.maxEle - metrics.minEle),
+    targetElevationM,
+    totalDistKm,
+    stops,
+    source: fetched.source || 'offline-model',
+  };
+}
+
+/**
+ * Vykreslí kompletní panel vizuálního profilu převýšení (grafu) pro detailní zobrazení trasy v katalogu.
+ */
+export function renderCatalogElevationProfileHtml(route, profileInput = null, allRoutes = []) {
+  const profile =
+    profileInput && Array.isArray(profileInput.points) && profileInput.points.length >= 2
+      ? profileInput
+      : buildCatalogElevationProfile(route, allRoutes);
+
+  const stops = Array.isArray(profile.stops) && profile.stops.length > 0
+    ? profile.stops
+    : route?.title
+    ? [{ title: route.title }]
+    : [];
+
+  const svgHtml = renderElevationProfileSvg(profile, stops);
+  const spanM = Math.max(0, (profile.maxEle || 0) - (profile.minEle || 0));
+  const targetEle = profile.targetElevationM ?? route?.elevationM ?? profile.maxEle;
+  const sourceLabel = profile.source === 'open-meteo'
+    ? '🌐 Výšková data: Open-Meteo DEM'
+    : '🗺️ Výšková data: Digitální model terénu ČR';
+
+  return `
+    <section class="panel catalog-elevation-panel" id="detail-elevation-section" data-testid="catalog-elevation-profile" aria-labelledby="detail-elevation-heading">
+      <div class="catalog-elevation-head">
+        <div>
+          <span class="eyebrow" style="margin-bottom:4px">Výšková analýza trasy</span>
+          <h2 id="detail-elevation-heading" style="margin:0">⛰️ Vizuální profil převýšení</h2>
+        </div>
+        <span class="catalog-elevation-source-badge" id="detail-elevation-source">${e(sourceLabel)}</span>
+      </div>
+
+      <div class="catalog-elevation-metrics" role="list" aria-label="Metriky nadmořské výšky a převýšení">
+        <div class="catalog-ele-metric gain" role="listitem">
+          <span class="cem-label">📈 Celkové stoupání</span>
+          <strong class="cem-value" data-testid="catalog-ele-gain">+${profile.gainM} m</strong>
+        </div>
+        <div class="catalog-ele-metric loss" role="listitem">
+          <span class="cem-label">📉 Celkové klesání</span>
+          <strong class="cem-value" data-testid="catalog-ele-loss">-${profile.lossM} m</strong>
+        </div>
+        <div class="catalog-ele-metric range" role="listitem">
+          <span class="cem-label">🏔️ Rozsah nadm. výšky</span>
+          <strong class="cem-value" data-testid="catalog-ele-range">${profile.minEle}–${profile.maxEle} m n. m.</strong>
+        </div>
+        <div class="catalog-ele-metric target" role="listitem">
+          <span class="cem-label">📍 Nadmořská výška místa</span>
+          <strong class="cem-value" data-testid="catalog-ele-target">${targetEle} m n. m. (rozdíl ${spanM} m)</strong>
+        </div>
+      </div>
+
+      <div class="catalog-elevation-chart-wrap" id="catalog-elevation-chart-wrap">
+        ${svgHtml}
+      </div>
+
+      <div class="catalog-elevation-readout" id="catalog-elevation-readout" role="status" aria-live="polite">
+        <span>👆 Přejeď myší nebo klepni na bod v grafu pro zobrazení přesné nadmořské výšky a kilometru trasy.</span>
+      </div>
+    </section>
+  `;
+}
+

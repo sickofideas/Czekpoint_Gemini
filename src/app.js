@@ -33,6 +33,11 @@ import { renderPilgrimsSection, renderSummitBook } from './pilgrims.js';
 import { playTick, playHammer, triggerHaptic, applyStaggerAnimation } from './fx.js';
 import { renderBrandLogoHtml, mountBrandLogo, mountAnimatedBrandLogo, mountAmbientBackground } from './brand-logo.js';
 import { getCachedPlacePhoto, resolveVerifiedPlacePhoto, prefetchVerifiedPhotosForPlaces } from './poi-photos.js';
+import {
+  buildCatalogElevationProfile,
+  fetchCatalogRouteElevationProfile,
+  renderCatalogElevationProfileHtml,
+} from './elevation.js';
 
 let disposeWalk = null;
 let disposeBrandLogo = null;
@@ -221,7 +226,44 @@ function renderExploreResults() {
   });
 }
 
-function fact(label, value, ic) { return `<div class="fact"><span>${icon(ic)}${label}</span><strong class="${value == null ? 'unknown' : ''}">${value == null ? 'Zatím nezjištěno' : e(value)}</strong></div>`; }
+function fact(label, value, ic, extraAttr = '') { return `<div class="fact" ${extraAttr}><span>${icon(ic)}${label}</span><strong class="${value == null ? 'unknown' : ''}">${value == null ? 'Zatím nezjištěno' : e(value)}</strong></div>`; }
+
+function bindCatalogElevationChartInteractions(sectionEl, profile) {
+  if (!sectionEl || !profile || !Array.isArray(profile.points) || profile.points.length === 0) return;
+  const svgEl = sectionEl.querySelector('.elevation-profile-svg');
+  const readoutEl = sectionEl.querySelector('#catalog-elevation-readout');
+  if (!svgEl || !readoutEl) return;
+
+  const dots = Array.from(svgEl.querySelectorAll('.ele-sample-dot'));
+  const showSampleAt = (idx) => {
+    const safeIdx = Math.max(0, Math.min(profile.points.length - 1, idx));
+    const pt = profile.points[safeIdx];
+    if (!pt) return;
+    dots.forEach((d, i) => {
+      const isSelected = i === safeIdx;
+      d.setAttribute('r', isSelected ? '5.5' : '3');
+      d.setAttribute('fill', isSelected ? '#d97706' : '#476924');
+    });
+    const distFormatted = Number(pt.distKm || 0).toFixed(2).replace('.', ',');
+    const diffFromStart = Math.round((pt.eleM || 0) - (profile.points[0]?.eleM || pt.eleM || 0));
+    const diffSign = diffFromStart >= 0 ? `+${diffFromStart}` : `${diffFromStart}`;
+    readoutEl.innerHTML = `<span>📍 <strong>Kilometr ${distFormatted} km</strong> · Nadmořská výška: <strong>${pt.eleM} m n. m.</strong> (${diffSign} m oproti startu)</span>`;
+  };
+
+  const handlePointer = (ev) => {
+    const rect = svgEl.getBoundingClientRect();
+    if (!rect || rect.width <= 0) return;
+    const clientX = ev.touches?.[0]?.clientX ?? ev.clientX;
+    if (!Number.isFinite(clientX)) return;
+    const relX = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    const idx = Math.round(relX * (profile.points.length - 1));
+    showSampleAt(idx);
+  };
+
+  svgEl.addEventListener('mousemove', handlePointer);
+  svgEl.addEventListener('click', handlePointer);
+  svgEl.addEventListener('touchstart', handlePointer, { passive: true });
+}
 
 async function renderDetail(id, renderId) {
   const route = state.routes.find(item => item.id === id);
@@ -232,6 +274,11 @@ async function renderDetail(id, renderId) {
   const inWalkPlan = isInCurrentWalkPlan(id, stateObj);
   const isRoute = isActualRouteItem(route);
   const hasStamp = stateObj.discoveries?.includes(id) || stateObj.discoveries?.includes(`catalog:${id}`);
+
+  const catalogEleProfile = buildCatalogElevationProfile(route, state.routes);
+  const elevationFactText = route.elevationM != null
+    ? `${number(route.elevationM)} m n. m. (+${catalogEleProfile.gainM} m)`
+    : `+${catalogEleProfile.gainM} m (${catalogEleProfile.minEle}–${catalogEleProfile.maxEle} m n. m.)`;
 
   const stampBadgeHtml = hasStamp
     ? '<span class="detail-trophy-badge" style="background:#eef5ce;border:1px solid #afbf68;color:#345032;">📍 Potvrzeno podle GPS (opakované vzorky v dosahu ≤ 20 m)</span>'
@@ -261,6 +308,7 @@ async function renderDetail(id, renderId) {
     <div class="detail-grid">
       <div class="detail-main">
         <div class="detail-cover"><img id="detail-cover-img" src="${e(coverSrc)}" width="600" height="340" alt="Fotografie nebo ilustrace místa" onerror="this.onerror=null;this.src='${e(fallbackBitmap)}';"><span class="image-label" id="detail-cover-label">${e(coverLabel)}</span></div>
+        ${renderCatalogElevationProfileHtml(route, catalogEleProfile, state.routes)}
         <section class="panel">
           <h2>O ${isRoute ? 'trase' : 'místě'}</h2>
           <p>${e(route.summary)}</p>
@@ -282,7 +330,7 @@ async function renderDetail(id, renderId) {
         <div class="facts">
           ${fact('Typ položky', isRoute ? 'Trasa (okruh)' : 'Samostatné místo', isRoute ? 'route' : 'pin')}
           ${fact('Délka trasy', isRoute && route.distanceKm != null ? `${number(route.distanceKm)} km` : isRoute ? null : 'Samostatný bod', 'route')}
-          ${fact('Převýšení', route.elevationM == null ? 'Neověřeno' : `${number(route.elevationM)} m`, 'mountain')}
+          ${fact('Převýšení', elevationFactText, 'mountain', 'id="detail-fact-elevation"')}
           ${fact('Obtížnost', { easy: 'Lehká dle zdroje', moderate: 'Střední', hard: 'Náročná', unknown: 'Neověřeno' }[route.access?.difficulty] ?? 'Neověřeno', 'tree')}
         </div>
         <div class="access-box ${e(route.access?.stroller || 'unknown')}">
@@ -317,6 +365,29 @@ async function renderDetail(id, renderId) {
       </div>
       <div id="report-list" class="report-list"><p class="small-note" role="status">Hledáme existující záznamy…</p></div>
     </section>`;
+
+  bindCatalogElevationChartInteractions(document.querySelector('#detail-elevation-section'), catalogEleProfile);
+
+  fetchCatalogRouteElevationProfile(route, { allRoutes: state.routes }).then(liveProfile => {
+    if (renderId !== state.renderId || !liveProfile) return;
+    const sec = document.querySelector('#detail-elevation-section');
+    if (sec) {
+      const wrapper = document.createElement('div');
+      wrapper.innerHTML = renderCatalogElevationProfileHtml(route, liveProfile, state.routes).trim();
+      const nextSec = wrapper.firstElementChild;
+      if (nextSec) {
+        sec.replaceWith(nextSec);
+        bindCatalogElevationChartInteractions(nextSec, liveProfile);
+      }
+    }
+    const factEl = document.querySelector('#detail-fact-elevation strong');
+    if (factEl) {
+      factEl.textContent = route.elevationM != null
+        ? `${number(route.elevationM)} m n. m. (+${liveProfile.gainM} m)`
+        : `+${liveProfile.gainM} m (${liveProfile.minEle}–${liveProfile.maxEle} m n. m.)`;
+      factEl.classList.remove('unknown');
+    }
+  }).catch(() => {});
 
   if (extPhotosOn && !cachedPhoto) {
     resolveVerifiedPlacePhoto(route).then(res => {

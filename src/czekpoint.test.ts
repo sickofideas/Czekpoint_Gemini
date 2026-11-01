@@ -103,6 +103,10 @@ import {
   computeElevationMetrics,
   fetchRouteElevationProfile,
   renderElevationProfileCardHtml,
+  buildCatalogRouteCoordinates,
+  buildCatalogElevationProfile,
+  fetchCatalogRouteElevationProfile,
+  renderCatalogElevationProfileHtml,
 } from './elevation.js';
 import {
   POSTCARD_THEMES,
@@ -3000,6 +3004,62 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
     assert.ok(walkJs.includes("fogMode = appSettings.fogParchment === false ? 'none' : 'explore'"), 'V režimu gamified je nastavena mlha explore');
     assert.ok(walkJs.includes("btn.dataset.p1Gamemode === mode"), 'applyGameMode přepíná třídu active i aria-pressed');
     assert.ok(walkJs.includes("btn.dataset.modalGameMode === mode"), 'applyGameMode synchronizuje i modální tlačítka nastavení');
+  });
+
+  it('DETAILNÍ SCÉNÁŘ: Vizuální profil převýšení (graf) pro detailní zobrazení trasy v katalogu pomocí dat o nadmořské výšce', async () => {
+    const appJs = fs.readFileSync('src/app.js', 'utf-8');
+    const stylesCss = fs.readFileSync('assets/styles.css', 'utf-8');
+
+    // 1. Test známého okruhu Třemšín (tremsin-okruh, 19 km)
+    const tremsinRoute = PILOT_ROUTES.find((r: any) => r.id === 'tremsin-okruh');
+    assert.ok(tremsinRoute, 'Katalog obsahuje trasu tremsin-okruh');
+    const coordsObj = buildCatalogRouteCoordinates(tremsinRoute, PILOT_ROUTES);
+    assert.ok(Array.isArray(coordsObj.coordinates) && coordsObj.coordinates.length >= 6, 'tremsin-okruh má sestavené průjezdní body');
+    assert.ok(Array.isArray(coordsObj.stops) && coordsObj.stops.length >= 2, 'tremsin-okruh má klíčové zastávky na profilu');
+
+    const profileTremsin = buildCatalogElevationProfile(tremsinRoute, PILOT_ROUTES);
+    assert.ok(profileTremsin.points.length >= 25, 'Profil obsahuje alespoň 25 výškových vzorků');
+    assert.ok(profileTremsin.gainM > 150, 'Třemšínský okruh má kladné stoupání > 150 m');
+    assert.ok(profileTremsin.lossM > 150, 'Třemšínský okruh má klesání > 150 m');
+    assert.ok(profileTremsin.maxEle > profileTremsin.minEle, 'maxEle je vyšší než minEle');
+    assert.equal(profileTremsin.totalDistKm, 19, 'Celková délka profilu odpovídá 19 km');
+
+    // 2. Test položky s explicitní nadmořskou výškou (např. Svatá Hora 586 m nebo Vrchol Praha 862 m)
+    const prahaPeak = PILOT_ROUTES.find((r: any) => r.id === 'brdy-vrchol-praha');
+    assert.ok(prahaPeak, 'Katalog obsahuje brdy-vrchol-praha');
+    const profilePraha = buildCatalogElevationProfile(prahaPeak, PILOT_ROUTES);
+    assert.equal(profilePraha.targetElevationM, 862, 'Cílová nadmořská výška vrcholu Praha je 862 m n. m.');
+    assert.ok(profilePraha.maxEle >= 862, 'Maximální výška profilu zahrnuje vrchol 862 m n. m.');
+
+    // 3. Test asynchronního načtení přes fetchCatalogRouteElevationProfile s mockovaným Open-Meteo API
+    const mockFetch = async () => ({
+      ok: true,
+      json: async () => ({
+        elevation: Array.from({ length: 32 }, (_, idx) => 510 + Math.round(Math.sin((idx / 31) * Math.PI) * 240)),
+      }),
+    });
+    const asyncProfile = await fetchCatalogRouteElevationProfile(tremsinRoute, {
+      allRoutes: PILOT_ROUTES,
+      fetchImpl: mockFetch,
+      sampleCount: 32,
+    });
+    assert.equal(asyncProfile.source, 'open-meteo', 'Při dostupném API je zdrojem open-meteo');
+    assert.ok(asyncProfile.gainM >= 200, 'Asynchronní profil spočítal stoupání ze vzorků');
+
+    // 4. Test vykreslení kompletního HTML a SVG grafu pro detail v katalogu
+    const html = renderCatalogElevationProfileHtml(tremsinRoute, profileTremsin, PILOT_ROUTES);
+    assert.ok(html.includes('id="detail-elevation-section"'), 'HTML obsahuje sekci #detail-elevation-section');
+    assert.ok(html.includes('Vizuální profil převýšení'), 'HTML obsahuje nadpis Vizuální profil převýšení');
+    assert.ok(html.includes('elevation-profile-svg'), 'HTML obsahuje SVG graf převýšení');
+    assert.ok(html.includes('ele-sample-dot'), 'SVG graf obsahuje interaktivní vzorkovací body .ele-sample-dot');
+    assert.ok(html.includes(`+${profileTremsin.gainM} m`), 'HTML zobrazuje celkové stoupání');
+    assert.ok(html.includes(`-${profileTremsin.lossM} m`), 'HTML zobrazuje celkové klesání');
+    assert.ok(html.includes(`${profileTremsin.minEle}–${profileTremsin.maxEle} m n. m.`), 'HTML zobrazuje rozsah nadmořské výšky');
+
+    // 5. Ověření napojení v src/app.js (renderDetail) a stylů v assets/styles.css
+    assert.ok(appJs.includes('renderCatalogElevationProfileHtml(route, catalogEleProfile, state.routes)'), 'renderDetail v src/app.js vykresluje graf převýšení');
+    assert.ok(appJs.includes('bindCatalogElevationChartInteractions'), 'src/app.js váže interaktivní odečet bodů grafu');
+    assert.ok(stylesCss.includes('.catalog-elevation-panel'), 'assets/styles.css obsahuje styly pro .catalog-elevation-panel');
   });
 });
 
