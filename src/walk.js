@@ -104,6 +104,7 @@ import {
   triggerPocketProximityAlert,
   playTurnAudioCue,
   createKeepAliveController,
+  unlockSpeechSynthesis,
 } from './keep-alive.js';
 import { haversineMeters } from './domain.js';
 import { escapeHtml as e, number } from './ui.js';
@@ -134,6 +135,7 @@ import {
   computeLateralLoopWaypoint,
   insertStopAtBestPosition,
   ensureLoopDetourWaypoints,
+  snapPointToPedestrianPath,
 } from './planner.js';
 import { ALLOWED_AVATARS, avatarUrl } from './avatars.js';
 import {
@@ -2416,7 +2418,10 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     }
 
     if (map && player && accuracyRing) {
-      setPlayerMarkerVisible(false);
+      const restPos = lastFix || plannedRoute?.origin || ROZMITAL_CENTER;
+      player.setLatLng([restPos.lat, restPos.lng]);
+      setPlayerMarkerVisible(true);
+      updatePlayerAvatarIcon(Boolean(active || demo));
       accuracyRing.setRadius(0);
     }
     plannedRouteRenderKey = null;
@@ -2453,6 +2458,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       const pointer = el.querySelector('.avatar-direction-pointer');
       if (wrap && wrap.dataset.avatarId === avatarId) {
         wrap.classList.toggle('is-walking', Boolean(isWalking));
+        wrap.classList.toggle('is-3d-avatar', Boolean(is3dMode || is3DMode));
         if (pointer) {
           const showArrow = appSettings.orbitalArrow !== false;
           pointer.style.display = showArrow ? '' : 'none';
@@ -2466,6 +2472,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         avatarId,
         bearingDeg: screenRelativeAngleDeg,
         isWalking,
+        is3D: Boolean(is3dMode || is3DMode),
         orbitalArrow: appSettings.orbitalArrow !== false,
       });
       const newPointer = el.querySelector('.avatar-direction-pointer');
@@ -2480,134 +2487,98 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
   let camLat = null;
   let camBearing = 0;
   let currentWalkHeadingDeg = null;
+  let last3dCameraSyncPos = null;
+  let last3dCameraSyncAt = 0;
 
   /**
-   * ZADÁNÍ Verze v2.2 (Bod 1 & 2): Jednotná smyčka kamery bez cukání ve 3D a GTA pohled.
-   * - Zákaz map.easeTo uvnitř smyčky pohybu.
-   * - V jediné requestAnimationFrame smyčce plynule interpoluje jak pozici Avatara (curLat, curLng),
-   *   tak natočení kamery (camBearing přes kruhový LERP), a na konci snímku volá jediné synchronní map.jumpTo!
+   * Lehký a stabilní posun 3D modelu a kamery bez 60 FPS centimetrové smyčky:
+   * - Přichytí pozici k chodníku/stezce (snapPointToPedestrianPath, tolerance ±16 m), aby postavička nikdy nelétala přes 3D budovy.
+   * - Ve 3D režimu přepočítává kameru jen při reálném posunu o >= 5 metrů (nebo po >= 1,5 s), nikdy několikrát za sekundu.
    */
-  function smoothMovePlayerTo(targetLat, targetLng, durationMs = 1100) {
-    if (!map || !player || !Number.isFinite(targetLat) || !Number.isFinite(targetLng)) return;
+  function smoothMovePlayerTo(rawTargetLat, rawTargetLng, durationMs = 1100) {
+    if (!map || !player || !Number.isFinite(rawTargetLat) || !Number.isFinite(rawTargetLng)) return;
     if (playerLerpRafId) {
       cancelAnimationFrame(playerLerpRafId);
       playerLerpRafId = null;
     }
 
-    const currentOpacity = typeof player.getOpacity === 'function' ? player.getOpacity() : 1;
+    // Přichycení k pěší trase / chodníku v toleranci 16 m, aby model chodil po stezkách a ne přes budovy
+    const snappedPt = snapPointToPedestrianPath(
+      { lat: rawTargetLat, lng: rawTargetLng },
+      plannedRouteCoords,
+      16
+    );
+    const targetLat = snappedPt && Number.isFinite(snappedPt.lat) ? snappedPt.lat : rawTargetLat;
+    const targetLng = snappedPt && Number.isFinite(snappedPt.lng) ? snappedPt.lng : rawTargetLng;
+
     setPlayerMarkerVisible(true);
-    updatePlayerAvatarIcon(true);
+    updatePlayerAvatarIcon(Boolean(active || demo || simSandboxActive));
 
     const startLatLng = typeof player.getLatLng === 'function' ? player.getLatLng() : null;
     const distM = startLatLng ? (haversineMeters({ lat: startLatLng.lat, lng: startLatLng.lng }, { lat: targetLat, lng: targetLng }) ?? 999) : 999;
 
-    // Azimut kroku pro natáčení kamery a stopy pohorek
-    if (startLatLng && Number.isFinite(startLatLng.lat) && Number.isFinite(startLatLng.lng) && distM >= 0.5) {
+    // Azimut kroku pouze při smysluplném posunu (>= 3 m), aby se kamera ve 3D necukala na centimetrech
+    if (startLatLng && Number.isFinite(startLatLng.lat) && Number.isFinite(startLatLng.lng) && distM >= 3.0) {
       currentWalkHeadingDeg = calculateBearing({ lat: startLatLng.lat, lng: startLatLng.lng }, { lat: targetLat, lng: targetLng });
     }
 
-    // Inicializace stavu kamery z mapy
-    if (map && typeof map.getCenter === 'function') {
-      const curCenter = map.getCenter();
-      if (curCenter && Number.isFinite(curCenter.lng) && Number.isFinite(curCenter.lat)) {
-        camLng = curCenter.lng;
-        camLat = curCenter.lat;
+    visualPlayerPos = { lat: targetLat, lng: targetLng };
+    player.setLatLng([targetLat, targetLng]);
+    accuracyRing?.setLatLng([targetLat, targetLng]);
+
+    const nowMs = Date.now();
+    const camStepDistM = last3dCameraSyncPos
+      ? (haversineMeters(last3dCameraSyncPos, { lat: targetLat, lng: targetLng }) ?? 999)
+      : 999;
+    const is3dActive = Boolean(is3dMode || is3DMode);
+
+    // Ve 3D aktualizujeme kameru pouze při posunu >= 5 m (nebo prvotním skoku), žádné přepočítávání několikrát za sekundu!
+    if (follow && !isUserTouchingMap && map && (!is3dActive || camStepDistM >= 5.0 || (nowMs - last3dCameraSyncAt) >= 2200)) {
+      last3dCameraSyncPos = { lat: targetLat, lng: targetLng };
+      last3dCameraSyncAt = nowMs;
+
+      if (typeof map.getBearing === 'function') {
+        camBearing = Number(map.getBearing()) || 0;
       }
-      camBearing = (typeof map.getBearing === 'function' ? Number(map.getBearing()) : 0) || 0;
+      let targetCamHeading = camBearing;
+      if (followHeadingMode) {
+        targetCamHeading = Number.isFinite(currentDeviceHeading)
+          ? currentDeviceHeading
+          : (Number.isFinite(currentWalkHeadingDeg) ? currentWalkHeadingDeg : camBearing);
+      } else if (is3dActive) {
+        targetCamHeading = Number.isFinite(currentWalkHeadingDeg)
+          ? currentWalkHeadingDeg
+          : (Number.isFinite(targetBearing) ? targetBearing : camBearing);
+      }
+
+      const delta = ((targetCamHeading - camBearing + 540) % 360) - 180;
+      camBearing = (camBearing + delta * 0.35 + 360) % 360;
+      camLng = targetLng;
+      camLat = targetLat;
+
+      const jumpOpts = {
+        center: [targetLng, targetLat],
+        padding: getMapCameraPadding(),
+      };
+      if ((followHeadingMode || is3dActive) && Number.isFinite(camBearing)) {
+        jumpOpts.bearing = camBearing;
+      }
+      if (typeof map.easeTo === 'function' && durationMs > 0 && camStepDistM < 120) {
+        try {
+          map.easeTo({ ...jumpOpts, duration: is3dActive ? 650 : 400, easing: t => t });
+        } catch {
+          try { map.jumpTo?.(jumpOpts); } catch {}
+        }
+      } else if (typeof map.jumpTo === 'function') {
+        try { map.jumpTo(jumpOpts); } catch {}
+      }
     }
 
-    if (!startLatLng || currentOpacity === 0 || distM > 350 || distM < 0.2 || durationMs <= 0) {
-      visualPlayerPos = { lat: targetLat, lng: targetLng };
-      player.setLatLng([targetLat, targetLng]);
-      accuracyRing?.setLatLng([targetLat, targetLng]);
-      if (follow && !isUserTouchingMap && map) {
-        let snapBearing = Number.isFinite(camBearing) ? camBearing : 0;
-        if (followHeadingMode) {
-          snapBearing = Number.isFinite(currentDeviceHeading)
-            ? currentDeviceHeading
-            : (Number.isFinite(currentWalkHeadingDeg) ? currentWalkHeadingDeg : snapBearing);
-        }
-        const jumpOpts = {
-          center: [targetLng, targetLat],
-          padding: getMapCameraPadding(),
-        };
-        if (followHeadingMode && Number.isFinite(snapBearing)) {
-          jumpOpts.bearing = snapBearing;
-        }
-        if (typeof map.jumpTo === 'function') {
-          try { map.jumpTo(jumpOpts); } catch {}
-        }
-      }
-      return;
+    if (!follow) {
+      updateRecenterButtonVisibility();
     }
-
-    const sLat = startLatLng.lat;
-    const sLng = startLatLng.lng;
-    const startTime = performance.now();
-
-    const stepLerp = (nowPerf) => {
-      if (disposed || !player || !map) {
-        playerLerpRafId = null;
-        return;
-      }
-      const elapsed = nowPerf - startTime;
-      const t = Math.min(1, Math.max(0, elapsed / durationMs));
-      const eased = 1 - Math.pow(1 - t, 3);
-      const curLat = sLat + (targetLat - sLat) * eased;
-      const curLng = sLng + (targetLng - sLng) * eased;
-
-      visualPlayerPos = { lat: curLat, lng: curLng };
-      player.setLatLng([curLat, curLng]);
-
-      // Jediná synchronní aktualizace kamery v LERP smyčce bez cukání
-      // KRITICKÁ OPRAVA 3D: Nikdy nevolat accuracyRing.setLatLng (GeoJSON setData) 60× za sekundu uvnitř rAF!
-      if (follow && !isUserTouchingMap && Number.isFinite(curLat) && Number.isFinite(curLng)) {
-        if (!Number.isFinite(camBearing)) camBearing = 0;
-        let targetCamHeading = camBearing;
-        if (followHeadingMode) {
-          targetCamHeading = Number.isFinite(currentDeviceHeading)
-            ? currentDeviceHeading
-            : (Number.isFinite(currentWalkHeadingDeg) ? currentWalkHeadingDeg : camBearing);
-        } else if (is3dMode || is3DMode) {
-          targetCamHeading = Number.isFinite(currentWalkHeadingDeg)
-            ? currentWalkHeadingDeg
-            : (Number.isFinite(targetBearing) ? targetBearing : camBearing);
-        }
-
-        // Kruhový LERP přes nejmenší úhel
-        const delta = ((targetCamHeading - camBearing + 540) % 360) - 180;
-        camBearing = (camBearing + delta * 0.12 + 360) % 360;
-        camLng = curLng;
-        camLat = curLat;
-
-        const jumpOpts = {
-          center: [curLng, curLat],
-          padding: getMapCameraPadding(),
-        };
-        if (followHeadingMode && Number.isFinite(camBearing)) {
-          jumpOpts.bearing = camBearing;
-        }
-        if (typeof map.jumpTo === 'function') {
-          try { map.jumpTo(jumpOpts); } catch {}
-        }
-      }
-
-      if (t < 1) {
-        playerLerpRafId = requestAnimationFrame(stepLerp);
-      } else {
-        playerLerpRafId = null;
-        visualPlayerPos = { lat: targetLat, lng: targetLng };
-        accuracyRing?.setLatLng([targetLat, targetLng]);
-        updatePlayerAvatarIcon(Boolean(active || demo));
-        if (!follow) {
-          updateRecenterButtonVisibility();
-        }
-        renderTrail();
-        drawFog();
-      }
-    };
-
-    playerLerpRafId = requestAnimationFrame(stepLerp);
+    renderTrail();
+    drawFog();
   }
 
   function metersToPx(lat, meters) {
@@ -3626,6 +3597,12 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     if (stepKey && stepKey === lastSpokenNavStepKey) return;
     if (stepKey) lastSpokenNavStepKey = stepKey;
 
+    if (typeof window !== 'undefined') {
+      const entry = { text: String(text), stepKey: String(stepKey || ''), direction, ts: Date.now() };
+      window.__lastSpokenNav = entry;
+      window.__spokenNavHistory = [...(Array.isArray(window.__spokenNavHistory) ? window.__spokenNavHistory.slice(-19) : []), entry];
+    }
+
     if (stateObj.soundEnabled !== false) {
       playTurnAudioCue(direction);
     }
@@ -3687,8 +3664,16 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
 
     // DÁVKA 2 (Bod 3.1): Při výpadku routeru (fallback_direct) nespouštíme hlasovou navigaci odboček!
     const isFallbackRoute = Boolean(!lastRoutedGeometry || lastRoutedGeometry.isFallback || lastRoutedGeometry.routeStatus === 'fallback_direct');
-    if (!isFallbackRoute && voiceNavEnabled && (active || demo || simSandboxActive) && instr.voiceText && instr.distanceToTurnM != null && instr.distanceToTurnM <= 85) {
-      speakCzechNav(instr.voiceText, instr.stepKey, instr.turnDirection || 'straight');
+    if (!isFallbackRoute && voiceNavEnabled && (active || demo || simSandboxActive)) {
+      if (instr.voiceText && instr.distanceToTurnM != null && instr.distanceToTurnM <= 85) {
+        speakCzechNav(instr.voiceText, instr.stepKey, instr.turnDirection || 'straight');
+      } else if (instr.text && (document.hidden || ($('pocket-mode-overlay') && !$('pocket-mode-overlay').hidden))) {
+        // V kapse při zhasnutém displeji hlásíme i průběžný směr každých ~90 m, aby uživatel věděl, že navigace žije
+        const bucket90 = Math.floor((Number(progress?.meters) || 0) / 90);
+        if (bucket90 > 0) {
+          speakCzechNav(instr.text, `pocket_progress_${bucket90}`, 'straight');
+        }
+      }
     }
   }
 
@@ -6721,6 +6706,27 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     if ($('walk-accuracy-banner')) $('walk-accuracy-banner').hidden = true;
     follow = true;
     updateFollowUi();
+    unlockSpeechSynthesis();
+
+    // Pokud uživatel odstartuje výpravu bez vybraných zastávek, automaticky mu připravíme pěší okruh po stezkách,
+    // aby hlasová navigace z kapsy ihned dávala konkrétní povely k chůzi.
+    if ((!plannedRoute.selectedPlaceIds || plannedRoute.selectedPlaceIds.length === 0) && !lastRoutedGeometry) {
+      const avail = getAllAvailablePlaces();
+      const preferred = ['zamek-rozmital', 'podbrdske-muzeum', 'kostel-stary-rozmital'].filter(id =>
+        avail.some(p => p.id === id)
+      );
+      const defaultStops = preferred.length > 0 ? preferred : avail.slice(0, 3).map(p => p.id);
+      if (defaultStops.length > 0) {
+        plannedRoute.selectedPlaceIds = defaultStops;
+        const orig = getRouteOriginPoint();
+        const places = getPlannedPlaces(defaultStops);
+        lastRoutedGeometry = buildLocalRoutedGeometry([orig, ...places], { useLocalFootpathGraph: true, isFallback: false });
+        plannedRouteCoords = lastRoutedGeometry.coordinates;
+        fakeGpsSim?.setSharedWalkingRoute(lastRoutedGeometry);
+        applyPlannedRouteGeoJsonToMap(plannedRouteCoords, false);
+        updateTurnNavPill(lastFix || orig);
+      }
+    }
 
     if (simSandboxActive) {
       if (!currentExpedition || currentExpedition.state === 'ended') {
@@ -7319,6 +7325,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       }
     }
     $('walk-map-wrap')?.classList.toggle('is-3d-mode', is3DMode);
+    updatePlayerAvatarIcon(Boolean(active || demo || simSandboxActive));
   }
 
   function enableAllMapInteractions() {
@@ -7821,16 +7828,17 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     playerEl.style.width = '86px';
     playerEl.style.height = '86px';
     playerEl.style.pointerEvents = 'none';
-    playerEl.style.opacity = (active || demo || simSandboxActive || lastFix) ? '1' : '0';
+    playerEl.style.opacity = '1';
     playerEl.style.zIndex = '45';
     playerEl.innerHTML = renderPlayerAvatarMarkerHtml({
       avatarId: stateObj.profile?.avatarId || 'liska',
       bearingDeg: targetBearing || 0,
       isWalking: walkState === 'running',
+      is3D: Boolean(is3dMode || is3DMode),
     });
     let playerPos = { lat: center.lat, lng: center.lng };
     visualPlayerPos = { lat: center.lat, lng: center.lng };
-    let playerOpacity = (active || demo || simSandboxActive || lastFix) ? 1 : 0;
+    let playerOpacity = 1;
     const rawPlayerMarker = new maplibregl.Marker({ element: playerEl, anchor: 'center' })
       .setLngLat([center.lng, center.lat])
       .addTo(map);
@@ -8663,12 +8671,37 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
   });
 
   $('walk-fake-gps-toggle')?.addEventListener('click', () => {
+    unlockSpeechSynthesis();
     if (fakeGpsSim) {
       fakeGpsSim.toggle();
       const zone = $('simulator-test-zone');
       if (zone) {
         zone.hidden = !fakeGpsSim.isOpen;
         if (fakeGpsSim.isOpen) {
+          // Zajistíme, aby měl simulátor ihned platnou pěší trasu po chodnících a stezkách (ne vzduchem přes budovy)
+          if (!plannedRoute.selectedPlaceIds || plannedRoute.selectedPlaceIds.length === 0) {
+            const avail = getAllAvailablePlaces();
+            const preferred = ['zamek-rozmital', 'podbrdske-muzeum', 'kostel-stary-rozmital'].filter(id =>
+              avail.some(p => p.id === id)
+            );
+            const defaultSimStops = preferred.length > 0 ? preferred : avail.slice(0, 3).map(p => p.id);
+            if (defaultSimStops.length > 0) {
+              plannedRoute.selectedPlaceIds = defaultSimStops;
+            }
+          }
+          const orig = lastFix || getRouteOriginPoint();
+          const stopPlaces = getPlannedPlaces();
+          if (!lastRoutedGeometry || lastRoutedGeometry.isFallback || !Array.isArray(lastRoutedGeometry.coordinates) || lastRoutedGeometry.coordinates.length < 2) {
+            lastRoutedGeometry = buildLocalRoutedGeometry([orig, ...stopPlaces], { useLocalFootpathGraph: true, isFallback: false });
+            plannedRouteCoords = lastRoutedGeometry.coordinates;
+            applyPlannedRouteGeoJsonToMap(plannedRouteCoords, false);
+          }
+          fakeGpsSim.setSharedWalkingRoute(lastRoutedGeometry);
+          if (fakeGpsSim.mode === 'idle') {
+            fakeGpsSim.startAutopilot(stopPlaces, getAllAvailablePlaces(), lastRoutedGeometry);
+            fakeGpsSim.triggerLoopTick?.(Date.now());
+          }
+          updateTurnNavPill(lastFix || orig);
           zone.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
       }
@@ -9678,17 +9711,26 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
           statsEl.textContent = `Ušlá vzdálenost: ${formatMetersCz(gainedM)}`;
         }
       }
+      const curPos = lastFix || telemetry.lastKnownPosition || getRouteOriginPoint();
+      const instr = computeActiveTurnInstruction(lastRoutedGeometry, curPos, plannedPlaces, confirmedStopIds);
+      const voiceMsg = instr?.voiceText || instr?.text || (rem.nextStop ? `Kapesní režim aktivní. Další cíl ${rem.nextStop.title}, ${ Math.round(rem.nextStopDistanceM || 0) } metrů.` : 'Kapesní režim aktivní. Hlasová navigace běží na pozadí.');
+      speakCzechNav(voiceMsg, `pocket-enter-${Date.now()}`, instr?.turnDirection || 'straight');
     }
   }
 
   $('btn-pocket-mode')?.addEventListener('click', (ev) => {
     ev?.stopPropagation?.();
+    unlockSpeechSynthesis();
     setPocketModeUi(true);
     playTick(stateObj.soundEnabled);
   });
 
   $('btn-direct-pocket-mode')?.addEventListener('click', (ev) => {
     ev?.stopPropagation?.();
+    unlockSpeechSynthesis();
+    if (walkState === 'idle') {
+      startUnifiedExpedition('pocket-direct');
+    }
     setPocketModeUi(true);
     playTick(stateObj.soundEnabled);
   });
@@ -10571,7 +10613,52 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
   $('btn-recenter-avatar')?.addEventListener('click', restoreFollowOnPlayer);
   $('btn-return-to-gps')?.addEventListener('click', restoreFollowOnPlayer);
 
+  let demoTimer = null;
+  let demoRouteCoords = [];
+
+  function stopDemoTimer() {
+    if (demoTimer) {
+      clearInterval(demoTimer);
+      demoTimer = null;
+    }
+  }
+
+  function buildDemoPedestrianCoords() {
+    const orig = getRouteOriginPoint() || ROZMITAL_CENTER;
+    const demoStops = ['zamek-rozmital', 'cvokarske-muzeum', 'kostel-stary-rozmital', 'podbrdske-muzeum', 'kostel-jan-nepomucky']
+      .map(id => getAllAvailablePlaces().find(p => p.id === id))
+      .filter(Boolean);
+    const routed = buildLocalRoutedGeometry([orig, ...demoStops], { useLocalFootpathGraph: true, isFallback: false });
+    if (!lastRoutedGeometry || lastRoutedGeometry.isFallback) {
+      lastRoutedGeometry = routed;
+      plannedRouteCoords = routed.coordinates;
+    }
+    const raw = Array.isArray(routed.coordinates) && routed.coordinates.length >= 2
+      ? routed.coordinates
+      : [[49.60141, 13.86441], [49.60180, 13.86350], [49.60215, 13.86310], [49.60240, 13.86232]];
+    // Rozdělíme úseky po cca 12 metrech, aby postavička v ukázce plynule kráčela po chodnících a cestách
+    const subdivided = [];
+    for (let i = 0; i < raw.length - 1; i++) {
+      const a = { lat: raw[i][0], lng: raw[i][1] };
+      const b = { lat: raw[i + 1][0], lng: raw[i + 1][1] };
+      const dist = haversineMeters(a, b) ?? 0;
+      const stepsCount = Math.max(1, Math.ceil(dist / 12));
+      for (let s = 0; s < stepsCount; s++) {
+        const t = s / stepsCount;
+        subdivided.push({
+          lat: Number((a.lat + (b.lat - a.lat) * t).toFixed(6)),
+          lng: Number((a.lng + (b.lng - a.lng) * t).toFixed(6)),
+        });
+      }
+    }
+    const lastPt = raw[raw.length - 1];
+    subdivided.push({ lat: lastPt[0], lng: lastPt[1] });
+    return subdivided;
+  }
+
   $('walk-demo')?.addEventListener('click', () => {
+    unlockSpeechSynthesis();
+    stopDemoTimer();
     pauseSession();
     demo = !demo;
     lastFix = null; anchor = null;
@@ -10583,9 +10670,17 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       stateObj = emptyState();
       telemetry = createTelemetryState(Date.now());
       currentExpedition = createExpedition({ progress, goal: DEFAULT_GOALS[0] });
+      demoRouteCoords = buildDemoPedestrianCoords();
       demoIndex = 0;
       stats();
       stepDemo();
+      demoTimer = setInterval(() => {
+        if (!demo || disposed) {
+          stopDemoTimer();
+          return;
+        }
+        stepDemo();
+      }, 1200);
     } else {
       try {
         stateObj = loadState();
@@ -10610,20 +10705,25 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       stats();
       status(storageError || 'Ukázka skončila.');
       if (map) {
-        setPlayerMarkerVisible(false);
+        setPlayerMarkerVisible(true);
         accuracyRing.setRadius(0);
         const c = progress.cells.length ? cellCenter(progress.cells.at(-1)) : { lat: 49.6014, lng: 13.8644 };
+        player?.setLatLng([c.lat, c.lng]);
         setMapView(c.lat, c.lng, map.getZoom?.() || 15.5, false);
       }
     }
   });
 
   function stepDemo() {
+    if (!Array.isArray(demoRouteCoords) || demoRouteCoords.length === 0) {
+      demoRouteCoords = buildDemoPedestrianCoords();
+    }
+    const pt = demoRouteCoords[demoIndex % demoRouteCoords.length];
     const fix = {
-      lat: 49.6014 + demoIndex * 0.00045,
-      lng: 13.8644 + Math.sin(demoIndex * 0.7) * 0.00025,
+      lat: pt.lat,
+      lng: pt.lng,
       accuracy: 6,
-      timestamp: Date.now() + demoIndex * 40000,
+      timestamp: Date.now() + demoIndex * 12000,
       simulated: true,
     };
     demoIndex++;
@@ -11183,8 +11283,15 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
   const visibility = () => {
     if (document.hidden) {
       hiddenStartedAtMs = Date.now();
-      if (active || walkState === 'running' || walkState === 'locating') {
+      if (active || walkState === 'running' || walkState === 'locating' || simSandboxActive || demo) {
+        keepAliveCtrl.start('Czekpoint GPS aktivní');
         keepAliveCtrl.triggerManualTick?.();
+        const curPos = lastFix || telemetry.lastKnownPosition || getRouteOriginPoint();
+        const plannedPlaces = getPlannedPlaces();
+        const instr = computeActiveTurnInstruction(lastRoutedGeometry, curPos, plannedPlaces, confirmedStopIds);
+        const nextStop = plannedPlaces.find(p => !isStopVisited(p));
+        const pocketSpeech = instr?.voiceText || instr?.text || (nextStop ? `Pokračuj po cestě k cíli ${nextStop.title}.` : 'Navigace v kapse je aktivní.');
+        speakCzechNav(pocketSpeech, `screen-lock-${Math.floor(Date.now() / 15000)}`, instr?.turnDirection || 'straight');
       }
       if (canPersistRealState()) {
         try { saveState(stateObj); } catch {}
@@ -11295,6 +11402,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
 
   return () => {
     disposed = true;
+    stopDemoTimer();
     document.body?.classList?.remove('nav-active');
     clearAllMapTasks();
     keepAliveCtrl.stop();

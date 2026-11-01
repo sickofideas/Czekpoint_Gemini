@@ -3268,4 +3268,41 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
     assert.ok(walkJs.includes('maxHalfLat = 0.014'), 'drawFog omezuje 3D horizont kolem středu mapy, aby nedocházelo k přepočtu 1024×1024 plátna při každém naklonění');
     assert.ok(walkJs.includes('id="btn-direct-pocket-mode"'), 'Akční lišta chůze obsahuje přímé tlačítko 🌙 Do kapsy (#btn-direct-pocket-mode)');
   });
+
+  it('Chůze po chodnících a stezkách (nikoliv přes budovy), úsporný 3D posun (≥ 5 m) a hlasová navigace z kapsy při zhasnutí displeje', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const walkJs = fs.readFileSync(path.resolve(process.cwd(), 'src/walk.js'), 'utf-8');
+    const { snapPointToPedestrianPath, ROZMITAL_PEDESTRIAN_GRAPH } = await import('./planner.js');
+    const { unlockSpeechSynthesis } = await import('./keep-alive.js');
+
+    // 1. Pěší graf Rožmitálu vede po ulicích a chodnících (více uzlů než pouhá přímka přes budovy)
+    assert.ok(Object.keys(ROZMITAL_PEDESTRIAN_GRAPH.nodes).length >= 20, 'Graf chodníků a stezek v Rožmitále obsahuje alespoň 20 uličních uzlů');
+    const routed = buildLocalRoutedGeometry(
+      [
+        { id: 'start', lat: 49.60141, lng: 13.86441 },
+        { id: 'zamek-rozmital', lat: 49.60240, lng: 13.86232 },
+        { id: 'podbrdske-muzeum', lat: 49.59932, lng: 13.86262 },
+      ],
+      { useLocalFootpathGraph: true, isFallback: false }
+    );
+    assert.equal(routed.isFallback, false);
+    assert.ok(routed.coordinates.length >= 6, `Trasa z náměstí k zámku a do muzea kopíruje ulice a chodníky (${routed.coordinates.length} bodů), nelétá vzduchem přes střechy`);
+
+    // 2. Přichycení bodu k chodníku/cestě v toleranci ±16 m
+    const slightlyInsideBuilding = { lat: 49.60222, lng: 13.86305 };
+    const snapped = snapPointToPedestrianPath(slightlyInsideBuilding, routed.coordinates, 16);
+    assert.equal(snapped.snapped, true, 'Bod odchýlený do budovy vedle ulice se přichytí zpět na chodník');
+    assert.ok(snapped.distanceToPathM <= 16);
+
+    // 3. 3D kamera nepřepočítává 60× za sekundu na centimetrech, ale jen při posunu >= 5 m
+    assert.ok(walkJs.includes('camStepDistM >= 5.0'), '3D kamera se přepočítává až při posunu >= 5 metrů');
+    assert.equal(walkJs.includes('requestAnimationFrame(stepLerp)'), false, 'Zrušena 60 FPS centimetrová smyčka stepLerp ve 3D');
+
+    // 4. Hlasová navigace se odemyká při startu a mluví i po zhasnutí displeje tlačítkem telefonu (document.hidden)
+    assert.equal(typeof unlockSpeechSynthesis, 'function');
+    assert.equal(unlockSpeechSynthesis(), true);
+    assert.ok(walkJs.includes('screen-lock-'), 'Při zhasnutí displeje (visibilitychange -> document.hidden) aplikace ohlásí navigační povel do kapsy');
+  });
 });
+

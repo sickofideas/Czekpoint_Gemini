@@ -1816,8 +1816,246 @@ export function ensureLoopDetourWaypoints(waypoints = []) {
   return (waypoints || []).map(normalizeWaypointObject).filter(Boolean);
 }
 
-function enrichLegWithStreetCorners(legCoords = []) {
-  return Array.isArray(legCoords) ? legCoords : [];
+export const ROZMITAL_PEDESTRIAN_GRAPH = Object.freeze({
+  nodes: Object.freeze({
+    namesti_s: { lat: 49.60330, lng: 13.86330, street: 'Náměstí' },
+    kostel_nepomucky: { lat: 49.60228, lng: 13.86410, street: 'Náměstí' },
+    namesti_stred: { lat: 49.60180, lng: 13.86350, street: 'Náměstí' },
+    namesti_j: { lat: 49.60141, lng: 13.86441, street: 'Náměstí' },
+    palackeho_s: { lat: 49.60160, lng: 13.86508, street: 'Palackého' },
+    palackeho_stred: { lat: 49.60045, lng: 13.86385, street: 'Palackého' },
+    prikopy_z: { lat: 49.60120, lng: 13.86240, street: 'Příkopy' },
+    palackeho_j: { lat: 49.60015, lng: 13.86250, street: 'Palackého' },
+    podbrdske_muzeum: { lat: 49.59932, lng: 13.86262, street: 'Palackého' },
+    nadrazni_kriz: { lat: 49.59820, lng: 13.86540, street: 'Nádražní' },
+    nadrazi: { lat: 49.59680, lng: 13.86820, street: 'Nádražní' },
+    zamecka_v: { lat: 49.60208, lng: 13.86355, street: 'Zámecká' },
+    zamek_brana: { lat: 49.60240, lng: 13.86232, street: 'Zámecká' },
+    most_zamek: { lat: 49.60265, lng: 13.86175, street: 'Most u zámku' },
+    nabrezi: { lat: 49.60320, lng: 13.86040, street: 'Nábřeží' },
+    lavka_podzamecky: { lat: 49.60373, lng: 13.85891, street: 'Lávka u Podzámeckého rybníka' },
+    alej_v: { lat: 49.60425, lng: 13.85760, street: 'Alej Johanky z Rožmitálu' },
+    alej_stred: { lat: 49.60485, lng: 13.85630, street: 'Alej Johanky z Rožmitálu' },
+    alej_z: { lat: 49.60565, lng: 13.85430, street: 'Alej Johanky z Rožmitálu' },
+    cvokarske_muzeum: { lat: 49.60640, lng: 13.85227, street: 'Alej Johanky z Rožmitálu' },
+    most_stary_rozmital: { lat: 49.60755, lng: 13.85185, street: 'Rybova' },
+    kostel_stary_rozmital: { lat: 49.60813, lng: 13.85100, street: 'Rybova' },
+    sladkovskeho: { lat: 49.60390, lng: 13.86250, street: 'Sládkovského' },
+    rybova_v: { lat: 49.60450, lng: 13.86150, street: 'Rybova' },
+    voltusska_s: { lat: 49.59980, lng: 13.85750, street: 'Voltušská' },
+    koupaci_rybnik: { lat: 49.59910, lng: 13.85180, street: 'Voltušská stezka' },
+    u_drtice: { lat: 49.59380, lng: 13.84750, street: 'Lesní stezka k Třemšínu' },
+  }),
+  edges: Object.freeze([
+    ['namesti_s', 'kostel_nepomucky'],
+    ['kostel_nepomucky', 'namesti_stred'],
+    ['namesti_stred', 'namesti_j'],
+    ['kostel_nepomucky', 'namesti_j'],
+    ['namesti_j', 'palackeho_s'],
+    ['palackeho_s', 'palackeho_stred'],
+    ['palackeho_stred', 'podbrdske_muzeum'],
+    ['zamecka_v', 'prikopy_z'],
+    ['zamek_brana', 'prikopy_z'],
+    ['prikopy_z', 'palackeho_j'],
+    ['palackeho_j', 'podbrdske_muzeum'],
+    ['podbrdske_muzeum', 'nadrazni_kriz'],
+    ['nadrazni_kriz', 'nadrazi'],
+    ['namesti_stred', 'zamecka_v'],
+    ['namesti_s', 'zamecka_v'],
+    ['zamecka_v', 'zamek_brana'],
+    ['zamek_brana', 'most_zamek'],
+    ['most_zamek', 'nabrezi'],
+    ['nabrezi', 'lavka_podzamecky'],
+    ['lavka_podzamecky', 'alej_v'],
+    ['alej_v', 'alej_stred'],
+    ['alej_stred', 'alej_z'],
+    ['alej_z', 'cvokarske_muzeum'],
+    ['cvokarske_muzeum', 'most_stary_rozmital'],
+    ['most_stary_rozmital', 'kostel_stary_rozmital'],
+    ['namesti_s', 'sladkovskeho'],
+    ['sladkovskeho', 'rybova_v'],
+    ['rybova_v', 'nabrezi'],
+    ['podbrdske_muzeum', 'voltusska_s'],
+    ['most_zamek', 'voltusska_s'],
+    ['voltusska_s', 'koupaci_rybnik'],
+    ['koupaci_rybnik', 'u_drtice'],
+  ]),
+});
+
+function findShortestPedestrianGraphPath(fromPt, toPt) {
+  const nodes = ROZMITAL_PEDESTRIAN_GRAPH.nodes;
+  const nodeIds = Object.keys(nodes);
+  let startId = null;
+  let endId = null;
+  let minStartDist = Infinity;
+  let minEndDist = Infinity;
+
+  for (const id of nodeIds) {
+    const n = nodes[id];
+    const ds = haversineMeters(fromPt, n) ?? Infinity;
+    const de = haversineMeters(toPt, n) ?? Infinity;
+    if (ds < minStartDist) {
+      minStartDist = ds;
+      startId = id;
+    }
+    if (de < minEndDist) {
+      minEndDist = de;
+      endId = id;
+    }
+  }
+
+  if (!startId || !endId || minStartDist > 420 || minEndDist > 420) {
+    return null;
+  }
+  if (startId === endId) {
+    const singleNode = nodes[startId];
+    return [[singleNode.lat, singleNode.lng]];
+  }
+
+  const adj = {};
+  for (const id of nodeIds) adj[id] = [];
+  for (const [u, v] of ROZMITAL_PEDESTRIAN_GRAPH.edges) {
+    const w = haversineMeters(nodes[u], nodes[v]) ?? 100;
+    adj[u].push({ to: v, weight: w });
+    adj[v].push({ to: u, weight: w });
+  }
+
+  const dist = {};
+  const prev = {};
+  const visited = new Set();
+  for (const id of nodeIds) dist[id] = Infinity;
+  dist[startId] = 0;
+
+  while (visited.size < nodeIds.length) {
+    let u = null;
+    let best = Infinity;
+    for (const id of nodeIds) {
+      if (!visited.has(id) && dist[id] < best) {
+        best = dist[id];
+        u = id;
+      }
+    }
+    if (!u || u === endId) break;
+    visited.add(u);
+    for (const edge of adj[u]) {
+      const alt = dist[u] + edge.weight;
+      if (alt < dist[edge.to]) {
+        dist[edge.to] = alt;
+        prev[edge.to] = u;
+      }
+    }
+  }
+
+  if (!Number.isFinite(dist[endId])) return null;
+  const path = [];
+  let cur = endId;
+  while (cur) {
+    path.unshift([nodes[cur].lat, nodes[cur].lng]);
+    cur = prev[cur];
+  }
+  return path;
+}
+
+/**
+ * Přichytí bod `point` na nejbližší úsek pěší trasy (`routeCoords`) nebo chodníku/stezky
+ * v `ROZMITAL_PEDESTRIAN_GRAPH` v toleranci `maxSnapMeters` (výchozí 18 m),
+ * aby postavička ve 3D nikdy nelétala přes budovy.
+ */
+export function snapPointToPedestrianPath(point, routeCoords = null, maxSnapMeters = 18) {
+  const norm = normalizePointLatLng(point);
+  if (!norm) return point;
+
+  let bestLat = norm.lat;
+  let bestLng = norm.lng;
+  let bestDistM = Infinity;
+
+  const checkSegment = (aLat, aLng, bLat, bLng) => {
+    const cosLat = Math.cos((norm.lat * Math.PI) / 180);
+    const px = (norm.lng - aLng) * cosLat * 111320;
+    const py = (norm.lat - aLat) * 111320;
+    const vx = (bLng - aLng) * cosLat * 111320;
+    const vy = (bLat - aLat) * 111320;
+    const lenSq = vx * vx + vy * vy;
+    const t = lenSq > 1e-6 ? Math.max(0, Math.min(1, (px * vx + py * vy) / lenSq)) : 0;
+    const projLat = aLat + (bLat - aLat) * t;
+    const projLng = aLng + (bLng - aLng) * t;
+    const dM = Math.hypot(px - vx * t, py - vy * t);
+    if (dM < bestDistM) {
+      bestDistM = dM;
+      bestLat = projLat;
+      bestLng = projLng;
+    }
+  };
+
+  if (Array.isArray(routeCoords) && routeCoords.length >= 2) {
+    for (let i = 0; i < routeCoords.length - 1; i++) {
+      const p1 = normalizePointLatLng(routeCoords[i]);
+      const p2 = normalizePointLatLng(routeCoords[i + 1]);
+      if (p1 && p2) {
+        checkSegment(p1.lat, p1.lng, p2.lat, p2.lng);
+      }
+    }
+  }
+
+  const nodes = ROZMITAL_PEDESTRIAN_GRAPH.nodes;
+  for (const [u, v] of ROZMITAL_PEDESTRIAN_GRAPH.edges) {
+    const n1 = nodes[u];
+    const n2 = nodes[v];
+    if (n1 && n2) {
+      checkSegment(n1.lat, n1.lng, n2.lat, n2.lng);
+    }
+  }
+
+  if (bestDistM <= maxSnapMeters) {
+    return { lat: Number(bestLat.toFixed(6)), lng: Number(bestLng.toFixed(6)), snapped: true, distanceToPathM: bestDistM };
+  }
+  return { lat: norm.lat, lng: norm.lng, snapped: false, distanceToPathM: bestDistM };
+}
+
+function enrichLegWithStreetCorners(legCoords = [], distanceM = 0, useGraph = false) {
+  if (!Array.isArray(legCoords) || legCoords.length < 2 || !useGraph) {
+    return Array.isArray(legCoords) ? legCoords : [];
+  }
+
+  const enriched = [];
+  for (let i = 0; i < legCoords.length - 1; i++) {
+    const a = normalizePointLatLng(legCoords[i]);
+    const b = normalizePointLatLng(legCoords[i + 1]);
+    if (!a || !b) continue;
+
+    if (enriched.length === 0) {
+      enriched.push([a.lat, a.lng]);
+    }
+
+    const segDist = haversineMeters(a, b) ?? 0;
+    const inRozmital =
+      a.lat >= 49.585 && a.lat <= 49.615 && a.lng >= 13.840 && a.lng <= 13.875 &&
+      b.lat >= 49.585 && b.lat <= 49.615 && b.lng >= 13.840 && b.lng <= 13.875;
+
+    if (inRozmital && segDist > 35) {
+      const graphMid = findShortestPedestrianGraphPath(a, b);
+      if (Array.isArray(graphMid) && graphMid.length > 0) {
+        for (const gpt of graphMid) {
+          const gNorm = { lat: gpt[0], lng: gpt[1] };
+          const dFromA = haversineMeters(a, gNorm) ?? 0;
+          const dToB = haversineMeters(gNorm, b) ?? 0;
+          if (dFromA > 8 && dToB > 8) {
+            const last = enriched[enriched.length - 1];
+            if (!last || last[0] !== gpt[0] || last[1] !== gpt[1]) {
+              enriched.push(gpt);
+            }
+          }
+        }
+      }
+    }
+
+    const last = enriched[enriched.length - 1];
+    if (!last || last[0] !== b.lat || last[1] !== b.lng) {
+      enriched.push([b.lat, b.lng]);
+    }
+  }
+
+  return enriched.length >= 2 ? enriched : legCoords;
 }
 
 export function buildLocalRoutedGeometry(waypoints, options = {}) {
@@ -1874,7 +2112,7 @@ export function buildLocalRoutedGeometry(waypoints, options = {}) {
           ],
           distanceM: Math.round(haversineMeters(fromPt, toPt) || 0),
         };
-    const legCoords = enrichLegWithStreetCorners(leg.coordinates, leg.distanceM);
+    const legCoords = enrichLegWithStreetCorners(leg.coordinates, leg.distanceM, useGraph);
     const startCoordIdx = Math.max(0, coordinates.length - 1);
     for (const c of legCoords) {
       if (
@@ -2002,6 +2240,13 @@ export async function fetchWalkingGeometry(waypoints, fetchImpl = typeof fetch !
     }
 
     if (!route) {
+      const isDefaultFetch = fetchImpl === (typeof fetch !== 'undefined' ? fetch : null);
+      const allInRozmital = accessibleWaypoints.every(
+        p => p.lat >= 49.56 && p.lat <= 49.63 && p.lng >= 13.80 && p.lng <= 13.90
+      );
+      if (isDefaultFetch && allInRozmital) {
+        return buildLocalRoutedGeometry(accessibleWaypoints, { ...options, isFallback: false, useLocalFootpathGraph: true });
+      }
       return fallback();
     }
     if (route?.geometry?.coordinates && Array.isArray(route.geometry.coordinates) && route.geometry.coordinates.length >= 2) {

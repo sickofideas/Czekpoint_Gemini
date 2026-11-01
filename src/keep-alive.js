@@ -265,6 +265,30 @@ function getSharedAudioContext() {
   return sharedAudioCtx;
 }
 
+/**
+ * Synchronně v rámci gesta uživatele (click/touch) odemkne Web Speech API (window.speechSynthesis)
+ * i Web Audio kontext, aby mobilní prohlížeč (iOS Safari / Android Chrome) nezablokoval hlasové povely
+ * po zhasnutí displeje nativním bočním tlačítkem telefonu.
+ */
+export function unlockSpeechSynthesis() {
+  try {
+    getSharedAudioContext();
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window && typeof SpeechSynthesisUtterance !== 'undefined') {
+      try {
+        window.speechSynthesis.resume?.();
+      } catch (_) {}
+      const warmUp = new SpeechSynthesisUtterance(' ');
+      warmUp.lang = 'cs-CZ';
+      warmUp.volume = 0.01;
+      warmUp.rate = 2.0;
+      window.speechSynthesis.speak(warmUp);
+    }
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
 export function triggerPocketProximityAlert(kind = 'proximity') {
   // Vibrace: [250, 120, 250] dle zadání #10
   try {

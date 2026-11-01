@@ -18,7 +18,7 @@ import {
   FOG_REVEAL_RADIUS_M,
   STOP_CONFIRM_RADIUS_M,
 } from './walk-engine.js';
-import { buildLocalRoutedGeometry } from './planner.js';
+import { buildLocalRoutedGeometry, snapPointToPedestrianPath } from './planner.js';
 import { resolveAccessibleStopLocation, evaluateNaturalFeatureReveals } from './natural-features.js';
 
 export const ROZMITAL_CENTER = Object.freeze({ lat: 49.6018, lng: 13.8635 });
@@ -622,8 +622,9 @@ export class GpsSimulator {
 
   stepOnce(distanceMeters = 15) {
     const bearing = this.currentDirectionDeg != null ? this.currentDirectionDeg : this.heading;
-    const nextPos = moveCoordinates(this.position, distanceMeters, bearing);
-    this.position = nextPos;
+    const rawNext = moveCoordinates(this.position, distanceMeters, bearing);
+    const snapped = snapPointToPedestrianPath(rawNext, this.autopilotRouteCoords, 16);
+    this.position = snapped && snapped.snapped ? { lat: snapped.lat, lng: snapped.lng } : rawNext;
     this.heading = bearing;
     this.onHeadingChange(this.heading);
     this.simTimestamp += 11000;
@@ -728,7 +729,9 @@ export class GpsSimulator {
     while (remaining > 0.05 && substeps < 120) {
       substeps++;
       const stepDist = Math.min(remaining, MAX_SUBSTEP_M);
-      this.position = moveCoordinates(this.position, stepDist, bearingDeg);
+      const rawNext = moveCoordinates(this.position, stepDist, bearingDeg);
+      const snapped = snapPointToPedestrianPath(rawNext, this.autopilotRouteCoords, 14);
+      this.position = snapped && snapped.snapped ? { lat: snapped.lat, lng: snapped.lng } : rawNext;
       remaining -= stepDist;
       this.heading = bearingDeg;
       this.simTimestamp += Math.max(10000, Math.round((stepDist / 1.4) * 1000));
