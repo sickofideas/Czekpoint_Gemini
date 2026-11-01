@@ -70,7 +70,7 @@ export function getAudioKeepaliveElement() {
       audioElement.playsInline = true;
       audioElement.setAttribute?.('playsinline', '');
       audioElement.setAttribute?.('webkit-playsinline', '');
-      audioElement.volume = 0.01;
+      audioElement.volume = 0.07;
       audioElement.addEventListener?.('timeupdate', () => {
         if (typeof audioTickCallback === 'function') {
           try {

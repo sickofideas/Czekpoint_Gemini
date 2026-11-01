@@ -763,7 +763,8 @@ export class GpsSimulator {
       const distToTarget = haversineMeters(this.position, target) ?? 0;
       const stepDist = Math.min(remaining, distToTarget, MAX_SUBSTEP_M);
       const step = stepTowards(this.position, target, stepDist);
-      this.position = { lat: step.lat, lng: step.lng };
+      const snapped = snapPointToPedestrianPath({ lat: step.lat, lng: step.lng }, this.autopilotRouteCoords, 14);
+      this.position = snapped && snapped.snapped ? { lat: snapped.lat, lng: snapped.lng } : { lat: step.lat, lng: step.lng };
       this.heading = step.heading;
       remaining -= stepDist;
       this.simTimestamp += Math.max(10000, Math.round((Math.max(1, stepDist) / 1.4) * 1000));

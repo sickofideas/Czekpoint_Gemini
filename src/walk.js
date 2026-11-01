@@ -2540,32 +2540,32 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       if (typeof map.getBearing === 'function') {
         camBearing = Number(map.getBearing()) || 0;
       }
-      let targetCamHeading = camBearing;
-      if (followHeadingMode) {
-        targetCamHeading = Number.isFinite(currentDeviceHeading)
-          ? currentDeviceHeading
-          : (Number.isFinite(currentWalkHeadingDeg) ? currentWalkHeadingDeg : camBearing);
-      } else if (is3dActive) {
-        targetCamHeading = Number.isFinite(currentWalkHeadingDeg)
-          ? currentWalkHeadingDeg
-          : (Number.isFinite(targetBearing) ? targetBearing : camBearing);
-      }
-
-      const delta = ((targetCamHeading - camBearing + 540) % 360) - 180;
-      camBearing = (camBearing + delta * 0.35 + 360) % 360;
-      camLng = targetLng;
-      camLat = targetLat;
 
       const jumpOpts = {
         center: [targetLng, targetLat],
         padding: getMapCameraPadding(),
       };
-      if ((followHeadingMode || is3dActive) && Number.isFinite(camBearing)) {
-        jumpOpts.bearing = camBearing;
+
+      // KRITICKÉ: Ve 3D režimu NIKDY automaticky nerotovat azimut kamery (bearing),
+      // pokud uživatel výslovně nezapnul režim „🧭 Sledovat směr“ (followHeadingMode)!
+      // Průběžné otáčení kamery na každém kroku při náklonu 58° způsobovalo cukání a protáčení světa.
+      if (followHeadingMode) {
+        const targetCamHeading = Number.isFinite(currentDeviceHeading)
+          ? currentDeviceHeading
+          : (Number.isFinite(currentWalkHeadingDeg) ? currentWalkHeadingDeg : camBearing);
+        const delta = ((targetCamHeading - camBearing + 540) % 360) - 180;
+        camBearing = (camBearing + delta * 0.35 + 360) % 360;
+        if (Number.isFinite(camBearing)) {
+          jumpOpts.bearing = camBearing;
+        }
       }
-      if (typeof map.easeTo === 'function' && durationMs > 0 && camStepDistM < 120) {
+
+      camLng = targetLng;
+      camLat = targetLat;
+
+      if (typeof map.easeTo === 'function' && durationMs > 0 && camStepDistM < 160) {
         try {
-          map.easeTo({ ...jumpOpts, duration: is3dActive ? 650 : 400, easing: t => t });
+          map.easeTo({ ...jumpOpts, duration: is3dActive ? 550 : 400, easing: t => t, essential: true });
         } catch {
           try { map.jumpTo?.(jumpOpts); } catch {}
         }
@@ -2578,7 +2578,14 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       updateRecenterButtonVisibility();
     }
     renderTrail();
-    drawFog();
+
+    // KRITICKÁ OPRAVA PROBLIKÁVÁNÍ 3D: Ve 3D režimu nevoláme updateImage na textuře mlhy při každém 5m posunu,
+    // protože re-bindování WebGL textury na 3D terénu vyvolává problikávání mapy.
+    if (!is3dActive) {
+      drawFog();
+    } else if (camStepDistM >= 35.0 || (nowMs - lastFogUpdateAt) >= 4000) {
+      drawFog();
+    }
   }
 
   function metersToPx(lat, meters) {
@@ -3588,9 +3595,12 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     updateTurnNavPill(origin);
   }
 
+  let lastPocketSpokenMeters = 0;
+  let lastPocketSpokenAt = 0;
+
   /**
    * ZADÁNÍ #08 (Bod 5) & ZADÁNÍ #10: Hlasová navigace v češtině (Web Speech API, cs-CZ) + zvukový signál rohu
-   * fungující i při zhasnutém displeji / v kapesním režimu.
+   * fungující spolehlivě i při zhasnutém displeji / v kapse.
    */
   function speakCzechNav(text, stepKey = '', direction = 'straight') {
     if (!voiceNavEnabled || !text) return;
@@ -3617,8 +3627,13 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         }
         const utter = new SpeechSynthesisUtterance(text);
         utter.lang = 'cs-CZ';
-        utter.rate = 1.02;
+        utter.rate = 1.0;
         utter.volume = 1.0;
+        try {
+          const voices = window.speechSynthesis.getVoices?.() || [];
+          const czVoice = voices.find(v => v.lang && (v.lang.startsWith('cs') || v.lang.startsWith('sk')));
+          if (czVoice) utter.voice = czVoice;
+        } catch {}
         window.speechSynthesis.speak(utter);
       }
     } catch {}
@@ -3626,18 +3641,19 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
 
   /**
    * ZADÁNÍ #08 (Bod 5): Aktualizuje kompaktní pilulku odbočovací navigace (.turn-nav-pill) vedle kompasu
-   * a hlásí každý roh domu v předstihu i přímo u rohu.
+   * a hlásí každý roh domu v předstihu i přímo u rohu a z kapsy při zhasnutém displeji.
    */
   function updateTurnNavPill(origin = lastFix) {
     const iconEl = $('turn-nav-icon');
     const textEl = $('turn-nav-text');
-    if (!iconEl || !textEl) return;
 
     const plannedPlaces = getPlannedPlaces();
     const currentPos = origin || lastFix || telemetry.lastKnownPosition || plannedRoute.origin;
-    if (!currentPos || (plannedPlaces.length === 0 && !lastRoutedGeometry)) {
-      iconEl.textContent = '↑';
-      textEl.textContent = 'Volná chůze · Vyber body v mapě nebo v seznamu';
+    if (!currentPos) return;
+
+    if (plannedPlaces.length === 0 && !lastRoutedGeometry) {
+      if (iconEl) iconEl.textContent = '↑';
+      if (textEl) textEl.textContent = 'Volná chůze · Vyber body v mapě nebo v seznamu';
       return;
     }
 
@@ -3647,11 +3663,21 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       plannedPlaces,
       confirmedStopIds
     );
-    iconEl.textContent = instr.icon || '↑';
-    textEl.textContent = instr.text || 'Pokračuj po trase';
+    if (iconEl) iconEl.textContent = instr.icon || '↑';
+    if (textEl) textEl.textContent = instr.text || 'Pokračuj po trase';
 
     if ($('pocket-mode-overlay') && !$('pocket-mode-overlay').hidden && $('pocket-mode-stats')) {
       $('pocket-mode-stats').textContent = instr.text || 'GPS zaznamenává trasu na pozadí';
+    }
+
+    // Aktualizace MediaSession pro zobrazení navigace na zamčené obrazovce telefonu
+    if (typeof navigator !== 'undefined' && 'mediaSession' in navigator && navigator.mediaSession?.metadata) {
+      try {
+        if (instr.text) navigator.mediaSession.metadata.title = instr.text;
+        if (instr.distanceToTurnM != null) {
+          navigator.mediaSession.metadata.album = `Czekpoint · ${Math.round(instr.distanceToTurnM)} m`;
+        }
+      } catch {}
     }
 
     // Pokud hráč seběhl z trasy (potvrzené vybočení > 45 m), automaticky přepočítáme pěší trasu
@@ -3660,18 +3686,28 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       lastOffRouteRecalcAt = Date.now();
       plannedRouteRenderKey = null;
       renderPlannedRouteOnMap(true, { offRoute: true });
+      if (voiceNavEnabled) {
+        speakCzechNav('Pozor, vybočili jste z trasy. Přepočítávám cestu.', `offroute_${Math.floor(Date.now() / 15000)}`, 'right');
+      }
     }
 
-    // DÁVKA 2 (Bod 3.1): Při výpadku routeru (fallback_direct) nespouštíme hlasovou navigaci odboček!
-    const isFallbackRoute = Boolean(!lastRoutedGeometry || lastRoutedGeometry.isFallback || lastRoutedGeometry.routeStatus === 'fallback_direct');
-    if (!isFallbackRoute && voiceNavEnabled && (active || demo || simSandboxActive)) {
-      if (instr.voiceText && instr.distanceToTurnM != null && instr.distanceToTurnM <= 85) {
+    const isHiddenOrPocket = (typeof document !== 'undefined' && document.hidden === true) || ($('pocket-mode-overlay') && !$('pocket-mode-overlay').hidden);
+
+    if (voiceNavEnabled && (active || demo || simSandboxActive)) {
+      if (instr.voiceText && instr.distanceToTurnM != null && instr.distanceToTurnM <= 70) {
+        // Hlášení odbočky u křižovatky
         speakCzechNav(instr.voiceText, instr.stepKey, instr.turnDirection || 'straight');
-      } else if (instr.text && (document.hidden || ($('pocket-mode-overlay') && !$('pocket-mode-overlay').hidden))) {
-        // V kapse při zhasnutém displeji hlásíme i průběžný směr každých ~90 m, aby uživatel věděl, že navigace žije
-        const bucket90 = Math.floor((Number(progress?.meters) || 0) / 90);
-        if (bucket90 > 0) {
-          speakCzechNav(instr.text, `pocket_progress_${bucket90}`, 'straight');
+      } else if (isHiddenOrPocket) {
+        // V kapse nebo při zhasnutém displeji: pravidelné hlasové vedení každých ~40 m nebo každých 30 s
+        const walkedM = Number(progress?.meters) || 0;
+        const now = Date.now();
+        const distSinceLastSpoken = Math.abs(walkedM - lastPocketSpokenMeters);
+        const timeSinceLastSpoken = now - lastPocketSpokenAt;
+        if ((distSinceLastSpoken >= 40 || (timeSinceLastSpoken >= 30000 && distSinceLastSpoken >= 15)) && instr.text) {
+          lastPocketSpokenMeters = walkedM;
+          lastPocketSpokenAt = now;
+          const speechMsg = instr.voiceText || instr.text;
+          speakCzechNav(speechMsg, `pocket_update_${Math.floor(walkedM / 40)}_${Math.floor(now / 30000)}`, instr.turnDirection || 'straight');
         }
       }
     }
@@ -6310,12 +6346,14 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         cancelAnimationFrame(playerLerpRafId);
         playerLerpRafId = null;
       }
-      visualPlayerPos = cleanFix;
+      const snapped = snapPointToPedestrianPath(cleanFix, plannedRouteCoords, 16);
+      const targetPt = snapped && snapped.snapped ? { lat: snapped.lat, lng: snapped.lng } : cleanFix;
+      visualPlayerPos = targetPt;
       if (map && player && accuracyRing) {
         setPlayerMarkerVisible(true);
         updatePlayerAvatarIcon(walkState === 'running');
-        player.setLatLng([cleanFix.lat, cleanFix.lng]);
-        accuracyRing.setLatLng([cleanFix.lat, cleanFix.lng]);
+        player.setLatLng([targetPt.lat, targetPt.lng]);
+        accuracyRing.setLatLng([targetPt.lat, targetPt.lng]);
         accuracyRing.setRadius(cleanFix.accuracy);
       }
     } else if (map && player && accuracyRing) {
@@ -11304,21 +11342,23 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       bindOrientationListeners();
       updateDirectionalIndicators();
 
-      // KRITICKÁ OPRAVA 2 (Hotfix v2.0.2): Okamžitá synchronizace a přemostění při rozsvícení displeje
+      // KRITICKÁ OPRAVA 2 (Hotfix v2.0.2): Plynulá synchronizace a přemostění při rozsvícení displeje bez skákání postavičky
       if (map) {
         resizeMap();
         const latestFix = lastAcceptedFix || lastFix;
         if (latestFix && Number.isFinite(latestFix.lat) && Number.isFinite(latestFix.lng)) {
-          visualPlayerPos = { lat: latestFix.lat, lng: latestFix.lng };
+          const snapped = snapPointToPedestrianPath(latestFix, plannedRouteCoords, 16);
+          const targetPt = snapped && snapped.snapped ? { lat: snapped.lat, lng: snapped.lng } : latestFix;
+          visualPlayerPos = { lat: targetPt.lat, lng: targetPt.lng };
           if (player) {
             setPlayerMarkerVisible(true);
-            player.setLatLng([latestFix.lat, latestFix.lng]);
+            smoothMovePlayerTo(targetPt.lat, targetPt.lng, 650);
           }
           if (accuracyRing) {
-            accuracyRing.setLatLng([latestFix.lat, latestFix.lng]);
+            accuracyRing.setLatLng([targetPt.lat, targetPt.lng]);
           }
           if (follow) {
-            centerMapOnPlayer(latestFix, false);
+            centerMapOnPlayer(targetPt, true);
           }
         }
         updateFogCanvas(true);

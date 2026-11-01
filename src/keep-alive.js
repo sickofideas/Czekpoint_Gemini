@@ -333,69 +333,71 @@ export function playTurnAudioCue(direction = 'straight') {
     osc.type = 'sine';
 
     if (direction === 'left') {
-      // 1x beep 440 Hz (~0.18s)
-      osc.frequency.setValueAtTime(440, now);
+      // Vzestupný dvoutón (C5 523 Hz -> E5 659 Hz) — jasná odbočka vlevo slyšitelná z kapsy
+      osc.frequency.setValueAtTime(523.25, now);
+      osc.frequency.setValueAtTime(659.25, now + 0.12);
       gain.gain.setValueAtTime(0.001, now);
-      gain.gain.exponentialRampToValueAtTime(0.18, now + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.18);
+      gain.gain.exponentialRampToValueAtTime(0.24, now + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.28);
       osc.connect(gain);
       gain.connect(ctx.destination);
       osc.start(now);
-      osc.stop(now + 0.20);
+      osc.stop(now + 0.29);
     } else if (direction === 'right') {
-      // 2x beep 587 Hz
-      osc.frequency.setValueAtTime(587.33, now);
+      // Sestupný dvoutón (E5 659 Hz -> C5 523 Hz) — jasná odbočka vpravo slyšitelná z kapsy
+      osc.frequency.setValueAtTime(659.25, now);
+      osc.frequency.setValueAtTime(523.25, now + 0.12);
       gain.gain.setValueAtTime(0.001, now);
-      gain.gain.exponentialRampToValueAtTime(0.18, now + 0.015);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.09);
-      gain.gain.setValueAtTime(0.0001, now + 0.12);
-      gain.gain.exponentialRampToValueAtTime(0.18, now + 0.14);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.23);
+      gain.gain.exponentialRampToValueAtTime(0.24, now + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.28);
       osc.connect(gain);
       gain.connect(ctx.destination);
       osc.start(now);
-      osc.stop(now + 0.25);
+      osc.stop(now + 0.29);
     } else if (direction === 'arrive') {
-      // Akord 523.25, 659.25, 783.99 Hz
+      // Slavnostní trojtónový akord (C5 523.25 + E5 659.25 + G5 783.99 Hz)
       osc.frequency.setValueAtTime(523.25, now);
       gain.gain.setValueAtTime(0.001, now);
-      gain.gain.exponentialRampToValueAtTime(0.16, now + 0.03);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.35);
+      gain.gain.exponentialRampToValueAtTime(0.22, now + 0.03);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.45);
       osc.connect(gain);
       gain.connect(ctx.destination);
       osc.start(now);
-      osc.stop(now + 0.37);
+      osc.stop(now + 0.46);
 
       const osc2 = ctx.createOscillator();
       const gain2 = ctx.createGain();
       osc2.type = 'sine';
       osc2.frequency.setValueAtTime(659.25, now);
       gain2.gain.setValueAtTime(0.001, now);
-      gain2.gain.exponentialRampToValueAtTime(0.14, now + 0.03);
-      gain2.gain.exponentialRampToValueAtTime(0.0001, now + 0.35);
+      gain2.gain.exponentialRampToValueAtTime(0.20, now + 0.03);
+      gain2.gain.exponentialRampToValueAtTime(0.0001, now + 0.45);
       osc2.connect(gain2);
       gain2.connect(ctx.destination);
       osc2.start(now);
-      osc2.stop(now + 0.37);
+      osc2.stop(now + 0.46);
     } else {
-      osc.frequency.setValueAtTime(440, now);
+      // Jemný potvrzovací tón přímého směru (D5 587 Hz)
+      osc.frequency.setValueAtTime(587.33, now);
       gain.gain.setValueAtTime(0.001, now);
-      gain.gain.exponentialRampToValueAtTime(0.12, now + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.15);
+      gain.gain.exponentialRampToValueAtTime(0.18, now + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.22);
       osc.connect(gain);
       gain.connect(ctx.destination);
       osc.start(now);
-      osc.stop(now + 0.16);
+      osc.stop(now + 0.23);
     }
 
     if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
       try {
         if (direction === 'right') {
-          navigator.vibrate([90, 60, 90]);
+          navigator.vibrate([120, 60, 120]);
         } else if (direction === 'left') {
-          navigator.vibrate([140]);
+          navigator.vibrate([160]);
         } else if (direction === 'arrive') {
-          navigator.vibrate([100, 50, 150]);
+          navigator.vibrate([140, 60, 200]);
+        } else {
+          navigator.vibrate([80]);
         }
       } catch {}
     }
@@ -517,10 +519,10 @@ export function createKeepAliveController() {
       if (ctx && !keepAliveOsc) {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
-        // Sub-audible 22 Hz s téměř nulovou hlasitostí udrží audio vlákno aktivní na iOS/Android
+        // Nízkofrekvenční 36 Hz jemný tón s reálnou zvukovou energií (~0.008) zabrání uspání audio vlákna systémem Android/iOS
         osc.type = 'sine';
-        osc.frequency.value = 22;
-        gain.gain.value = 0.0002;
+        osc.frequency.value = 36;
+        gain.gain.value = 0.008;
         osc.connect(gain);
         gain.connect(ctx.destination);
         osc.start();
