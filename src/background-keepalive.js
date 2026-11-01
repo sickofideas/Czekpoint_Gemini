@@ -9,11 +9,57 @@
  * 3. Screen Wake Lock API (volitelné zabránění zhasnutí obrazovky, pokud je zapnuto).
  */
 
-// 48-bajtový platný neslyšný WAV soubor (8-bit PCM ticho)
-export const SILENT_WAV_BASE64 = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAESsAAABAAgAZGF0YQQAAACAgICA';
+// Generuje 2sekundový platný 8-bit PCM WAV soubor (8000 Hz, 16 000 vzorků) s nepatrným střídáním 128/129,
+// aby mobilní OS (Android Chrome, iOS Safari) nevyhodnotil stream jako nulové ticho a neuspal proces při zhasnutí displeje.
+function buildKeepAliveWavDataUri() {
+  try {
+    const sampleRate = 8000;
+    const durationSec = 2;
+    const numSamples = sampleRate * durationSec;
+    const buffer = new ArrayBuffer(44 + numSamples);
+    const view = new DataView(buffer);
+    const writeStr = (offset, str) => {
+      for (let i = 0; i < str.length; i++) {
+        view.setUint8(offset + i, str.charCodeAt(i));
+      }
+    };
+    writeStr(0, 'RIFF');
+    view.setUint32(4, 36 + numSamples, true);
+    writeStr(8, 'WAVE');
+    writeStr(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true); // PCM
+    view.setUint16(22, 1, true); // Mono
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate, true);
+    view.setUint16(32, 1, true);
+    view.setUint16(34, 8, true); // 8-bit
+    writeStr(36, 'data');
+    view.setUint32(40, numSamples, true);
+    const bytes = new Uint8Array(buffer);
+    for (let i = 0; i < numSamples; i++) {
+      bytes[44 + i] = (i & 1) === 0 ? 128 : 129;
+    }
+    if (typeof btoa === 'function') {
+      let binary = '';
+      const chunkSize = 4096;
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+      }
+      return 'data:audio/wav;base64,' + btoa(binary);
+    }
+    if (typeof Buffer !== 'undefined') {
+      return 'data:audio/wav;base64,' + Buffer.from(bytes).toString('base64');
+    }
+  } catch {}
+  return 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAESsAAABAAgAZGF0YQQAAACAgICA';
+}
+
+export const SILENT_WAV_BASE64 = buildKeepAliveWavDataUri();
 
 let audioElement = null;
 let audioTickCallback = null;
+let trackingShouldStayActive = false;
 
 export function getAudioKeepaliveElement() {
   if (typeof window === 'undefined' || typeof Audio === 'undefined') return null;
@@ -22,11 +68,22 @@ export function getAudioKeepaliveElement() {
       audioElement = new Audio(SILENT_WAV_BASE64);
       audioElement.loop = true;
       audioElement.playsInline = true;
+      audioElement.setAttribute?.('playsinline', '');
+      audioElement.setAttribute?.('webkit-playsinline', '');
       audioElement.volume = 0.01;
       audioElement.addEventListener?.('timeupdate', () => {
         if (typeof audioTickCallback === 'function') {
           try {
             audioTickCallback(Date.now());
+          } catch {}
+        }
+      });
+      audioElement.addEventListener?.('ended', () => {
+        if (trackingShouldStayActive && audioElement) {
+          try {
+            audioElement.currentTime = 0;
+            const p = audioElement.play();
+            if (p && typeof p.catch === 'function') p.catch(() => {});
           } catch {}
         }
       });
@@ -58,6 +115,7 @@ export function startBackgroundTracking({
 } = {}) {
   if (typeof window === 'undefined' && typeof navigator === 'undefined') return;
 
+  trackingShouldStayActive = true;
   if (typeof onTick === 'function') {
     audioTickCallback = onTick;
   }
@@ -107,6 +165,7 @@ export function updateBackgroundTracking({ title, album } = {}) {
 }
 
 export function pauseBackgroundTracking() {
+  trackingShouldStayActive = false;
   const audio = getAudioKeepaliveElement();
   if (audio) {
     try { audio.pause(); } catch {}
@@ -119,6 +178,7 @@ export function pauseBackgroundTracking() {
 }
 
 export function stopBackgroundTracking() {
+  trackingShouldStayActive = false;
   const audio = getAudioKeepaliveElement();
   if (audio) {
     try {

@@ -540,9 +540,11 @@ export function createKeepAliveController() {
   return {
     async start(subtitle = 'Czekpoint GPS aktivní') {
       active = true;
-      await acquireWakeLock();
+      // KRITICKÉ: AudioContext a Web Worker musí startovat synchronně přímo v uživatelském gestu (před await!),
+      // jinak iOS Safari a mobilní Chrome zablokují AudioContext ve stavu 'suspended' a uspí kartu po zhasnutí displeje.
       startAudioAndMediaSession(subtitle);
       startBackgroundWorker();
+      await acquireWakeLock();
       if (heartbeatTimer) clearInterval(heartbeatTimer);
       heartbeatTimer = setInterval(() => {
         if (!active) return;
@@ -553,7 +555,7 @@ export function createKeepAliveController() {
         if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
           acquireWakeLock();
         }
-      }, 4000);
+      }, 3000);
       return true;
     },
     async stop() {
@@ -584,6 +586,8 @@ export function createKeepAliveController() {
     setPocketMode(enabled) {
       pocketMode = Boolean(enabled);
       if (pocketMode && active) {
+        startAudioAndMediaSession();
+        startBackgroundWorker();
         acquireWakeLock();
       }
       return pocketMode;

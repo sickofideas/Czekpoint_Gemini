@@ -1579,6 +1579,9 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
           <button type="button" class="button mab-btn mab-pause-btn" id="walk-pause">
             ⏸ Pauza
           </button>
+          <button type="button" class="button mab-btn mab-pocket-btn" id="btn-direct-pocket-mode" title="Kapesní režim — zhasne mapu na černou obrazovku a udrží záznam GPS i hlasovou navigaci v kapse">
+            🌙 Do kapsy
+          </button>
           <!-- DÁVKA 2 (Bod 1.1) / DÁVKA 3 (Bod 8.2): Tlačítko Uložit vzpomínku uvnitř akční lišty -->
           <button type="button" class="button mab-btn mab-memory-btn" id="walk-save-memory" title="Uložit vlastní soukromou vzpomínku na toto místo">
             ✨ Uložit vzpomínku
@@ -2221,8 +2224,15 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     return Number.isFinite(raw) ? Math.max(0, Math.round(raw)) : 0;
   }
 
+  let cachedCameraPadding = null;
+  let cachedCameraPaddingAt = 0;
+
   function getMapCameraPadding() {
     if (!map) return { top: 0, bottom: 0, left: 0, right: 0 };
+    const now = Date.now();
+    if (cachedCameraPadding && (now - cachedCameraPaddingAt) < 400) {
+      return cachedCameraPadding;
+    }
     const mapEl = $('walk-map');
     const h = mapEl?.clientHeight || map?.transform?.height || 0;
     const w = mapEl?.clientWidth || map?.transform?.width || 0;
@@ -2231,12 +2241,14 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     }
     const maxBottom = Math.max(0, Math.floor(h * 0.35));
     const bottom = zenMode ? 0 : Math.min(140, maxBottom, Math.round(getBottomSheetOverlapPx() * 0.5));
-    return {
+    cachedCameraPadding = {
       top: Math.min(20, Math.floor(h * 0.1)),
       bottom: Number.isFinite(bottom) ? Math.max(0, bottom) : 0,
       left: 0,
       right: 0,
     };
+    cachedCameraPaddingAt = now;
+    return cachedCameraPadding;
   }
 
   let userZoomLocked = false;
@@ -2510,16 +2522,16 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       accuracyRing?.setLatLng([targetLat, targetLng]);
       if (follow && !isUserTouchingMap && map) {
         let snapBearing = Number.isFinite(camBearing) ? camBearing : 0;
-        if (is3dMode || is3DMode) {
-          snapBearing = Number.isFinite(currentWalkHeadingDeg) ? currentWalkHeadingDeg : (Number.isFinite(targetBearing) ? targetBearing : snapBearing);
-        } else if (followHeadingMode) {
-          snapBearing = Number.isFinite(currentDeviceHeading) ? currentDeviceHeading : (Number.isFinite(currentWalkHeadingDeg) ? currentWalkHeadingDeg : snapBearing);
+        if (followHeadingMode) {
+          snapBearing = Number.isFinite(currentDeviceHeading)
+            ? currentDeviceHeading
+            : (Number.isFinite(currentWalkHeadingDeg) ? currentWalkHeadingDeg : snapBearing);
         }
         const jumpOpts = {
           center: [targetLng, targetLat],
           padding: getMapCameraPadding(),
         };
-        if ((is3dMode || is3DMode || followHeadingMode) && Number.isFinite(snapBearing)) {
+        if (followHeadingMode && Number.isFinite(snapBearing)) {
           jumpOpts.bearing = snapBearing;
         }
         if (typeof map.jumpTo === 'function') {
@@ -2546,21 +2558,20 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
 
       visualPlayerPos = { lat: curLat, lng: curLng };
       player.setLatLng([curLat, curLng]);
-      accuracyRing?.setLatLng([curLat, curLng]);
 
       // Jediná synchronní aktualizace kamery v LERP smyčce bez cukání
+      // KRITICKÁ OPRAVA 3D: Nikdy nevolat accuracyRing.setLatLng (GeoJSON setData) 60× za sekundu uvnitř rAF!
       if (follow && !isUserTouchingMap && Number.isFinite(curLat) && Number.isFinite(curLng)) {
         if (!Number.isFinite(camBearing)) camBearing = 0;
         let targetCamHeading = camBearing;
-        if (is3dMode || is3DMode) {
-          // GTA pohled zezadu ve směru pohybu
-          targetCamHeading = Number.isFinite(currentWalkHeadingDeg)
-            ? currentWalkHeadingDeg
-            : (Number.isFinite(targetBearing) ? targetBearing : camBearing);
-        } else if (followHeadingMode) {
+        if (followHeadingMode) {
           targetCamHeading = Number.isFinite(currentDeviceHeading)
             ? currentDeviceHeading
             : (Number.isFinite(currentWalkHeadingDeg) ? currentWalkHeadingDeg : camBearing);
+        } else if (is3dMode || is3DMode) {
+          targetCamHeading = Number.isFinite(currentWalkHeadingDeg)
+            ? currentWalkHeadingDeg
+            : (Number.isFinite(targetBearing) ? targetBearing : camBearing);
         }
 
         // Kruhový LERP přes nejmenší úhel
@@ -2573,7 +2584,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
           center: [curLng, curLat],
           padding: getMapCameraPadding(),
         };
-        if ((is3dMode || is3DMode || followHeadingMode) && Number.isFinite(camBearing)) {
+        if (followHeadingMode && Number.isFinite(camBearing)) {
           jumpOpts.bearing = camBearing;
         }
         if (typeof map.jumpTo === 'function') {
@@ -2586,6 +2597,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       } else {
         playerLerpRafId = null;
         visualPlayerPos = { lat: targetLat, lng: targetLng };
+        accuracyRing?.setLatLng([targetLat, targetLng]);
         updatePlayerAvatarIcon(Boolean(active || demo));
         if (!follow) {
           updateRecenterButtonVisibility();
@@ -2617,9 +2629,9 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
 
     const nowMs = Date.now();
 
-    // Verze v2.2 (Bod 1.2): Během aktivní animace pohybu spouštět drawFog maximálně jednou za 1200 ms
-    if (playerLerpRafId !== null && !force && (nowMs - lastFogUpdateAt < 1200)) {
-      scheduleFog(1200);
+    // Verze v2.2 (Bod 1.2): Během aktivní animace pohybu nebo dotyku uživatele spouštět drawFog odloženě
+    if ((playerLerpRafId !== null || isUserTouchingMap) && !force && (nowMs - lastFogUpdateAt < 1200)) {
+      scheduleFog(isUserTouchingMap ? 350 : 1200);
       return;
     }
 
@@ -2629,12 +2641,23 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       try {
         const b = map.getBounds();
         if (b) {
-          viewportBounds = {
-            south: typeof b.getSouth === 'function' ? b.getSouth() : b._sw?.lat,
-            north: typeof b.getNorth === 'function' ? b.getNorth() : b._ne?.lat,
-            west: typeof b.getWest === 'function' ? b.getWest() : b._sw?.lng,
-            east: typeof b.getEast === 'function' ? b.getEast() : b._ne?.lng,
-          };
+          let south = typeof b.getSouth === 'function' ? b.getSouth() : b._sw?.lat;
+          let north = typeof b.getNorth === 'function' ? b.getNorth() : b._ne?.lat;
+          let west = typeof b.getWest === 'function' ? b.getWest() : b._sw?.lng;
+          let east = typeof b.getEast === 'function' ? b.getEast() : b._ne?.lng;
+          // KRITICKÁ OPRAVA 3D: V nakloněném 3D pohledu (pitch 58°) sahá map.getBounds() až k horizontu (15–30 km daleko),
+          // což by při každém pootočení/naklonění kamery nafouklo texturu mlhy a vyvolalo synchronní 1024×1024 toDataURL()!
+          // Omezíme proto viewportBounds kolem středu pohledu na rozumný lokální poloměr (~1.6 km).
+          const curPitch = typeof map.getPitch === 'function' ? Number(map.getPitch()) || 0 : 0;
+          if ((is3dMode || is3DMode || curPitch > 20) && curCenter && Number.isFinite(curCenter.lat) && Number.isFinite(curCenter.lng)) {
+            const maxHalfLat = 0.014;
+            const maxHalfLng = 0.020;
+            south = Math.max(Number(south), curCenter.lat - maxHalfLat);
+            north = Math.min(Number(north), curCenter.lat + maxHalfLat);
+            west = Math.max(Number(west), curCenter.lng - maxHalfLng);
+            east = Math.min(Number(east), curCenter.lng + maxHalfLng);
+          }
+          viewportBounds = { south, north, west, east };
         }
       } catch {}
     }
@@ -3969,9 +3992,15 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     ensureCustomMapSourcesAndLayers();
 
     const plannedPlaces = getPlannedPlaces();
-    const currentOrigin = (lastFix && Number.isFinite(lastFix.lat) && !userExplicitlyPickedOrigin)
+    // KRITICKÁ OPRAVA VÝKONU: Během chůze se startovní bod trasy (currentOrigin) pro výpočet OSRM geometrie
+    // nesmí měnit s každým metrem chůze (lastFix), jinak se při každém kroku zneplatní geomKey a spustí
+    // síťová bouře OSRM + Open-Meteo + přestavba GeoJSON vrstev!
+    const stableStartOrigin = lockedExpeditionOrigin
+      ? normalizePointLatLng(lockedExpeditionOrigin)
+      : (plannedRoute.origin ? normalizePointLatLng(plannedRoute.origin) : getRouteOriginPoint());
+    const currentOrigin = (opts?.offRoute && lastFix && Number.isFinite(lastFix.lat))
       ? normalizePointLatLng(lastFix)
-      : getRouteOriginPoint();
+      : (stableStartOrigin || ((lastFix && Number.isFinite(lastFix.lat) && !userExplicitlyPickedOrigin) ? normalizePointLatLng(lastFix) : getRouteOriginPoint()));
     const unvisitedPlaces = plannedPlaces.filter(p => !isStopVisited(p));
     const isLoop = plannedRoute.routeType === 'loop' && plannedPlaces.length >= 2;
     const loopReturnOrigin = lockedExpeditionOrigin
@@ -4584,12 +4613,14 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         memoryObj: m,
       }));
 
-    // Při nižším přiblížení mapy zobrazíme bohatou sadu nejzajímavějších a nejbližších bodů,
-    // aby okolí nikdy nepůsobilo prázdně, ale zároveň se značky nepřekrývaly.
+    // Při nižším přiblížení mapy nebo ve 3D režimu zobrazíme optimální sadu nejzajímavějších a nejbližších bodů,
+    // aby okolí nikdy nepůsobilo prázdně, ale 3D projekce DOM značek běžela plynule na 60 FPS.
     const curZoom = (map && typeof map.getZoom === 'function') ? map.getZoom() : 15;
     let displayMapPlaces = mapPlaces;
-    if (curZoom < 14) {
-      const maxNormalPlaces = curZoom < 11 ? 28 : curZoom < 13 ? 52 : 85;
+    if (curZoom < 14 || is3dMode || is3DMode) {
+      const maxNormalPlaces = (is3dMode || is3DMode)
+        ? (curZoom < 13 ? 22 : 34)
+        : (curZoom < 11 ? 28 : curZoom < 13 ? 52 : 85);
       const mustHave = [];
       const others = [];
       for (const p of mapPlaces) {
@@ -4788,7 +4819,9 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       }
     }
 
-    renderPlannedRouteOnMap();
+    if (!options?.skipListRebuild || !plannedRouteRenderKey) {
+      renderPlannedRouteOnMap();
+    }
 
     // Asynchronně načteme fotky pouze pokud je zapnuté zobrazování externích fotografií
     if (appSettings.showExternalPhotos !== false) {
@@ -6709,6 +6742,17 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         : (lastFix ? { id: 'start-gps', label: 'Místo startu', lat: lastFix.lat, lng: lastFix.lng } : null);
       expeditionStartPoint = lockedExpeditionOrigin ? { ...lockedExpeditionOrigin } : null;
       if (lastFix) centerMapOnPlayer(lastFix, false);
+      keepAliveCtrl.start('Czekpoint Simulátor aktivní');
+      startBackgroundTracking({
+        title: 'Výprava běží (Simulátor)',
+        artist: 'Czekpoint GPS aktivní',
+        album: 'Záznam chůze i při zhasnutém displeji',
+        onPause: () => { togglePauseUnified(); },
+        onResume: () => { togglePauseUnified(); },
+        onStop: () => { finishUnifiedExpedition(); },
+        onTick: () => { keepAliveCtrl.triggerManualTick?.(); },
+      });
+      holdWake();
       updateMapActionBar();
       updateTopBarUi();
       stats();
@@ -7129,15 +7173,15 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
                 source: 'openfreemap-v',
                 'source-layer': 'landcover',
                 type: 'fill-extrusion',
-                minzoom: 11,
+                minzoom: 15,
                 maxzoom: 22,
                 filter: ['==', ['get', 'class'], 'wood'],
                 layout: { visibility: 'visible' },
                 paint: {
                   'fill-extrusion-color': '#2d6a4f',
-                  'fill-extrusion-height': 12,
+                  'fill-extrusion-height': 9,
                   'fill-extrusion-base': 0,
-                  'fill-extrusion-opacity': 0.58,
+                  'fill-extrusion-opacity': 0.38,
                 },
               },
               extrusionBefore
@@ -7460,6 +7504,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
 
     const hardenTerrainInstance = (terrainObj) => {
       if (!terrainObj || terrainObj.__czekpointHardened) return;
+      terrainObj.__lastSmoothElev = null;
       if (typeof terrainObj.getElevationForLngLatZoom === 'function') {
         const origGetElev = terrainObj.getElevationForLngLatZoom.bind(terrainObj);
         terrainObj.getElevationForLngLatZoom = function (lngLat, zoom) {
@@ -7472,10 +7517,28 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
             : Math.min(maxSourceZoom, Math.floor(Number(mapInstance.transform?.tileZoom) || 14));
           const safeZoom = Math.max(minSourceZoom, Math.min(maxSourceZoom, rawZoom));
           try {
-            const elev = origGetElev(safeLl, safeZoom);
-            return Number.isFinite(Number(elev)) ? Number(elev) : 0;
+            const rawElev = Number(origGetElev(safeLl, safeZoom));
+            if (!Number.isFinite(rawElev)) {
+              return Number.isFinite(this.__lastSmoothElev) ? this.__lastSmoothElev : 0;
+            }
+            // KRITICKÁ OPRAVA 3D: Zabráníme skokové změně výšky kamery (0 m -> 550 m v jediném snímku),
+            // když se asynchronněčte dlaždice terrain-dem (způsobovalo prudké přeskakování zoomu a středu mapy).
+            if (rawElev === 0 && Number.isFinite(this.__lastSmoothElev) && Math.abs(this.__lastSmoothElev) > 10) {
+              return this.__lastSmoothElev;
+            }
+            if (!Number.isFinite(this.__lastSmoothElev)) {
+              this.__lastSmoothElev = rawElev;
+            } else {
+              const diff = rawElev - this.__lastSmoothElev;
+              if (Math.abs(diff) > 18) {
+                this.__lastSmoothElev = this.__lastSmoothElev + diff * 0.18;
+              } else {
+                this.__lastSmoothElev = rawElev;
+              }
+            }
+            return this.__lastSmoothElev;
           } catch {
-            return 0;
+            return Number.isFinite(this.__lastSmoothElev) ? this.__lastSmoothElev : 0;
           }
         };
       }
@@ -7708,17 +7771,29 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     }
 
     let accCenter = { lat: center.lat, lng: center.lng };
+    let lastSyncedAccCenter = null;
     let accRadiusM = 0;
+    let lastSyncedAccRadiusM = -1;
     accuracyRing = {
       setLatLng([lat, lng]) {
-        if (Number.isFinite(Number(lat)) && Number.isFinite(Number(lng))) {
-          accCenter = { lat: Number(lat), lng: Number(lng) };
-          this.sync();
+        const nLat = Number(lat);
+        const nLng = Number(lng);
+        if (Number.isFinite(nLat) && Number.isFinite(nLng)) {
+          accCenter = { lat: nLat, lng: nLng };
+          const movedM = lastSyncedAccCenter
+            ? (haversineMeters(lastSyncedAccCenter, accCenter) ?? 999)
+            : 999;
+          if (movedM >= 2.5) {
+            this.sync();
+          }
         }
       },
       setRadius(r) {
-        accRadiusM = Math.max(0, Number(r) || 0);
-        this.sync();
+        const nextR = Math.max(0, Number(r) || 0);
+        accRadiusM = nextR;
+        if (Math.abs(nextR - lastSyncedAccRadiusM) >= 0.5) {
+          this.sync();
+        }
       },
       sync() {
         if (!map || typeof map.getSource !== 'function') return;
@@ -7726,10 +7801,12 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         try {
           const src = map.getSource('accuracy-ring-source');
           if (!src) return;
+          lastSyncedAccCenter = { lat: accCenter.lat, lng: accCenter.lng };
+          lastSyncedAccRadiusM = accRadiusM;
           if (accRadiusM <= 0.5) {
             src.setData({ type: 'FeatureCollection', features: [] });
           } else {
-            const feat = createGeoJsonCirclePolygon(accCenter, accRadiusM, 48);
+            const feat = createGeoJsonCirclePolygon(accCenter, accRadiusM, 36);
             src.setData({
               type: 'FeatureCollection',
               features: feat ? [feat] : [],
@@ -7785,8 +7862,12 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       },
     };
 
+    let lastStyleInitAt = 0;
     const onStyleOrMapLoad = () => {
       if (disposed || !map) return;
+      const now = Date.now();
+      if (now - lastStyleInitAt < 150) return;
+      lastStyleInitAt = now;
       hardenMapLibreInternals(map, center);
       enableAllMapInteractions();
       ensureCustomMapSourcesAndLayers({ force3DSync: true });
@@ -7807,7 +7888,9 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
 
     map.on('style.load', onStyleOrMapLoad);
     map.on('load', onStyleOrMapLoad);
-    ensureCustomMapSourcesAndLayers({ force3DSync: true });
+    if (typeof map.isStyleLoaded !== 'function' || map.isStyleLoaded()) {
+      ensureCustomMapSourcesAndLayers({ force3DSync: true });
+    }
     update3DUiState();
 
     // Události ztráty a obnovení grafického kontextu WebGL (webglcontextlost / webglcontextrestored)
@@ -9598,7 +9681,14 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     }
   }
 
-  $('btn-pocket-mode')?.addEventListener('click', () => {
+  $('btn-pocket-mode')?.addEventListener('click', (ev) => {
+    ev?.stopPropagation?.();
+    setPocketModeUi(true);
+    playTick(stateObj.soundEnabled);
+  });
+
+  $('btn-direct-pocket-mode')?.addEventListener('click', (ev) => {
+    ev?.stopPropagation?.();
     setPocketModeUi(true);
     playTick(stateObj.soundEnabled);
   });
@@ -10573,7 +10663,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
 
     // 3. Zavření kapesního režimu (#pocket-mode-overlay) při kliknutí mimo .pocket-mode-box
     if ($('pocket-mode-overlay') && !$('pocket-mode-overlay').hidden) {
-      if (!t.closest('.pocket-mode-box') && !t.closest('#btn-pocket-mode')) {
+      if (!t.closest('.pocket-mode-box') && !t.closest('#btn-pocket-mode') && !t.closest('#btn-direct-pocket-mode')) {
         setPocketModeUi(false);
         playTick(stateObj.soundEnabled);
         return;
@@ -11088,7 +11178,20 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     }
   });
 
+  let hiddenStartedAtMs = 0;
+
   const visibility = () => {
+    if (document.hidden) {
+      hiddenStartedAtMs = Date.now();
+      if (active || walkState === 'running' || walkState === 'locating') {
+        keepAliveCtrl.triggerManualTick?.();
+      }
+      if (canPersistRealState()) {
+        try { saveState(stateObj); } catch {}
+      }
+      return;
+    }
+
     if (!document.hidden && !disposed) {
       // DÁVKA 3 (Bod 3.3): Po návratu do aplikace z pozadí čistě obnovíme odběr senzoru orientace bez duplicitních listenerů
       bindOrientationListeners();
@@ -11115,14 +11218,17 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         renderTrail();
       }
 
-      if (active && !simSandboxActive) {
+      if ((active || walkState === 'running' || walkState === 'locating') && !simSandboxActive) {
         restartGpsWatch();
         holdWake();
+        keepAliveCtrl.start('Czekpoint GPS aktivní');
         stats();
       }
     }
   };
   document.addEventListener('visibilitychange', visibility, { signal: aborter.signal });
+  window.addEventListener('pageshow', visibility, { signal: aborter.signal });
+  window.addEventListener('focus', visibility, { signal: aborter.signal });
 
   const pagehide = () => {
     // ZADÁNÍ: Při zhasnutí obrazovky nebo uspání telefonu v kapse NIKDY nepozastavovat výpravu!

@@ -3236,11 +3236,36 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
     assert.ok(walkJs.includes('data-visual-cat='), 'src/walk.js nastavuje atribut data-visual-cat na mapových značkách i kartách');
     assert.ok(walkJs.includes('data-shape='), 'src/walk.js nastavuje atribut data-shape na mapových značkách i kartách');
   });
+
+  it('Plynulá 3D mapa bez cukání/přeskakování a spolehlivý běh na pozadí při zhasnutém displeji', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const walkJs = fs.readFileSync(path.resolve(process.cwd(), 'src/walk.js'), 'utf-8');
+    const keepAliveJs = fs.readFileSync(path.resolve(process.cwd(), 'src/keep-alive.js'), 'utf-8');
+    const { SILENT_WAV_BASE64 } = await import('./background-keepalive.js');
+
+    // 1. Ověření 2sekundového PCM WAV keep-alive streamu (nikoliv 4bajtového pahýlu)
+    assert.ok(
+      typeof SILENT_WAV_BASE64 === 'string' && SILENT_WAV_BASE64.startsWith('data:audio/wav;base64,') && SILENT_WAV_BASE64.length > 10000,
+      `SILENT_WAV_BASE64 musí být vícevteřinový platný WAV stream (>10 KB), délka: ${SILENT_WAV_BASE64?.length}`
+    );
+
+    // 2. Synchronní odemknutí AudioContextu a Web Workeru před await acquireWakeLock() v keep-alive.js
+    const startMethodIdx = keepAliveJs.indexOf('async start(');
+    const startAudioIdx = keepAliveJs.indexOf('startAudioAndMediaSession(subtitle);', startMethodIdx);
+    const awaitWakeIdx = keepAliveJs.indexOf('await acquireWakeLock();', startMethodIdx);
+    assert.ok(startMethodIdx > 0 && startAudioIdx > startMethodIdx && awaitWakeIdx > startAudioIdx, 'startAudioAndMediaSession se musí volat synchronně PŘED await acquireWakeLock()');
+
+    // 3. Zákaz volání accuracyRing.setLatLng([curLat, curLng]) uvnitř 60fps smyčky stepLerp
+    assert.equal(
+      walkJs.includes('accuracyRing?.setLatLng([curLat, curLng])'),
+      false,
+      'stepLerp nesmí volat accuracyRing.setLatLng([curLat, curLng]) 60× za sekundu'
+    );
+
+    // 4. Vyhlazení skoků DEM výšky (__lastSmoothElev) a omezení 3D horizontu v drawFog
+    assert.ok(walkJs.includes('__lastSmoothElev'), 'hardenTerrainInstance vyhlazuje skoky nadmořské výšky DEM dlaždic (__lastSmoothElev)');
+    assert.ok(walkJs.includes('maxHalfLat = 0.014'), 'drawFog omezuje 3D horizont kolem středu mapy, aby nedocházelo k přepočtu 1024×1024 plátna při každém naklonění');
+    assert.ok(walkJs.includes('id="btn-direct-pocket-mode"'), 'Akční lišta chůze obsahuje přímé tlačítko 🌙 Do kapsy (#btn-direct-pocket-mode)');
+  });
 });
-
-
-
-
-
-
-
