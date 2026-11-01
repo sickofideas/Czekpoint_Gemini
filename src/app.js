@@ -117,7 +117,7 @@ function distanceTo(route) {
   return Number.isFinite(meters) ? `${number(meters / 1000)} km vzdušně` : '';
 }
 
-function renderCard(route, passport = false) {
+function renderCard(route, passport = false, index = 0) {
   const visit = visitFor(route.id);
   const saved = isSaved(route.id);
   const stateObj = loadState();
@@ -135,8 +135,9 @@ function renderCard(route, passport = false) {
   const photoLicenseTag = (cachedPhoto && cachedPhoto.photoUrl)
     ? `📸 Fotka · Wikimedia Commons (${cachedPhoto.license || 'CC BY-SA'})`
     : (isRoute ? '🥾 Trasa / okruh' : '🎨 Vektorová ilustrace kategorie');
+  const staggerIdx = Math.min(Math.max(0, Number(index) || 0), 12);
 
-  return `<article class="route-card" data-route-card="${e(route.id)}">
+  return `<article class="route-card route-card-fade-in" data-route-card="${e(route.id)}" style="--card-stagger:${staggerIdx};--stagger-i:${staggerIdx}">
     <div class="card-image"><a href="${routeLink(route)}" data-catalog-link="true" tabindex="-1" aria-hidden="true"><img src="${e(cardImgSrc)}" alt="" width="600" height="340" loading="lazy" onerror="this.onerror=null;this.src='${e(fallbackBitmap)}';"></a>
       <span class="image-label">${e(photoLicenseTag)}</span>
       <button class="save-button ${saved ? 'saved' : ''}" type="button" data-action="save" data-id="${e(route.id)}" aria-pressed="${saved}" title="${saved ? 'Odebrat z oblíbených na později' : 'Uložit do oblíbených na později'}" aria-label="${saved ? 'Odebrat z oblíbených na později' : 'Uložit do oblíbených na později'}: ${e(route.title)}">${icon('heart')}</button>
@@ -212,7 +213,8 @@ function renderExploreResults() {
   const placesCount = routes.filter(r => !isActualRouteItem(r)).length;
   const routesCount = routes.filter(r => isActualRouteItem(r)).length;
   document.querySelector('#results-info').textContent = `Zobrazeno ${routes.length} z ${state.routes.length} položek (${placesCount} samostatných míst, ${routesCount} tras)${state.position ? ' · seřazeno podle vzdušné vzdálenosti' : ''}${state.filters.maxDistance ? ' · samostatná místa bez délky trasy jsou skrytá' : ''}`;
-  grid.innerHTML = routes.length ? routes.map(route => renderCard(route)).join('') : `<div class="empty-state">${icon('search')}<h3>Tady je zatím ticho.</h3><p>Tomuto výběru žádné místo ani trasa neodpovídá. Zkus méně filtrů nebo jiné hledání.</p><button type="button" class="button" data-action="reset-filters">Zobrazit všechna místa a trasy</button></div>`;
+  grid.innerHTML = routes.length ? routes.map((route, idx) => renderCard(route, false, idx)).join('') : `<div class="empty-state route-card-fade-in">${icon('search')}<h3>Tady je zatím ticho.</h3><p>Tomuto výběru žádné místo ani trasa neodpovídá. Zkus méně filtrů nebo jiné hledání.</p><button type="button" class="button" data-action="reset-filters">Zobrazit všechna místa a trasy</button></div>`;
+  applyStaggerAnimation(grid, '.route-card, .empty-state');
   prefetchVerifiedPhotosForPlaces(routes.slice(0, 12), {
     maxCount: 12,
     onPlaceResolved: (resolvedRoute, photoRes) => {
@@ -912,7 +914,7 @@ function renderPassport() {
           <button class="chip ${state.passportTab === 'visited' ? 'active' : ''}" data-action="passport-tab" data-tab="visited" aria-pressed="${state.passportTab === 'visited'}">${icon('check')}Moje návštěvy (${visitedRoutes.length})</button>
           <button class="chip ${state.passportTab === 'saved' ? 'active' : ''}" data-action="passport-tab" data-tab="saved" aria-pressed="${state.passportTab === 'saved'}">${icon('heart')}Na později (${savedRoutes.length})</button>
         </div>
-        <div class="route-grid">${routes.length ? routes.map(route => renderCard(route, true)).join('') : `<div class="empty-state">${icon(state.passportTab === 'visited' ? 'book' : 'heart')}<h3>${state.passportTab === 'visited' ? 'První stránka zatím čeká.' : 'Kam vyrazíš příště?'}</h3><p>${state.passportTab === 'visited' ? 'Na detailu výletu klepni po návštěvě na „Byl/a jsem tady“. Tvoje sbírka začne prvním místem.' : 'Srdíčkem si ulož výlety, které tě zaujmou. Najdeš je tady, až bude chuť vyrazit.'}</p><a class="button primary" href="#/katalog">Katalog výletů ${icon('arrow')}</a></div>`}</div>
+        <div class="route-grid">${routes.length ? routes.map((route, idx) => renderCard(route, true, idx)).join('') : `<div class="empty-state route-card-fade-in">${icon(state.passportTab === 'visited' ? 'book' : 'heart')}<h3>${state.passportTab === 'visited' ? 'První stránka zatím čeká.' : 'Kam vyrazíš příště?'}</h3><p>${state.passportTab === 'visited' ? 'Na detailu výletu klepni po návštěvě na „Byl/a jsem tady“. Tvoje sbírka začne prvním místem.' : 'Srdíčkem si ulož výlety, které tě zaujmou. Najdeš je tady, až bude chuť vyrazit.'}</p><a class="button primary" href="#/katalog">Katalog výletů ${icon('arrow')}</a></div>`}</div>
       </section>
     `;
   } else {

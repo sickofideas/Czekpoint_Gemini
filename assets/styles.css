@@ -820,4 +820,39 @@ dialog:not([open]) {
   color: #243b2e;
 }
 
+/* ==========================================================================
+   Jemná fade-in animace pro karty tras v katalogu (.route-card-fade-in)
+   ========================================================================== */
+@keyframes routeCardFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.route-card,
+.route-card-fade-in,
+.tile-animate-in,
+.route-grid > .empty-state {
+  animation: routeCardFadeIn 0.36s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(var(--card-stagger, var(--stagger-i, 0)) * 35ms);
+  will-change: opacity, transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .route-card,
+  .route-card-fade-in,
+  .tile-animate-in,
+  .route-grid > .empty-state {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}
+
+
 

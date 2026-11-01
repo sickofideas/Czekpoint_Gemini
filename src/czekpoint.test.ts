@@ -3061,7 +3061,71 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
     assert.ok(appJs.includes('bindCatalogElevationChartInteractions'), 'src/app.js váže interaktivní odečet bodů grafu');
     assert.ok(stylesCss.includes('.catalog-elevation-panel'), 'assets/styles.css obsahuje styly pro .catalog-elevation-panel');
   });
+
+  it('Jemná fade-in animace pro karty tras v katalogu při vykreslování a přepínání filtrů', async () => {
+    const appJs = fs.readFileSync('src/app.js', 'utf-8');
+    const fxJs = fs.readFileSync('src/fx.js', 'utf-8');
+    const stylesCss = fs.readFileSync('assets/styles.css', 'utf-8');
+
+    // 1. Ověření CSS keyframes a tříd v assets/styles.css
+    assert.ok(stylesCss.includes('@keyframes routeCardFadeIn'), 'CSS obsahuje keyframes routeCardFadeIn');
+    assert.ok(stylesCss.includes('.route-card-fade-in'), 'CSS obsahuje třídu .route-card-fade-in');
+    assert.ok(stylesCss.includes('animation: routeCardFadeIn 0.36s cubic-bezier(0.22, 1, 0.36, 1) both'), 'CSS definuje plynulou animaci routeCardFadeIn s cubic-bezier');
+    assert.ok(stylesCss.includes('animation-delay: calc(var(--card-stagger, var(--stagger-i, 0)) * 35ms)'), 'CSS počítá odstupňované zpoždění karet (--card-stagger)');
+
+    // 2. Ověření renderCard a renderExploreResults v src/app.js
+    assert.ok(appJs.includes('function renderCard(route, passport = false, index = 0)'), 'renderCard přijímá index pro odstupňování animace');
+    assert.ok(appJs.includes('class="route-card route-card-fade-in"'), 'renderCard přidává třídu route-card-fade-in na každou kartu');
+    assert.ok(appJs.includes('--card-stagger:${staggerIdx}'), 'renderCard nastavuje CSS proměnnou --card-stagger');
+    assert.ok(appJs.includes("applyStaggerAnimation(grid, '.route-card, .empty-state')"), 'renderExploreResults spouští applyStaggerAnimation při každém překreslení mřížky katalogu');
+
+    // 3. Funkční test applyStaggerAnimation z src/fx.js s mockovaným DOM kontejnerem
+    assert.ok(fxJs.includes("item.style.setProperty('--card-stagger', stagger.toString())"), 'applyStaggerAnimation nastavuje --card-stagger');
+    assert.ok(fxJs.includes("item.classList.add('tile-animate-in', 'route-card-fade-in')"), 'applyStaggerAnimation přidává třídu route-card-fade-in');
+
+    const { applyStaggerAnimation } = await import('./fx.js');
+    const makeMockCard = () => {
+      const props = new Map<string, string>();
+      const classes = new Set<string>();
+      return {
+        offsetWidth: 300,
+        style: {
+          setProperty: (k: string, v: string) => props.set(k, v),
+          getPropertyValue: (k: string) => props.get(k) || '',
+        },
+        classList: {
+          remove: (...names: string[]) => names.forEach(n => classes.delete(n)),
+          add: (...names: string[]) => names.forEach(n => classes.add(n)),
+          contains: (name: string) => classes.has(name),
+        },
+      };
+    };
+
+    const mockCards = Array.from({ length: 15 }, () => makeMockCard());
+    const mockContainer = {
+      querySelectorAll: () => mockCards,
+    };
+
+    const prevDoc = (globalThis as any).document;
+    const prevWin = (globalThis as any).window;
+    try {
+      (globalThis as any).document = {};
+      (globalThis as any).window = {
+        matchMedia: () => ({ matches: false }),
+      };
+
+      applyStaggerAnimation(mockContainer as any, '.route-card');
+      assert.equal(mockCards[0].style.getPropertyValue('--card-stagger'), '0', 'První karta má --card-stagger 0');
+      assert.equal(mockCards[3].style.getPropertyValue('--card-stagger'), '3', 'Čtvrtá karta má --card-stagger 3');
+      assert.equal(mockCards[14].style.getPropertyValue('--card-stagger'), '12', 'Odstupňování je zastropováno na 12 pro svižné vykreslení');
+      assert.equal(mockCards[0].classList.contains('route-card-fade-in'), true, 'Karta má třídu route-card-fade-in');
+    } finally {
+      (globalThis as any).document = prevDoc;
+      (globalThis as any).window = prevWin;
+    }
+  });
 });
+
 
 
 

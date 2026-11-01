@@ -213,8 +213,9 @@ export function applyStaggerAnimation(containerOrSelector, itemSelector = ':scop
   items.forEach((item, index) => {
     const stagger = Math.min(index, 12);
     item.style.setProperty('--stagger-i', stagger.toString());
-    item.classList.remove('tile-animate-in');
+    item.style.setProperty('--card-stagger', stagger.toString());
+    item.classList.remove('tile-animate-in', 'route-card-fade-in');
     void item.offsetWidth; // Trigger reflow for re-animation
-    item.classList.add('tile-animate-in');
+    item.classList.add('tile-animate-in', 'route-card-fade-in');
   });
 }
