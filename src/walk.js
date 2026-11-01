@@ -2725,7 +2725,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       if (map.getLayer('czekpoint-fog-layer')) {
         map.setLayoutProperty('czekpoint-fog-layer', 'visibility', fogMode === 'none' ? 'none' : 'visible');
         const targetFogOpacity = (is3dMode || is3DMode)
-          ? (fogMode === 'full' ? 0.68 : 0.46)
+          ? 0
           : (fogMode === 'full' ? 0.94 : 0.82);
         map.setPaintProperty('czekpoint-fog-layer', 'raster-opacity', targetFogOpacity);
       }
@@ -7149,7 +7149,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
             type: 'raster',
             source: 'czekpoint-fog-source',
             paint: {
-              'raster-opacity': (is3dMode || is3DMode) ? 0.46 : 0.82,
+              'raster-opacity': (is3dMode || is3DMode) ? 0 : 0.82,
               'raster-fade-duration': 0,
               'raster-resampling': 'linear',
             },
@@ -7236,9 +7236,9 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
                 layout: { visibility: 'visible' },
                 paint: {
                   'fill-extrusion-color': '#2d6a4f',
-                  'fill-extrusion-height': 9,
+                  'fill-extrusion-height': 0,
                   'fill-extrusion-base': 0,
-                  'fill-extrusion-opacity': 0.38,
+                  'fill-extrusion-opacity': 0,
                 },
               },
               extrusionBefore
@@ -7339,6 +7339,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     }
 
     if (typeof window !== 'undefined') {
+      window.__map = map;
       window.__czekpointLast3DCheck = result;
       window.czekpointVerify3DState = () => verify3DMapState('manual');
     }
@@ -7576,25 +7577,11 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
           const safeZoom = Math.max(minSourceZoom, Math.min(maxSourceZoom, rawZoom));
           try {
             const rawElev = Number(origGetElev(safeLl, safeZoom));
-            if (!Number.isFinite(rawElev)) {
-              return Number.isFinite(this.__lastSmoothElev) ? this.__lastSmoothElev : 0;
-            }
-            // KRITICKÁ OPRAVA 3D: Zabráníme skokové změně výšky kamery (0 m -> 550 m v jediném snímku),
-            // když se asynchronněčte dlaždice terrain-dem (způsobovalo prudké přeskakování zoomu a středu mapy).
-            if (rawElev === 0 && Number.isFinite(this.__lastSmoothElev) && Math.abs(this.__lastSmoothElev) > 10) {
-              return this.__lastSmoothElev;
-            }
-            if (!Number.isFinite(this.__lastSmoothElev)) {
+            if (Number.isFinite(rawElev)) {
               this.__lastSmoothElev = rawElev;
-            } else {
-              const diff = rawElev - this.__lastSmoothElev;
-              if (Math.abs(diff) > 18) {
-                this.__lastSmoothElev = this.__lastSmoothElev + diff * 0.18;
-              } else {
-                this.__lastSmoothElev = rawElev;
-              }
+              return rawElev;
             }
-            return this.__lastSmoothElev;
+            return Number.isFinite(this.__lastSmoothElev) ? this.__lastSmoothElev : 0;
           } catch {
             return Number.isFinite(this.__lastSmoothElev) ? this.__lastSmoothElev : 0;
           }
@@ -7817,6 +7804,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         maxPitch: 75,
         attributionControl: false,
       });
+      window.__czekpointMap = map;
       hardenMapLibreInternals(map, center);
       appliedTerrain3D = Boolean(is3dMode);
       update3DUiState();

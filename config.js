@@ -258,9 +258,9 @@ export function buildMapLibreStyle(cfg = config, options = {}) {
       },
       paint: {
         'fill-extrusion-color': '#2d6a4f',
-        'fill-extrusion-height': 12,
+        'fill-extrusion-height': 0,
         'fill-extrusion-base': 0,
-        'fill-extrusion-opacity': 0.58,
+        'fill-extrusion-opacity': 0,
       },
     });
 
