@@ -2922,8 +2922,8 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
 
     // 4. Ověření vizuálního indikátoru aktivního 3D terénu v mapě (#map-3d-active-badge)
     assert.ok(walkJs.includes('id="map-3d-active-badge"'), 'src/walk.js obsahuje element #map-3d-active-badge');
-    assert.ok(walkJs.includes('3D Terén aktivní'), 'Indikátor obsahuje text „3D Terén aktivní“');
-    assert.ok(walkJs.includes('badge.hidden = !is3DMode'), 'update3DUiState řídí viditelnost odznáčku badge.hidden = !is3DMode');
+    assert.ok(walkJs.includes('3D terén a budovy aktivní'), 'Indikátor obsahuje text „3D terén a budovy aktivní“');
+    assert.ok(walkJs.includes('badge.hidden = !is3DMode || !sourcesLoaded'), 'update3DUiState zobrazí indikátor pouze ve 3D při načtených zdrojích a skryje jej ve 2D');
     assert.ok(walkCss.includes('.map-3d-active-badge'), 'assets/walk.css definuje styl pro .map-3d-active-badge');
     assert.ok(walkCss.includes('.map-3d-badge-status-dot'), 'assets/walk.css definuje svítící tečku pro indikátor');
 

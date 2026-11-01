@@ -7193,10 +7193,17 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     }
     const badge = $('map-3d-active-badge');
     if (badge) {
-      badge.hidden = !is3DMode;
+      const hasTerrainSource = Boolean(map && typeof map.getSource === 'function' && map.getSource('terrain-dem'));
+      const hasBuildingsLoaded = Boolean(
+        map &&
+        typeof map.getSource === 'function' &&
+        (map.getSource('openfreemap-v') || (typeof map.getLayer === 'function' && map.getLayer('czekpoint-3d-buildings')) || appSettings.show3dBuildings === false)
+      );
+      const sourcesLoaded = !map || typeof map.getSource !== 'function' || (hasTerrainSource && hasBuildingsLoaded);
+      badge.hidden = !is3DMode || !sourcesLoaded;
       const textEl = $('map-3d-badge-text');
-      if (textEl && is3DMode) {
-        textEl.textContent = '3D Terén a budovy aktivní';
+      if (textEl) {
+        textEl.textContent = (is3DMode && sourcesLoaded) ? '3D terén a budovy aktivní' : '';
       }
     }
     $('walk-map-wrap')?.classList.toggle('is-3d-mode', is3DMode);
@@ -7733,6 +7740,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     map.on('style.load', onStyleOrMapLoad);
     map.on('load', onStyleOrMapLoad);
     ensureCustomMapSourcesAndLayers({ force3DSync: true });
+    update3DUiState();
 
     // Události ztráty a obnovení grafického kontextu WebGL (webglcontextlost / webglcontextrestored)
     const mapCanvas = typeof map.getCanvas === 'function' ? map.getCanvas() : null;
