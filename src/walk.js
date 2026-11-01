@@ -2076,6 +2076,9 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
   const prefetchedPhotoPlaceIds = new Set();
   const prefetchedVerifiedPlaceIds = new Set();
   let lastTrailRenderKey = '';
+  let lastMarkerInteractedAt = 0;
+  let lastRenderedLegendKey = '';
+  let lastRenderedPlacesKey = '';
 
   function getMapPixelSize() {
     const mapEl = $('walk-map');
@@ -4525,28 +4528,32 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         const k = item.visualCat?.key || 'nature';
         if (catCounts[k] !== undefined) catCounts[k] += 1;
       }
-      const legendOrder = ['castles', 'sacral', 'views', 'water', 'nature'];
-      const allActive = activeVisualCat === 'all';
-      const chipsHtml = [
-        `<button type="button" class="poi-legend-chip ${allActive ? 'active' : ''}" data-visual-cat-filter="all" aria-pressed="${allActive ? 'true' : 'false'}">
-          <span class="poi-legend-all-dot">✦</span>
-          <span class="poi-legend-label">Všechny kategorie</span>
-          <span class="poi-legend-count">${catCounts.all}</span>
-        </button>`,
-        ...legendOrder.map(key => {
-          const catDef = POI_VISUAL_CATEGORIES[key];
-          const isAct = activeVisualCat === key;
-          const glyphSvg = renderCategoryMarkerGlyph(key === 'sacral' ? 'sacral' : catDef.kind, 'default');
-          return `<button type="button" class="poi-legend-chip cat-${e(key)} ${isAct ? 'active' : ''}" data-visual-cat-filter="${e(key)}" aria-pressed="${isAct ? 'true' : 'false'}" title="${e(`${catDef.label} (tvar: ${catDef.shapeLabel})`)}">
-            <span class="czekpoint-marker-badge legend-mini-badge cat-${e(key)} shape-${e(catDef.shape)}" data-kind="${e(catDef.kind)}" data-visual-cat="${e(key)}" data-shape="${e(catDef.shape)}">
-              <span class="czekpoint-marker-glyph kind-${e(catDef.kind)}">${glyphSvg}</span>
-            </span>
-            <span class="poi-legend-label">${e(catDef.shortLabel)}</span>
-            <span class="poi-legend-count">${catCounts[key] || 0}</span>
-          </button>`;
-        }),
-      ].join('');
-      $('poi-category-legend').innerHTML = chipsHtml;
+      const legendKey = `${activeVisualCat}|${catCounts.all}|${catCounts.castles}|${catCounts.sacral}|${catCounts.views}|${catCounts.water}|${catCounts.nature}`;
+      if (lastRenderedLegendKey !== legendKey) {
+        lastRenderedLegendKey = legendKey;
+        const legendOrder = ['castles', 'sacral', 'views', 'water', 'nature'];
+        const allActive = activeVisualCat === 'all';
+        const chipsHtml = [
+          `<button type="button" class="poi-legend-chip ${allActive ? 'active' : ''}" data-visual-cat-filter="all" aria-pressed="${allActive ? 'true' : 'false'}">
+            <span class="poi-legend-all-dot">✦</span>
+            <span class="poi-legend-label">Všechny kategorie</span>
+            <span class="poi-legend-count">${catCounts.all}</span>
+          </button>`,
+          ...legendOrder.map(key => {
+            const catDef = POI_VISUAL_CATEGORIES[key];
+            const isAct = activeVisualCat === key;
+            const glyphSvg = renderCategoryMarkerGlyph(key === 'sacral' ? 'sacral' : catDef.kind, 'default');
+            return `<button type="button" class="poi-legend-chip cat-${e(key)} ${isAct ? 'active' : ''}" data-visual-cat-filter="${e(key)}" aria-pressed="${isAct ? 'true' : 'false'}" title="${e(`${catDef.label} (tvar: ${catDef.shapeLabel})`)}">
+              <span class="czekpoint-marker-badge legend-mini-badge cat-${e(key)} shape-${e(catDef.shape)}" data-kind="${e(catDef.kind)}" data-visual-cat="${e(key)}" data-shape="${e(catDef.shape)}">
+                <span class="czekpoint-marker-glyph kind-${e(catDef.kind)}">${glyphSvg}</span>
+              </span>
+              <span class="poi-legend-label">${e(catDef.shortLabel)}</span>
+              <span class="poi-legend-count">${catCounts[key] || 0}</span>
+            </button>`;
+          }),
+        ].join('');
+        $('poi-category-legend').innerHTML = chipsHtml;
+      }
     }
 
     if ($('nearby-places-count-badge')) {
@@ -4554,8 +4561,11 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     }
 
     if (!skipListRebuild && $('walk-places')) {
-      const extPhotosOn = appSettings.showExternalPhotos !== false;
-      $('walk-places').innerHTML = sidebarList.slice(0, 40).map(p => {
+      const placesSignature = `${activeVisualCat}|${plannedRoute.selectedPlaceIds?.join(',')}|${confirmedStopIds.size}|${sidebarList.slice(0, 40).map(p => `${p.id}:${plannedPlaceIds.has(p.id) ? 1 : 0}:${isStopVisitedInSession(p) ? 1 : 0}:${Math.round(p.distanceM || 0)}`).join(';')}`;
+      if (lastRenderedPlacesKey !== placesSignature) {
+        lastRenderedPlacesKey = placesSignature;
+        const extPhotosOn = appSettings.showExternalPhotos !== false;
+        $('walk-places').innerHTML = sidebarList.slice(0, 40).map(p => {
         const visitedToday = isStopVisitedInSession(p);
         const nearbyToday = !visitedToday && nearbyRecordedIds.has(p.id);
         const earlierStamp = !visitedToday && hasLifetimeStamp(p);
@@ -4614,6 +4624,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
           </div>
         </div>`;
       }).join('') || '<p class="small-note">V této části mapy zatím nejsou žádná místa pro zvolený filtr. Zkus přepnout kategorii na „Všechny kategorie“ nebo posuň mapu.</p>';
+      }
     }
 
     if (!map || !maplibregl) return;
@@ -4702,8 +4713,8 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       } else {
         const el = document.createElement('div');
         el.className = 'czekpoint-marker-anchor user-memory-anchor';
-        el.style.width = '38px';
-        el.style.height = '38px';
+        el.style.width = '52px';
+        el.style.height = '52px';
         el.title = `✨ Vlastnoruční vzpomínka: ${m.symbolTitle}`;
         el.innerHTML = iconHtml;
         const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
@@ -4721,6 +4732,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         placeMarkersById.set(mItem.id, entry);
         el.addEventListener('click', (ev) => {
           ev.stopPropagation();
+          lastMarkerInteractedAt = Date.now();
           openPlaceDetail(entry.place || mItem);
         });
       }
@@ -4795,8 +4807,8 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       } else {
         const el = document.createElement('div');
         el.className = 'czekpoint-marker-anchor';
-        el.style.width = '42px';
-        el.style.height = '42px';
+        el.style.width = '52px';
+        el.style.height = '52px';
         el.title = p.title || '';
         el.innerHTML = iconHtml;
 
@@ -4817,6 +4829,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
 
         el.addEventListener('click', (ev) => {
           ev.stopPropagation();
+          lastMarkerInteractedAt = Date.now();
           const currentPlace = entry.place || p;
           if (pickingCustomEndOnMap) {
             pickingCustomEndOnMap = false;
@@ -4855,7 +4868,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
           showExternalPhotos: true,
           onUpdated: () => {
             if (disposed) return;
-            renderPlaces();
+            renderPlaces({ skipListRebuild: true });
           },
         });
       }
@@ -4868,7 +4881,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
           maxCount: 16,
           onBatchUpdated: () => {
             if (disposed) return;
-            renderPlaces();
+            renderPlaces({ skipListRebuild: true });
             renderNextCheckpointHero(lastFix || telemetry.lastKnownPosition);
             if (selectedDetailPlace && !$('place-detail-sheet')?.hidden) {
               const updatedPhoto = getCachedPlacePhoto(selectedDetailPlace);
@@ -8130,6 +8143,9 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     });
 
     map.on('click', ev => {
+      if (Date.now() - lastMarkerInteractedAt < 400) {
+        return;
+      }
       const clickPt = ev?.lngLat || ev?.latlng;
       if ($('place-detail-sheet') && !$('place-detail-sheet').hidden) {
         closePlaceDetail();

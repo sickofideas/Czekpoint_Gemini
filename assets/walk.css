@@ -405,23 +405,32 @@
   place-items: center !important;
   background: transparent !important;
   border: 0 !important;
-  cursor: pointer;
+  cursor: pointer !important;
+  width: 52px !important;
+  height: 52px !important;
+  touch-action: manipulation !important;
+  pointer-events: auto !important;
 }
 
 .czekpoint-marker-badge {
   position: relative;
-  width: 28px;
-  height: 28px;
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   background: #17382c;
   color: #e5f2bc;
-  border: 2px solid #ffffff;
-  box-shadow: 0 2px 7px rgba(0, 0, 0, 0.38);
+  border: 2.5px solid #ffffff;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
   transition: transform 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease, border-radius 0.18s ease;
   pointer-events: auto;
+  font-size: 1.25rem;
+}
+.marker-glyph-svg {
+  width: 22px !important;
+  height: 22px !important;
 }
 
 /* ============================================================================
@@ -3840,14 +3849,16 @@ dialog:not([open]) {
 .mab-active-group .mab-memory-btn,
 .mab-active-group .mab-finish-btn,
 .mab-active-group .mab-more-btn {
-  min-height: 44px !important;
-  padding: 8px 6px !important;
-  font-size: 0.84rem !important;
+  min-height: 50px !important;
+  padding: 10px 8px !important;
+  font-size: 0.94rem !important;
+  font-weight: 800 !important;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0 !important;
   width: 100% !important;
+  touch-action: manipulation;
 }
 .mab-btn:active {
   transform: scale(0.97) !important;
@@ -3856,10 +3867,12 @@ dialog:not([open]) {
   background: linear-gradient(135deg, #15803d 0%, #16a34a 100%) !important;
   color: #f0fdf4 !important;
   border: 2px solid #86efac !important;
-  font-size: 1.05rem !important;
-  padding: 12px 24px !important;
-  min-height: 48px !important;
+  font-size: 1.15rem !important;
+  padding: 14px 28px !important;
+  min-height: 54px !important;
+  font-weight: 850 !important;
   flex: 1;
+  touch-action: manipulation;
 }
 .mab-start-btn:hover {
   background: linear-gradient(135deg, #16a34a 0%, #22c55e 100%) !important;
@@ -4210,25 +4223,33 @@ dialog:not([open]) {
 #walk-search-toggle,
 #walk-zen-toggle,
 #btn-toggle-3d,
-#btn-follow-heading {
-  width: 44px !important;
-  height: 44px !important;
-  min-width: 44px !important;
-  min-height: 44px !important;
+#btn-follow-heading,
+#btn-north-up {
+  width: 48px !important;
+  height: 48px !important;
+  min-width: 48px !important;
+  min-height: 48px !important;
   padding: 0 !important;
-  border-radius: 12px !important;
-  font-size: 0.85rem !important;
-  background: rgba(24, 38, 28, 0.94);
+  border-radius: 14px !important;
+  font-size: 1.25rem !important;
+  background: rgba(24, 38, 28, 0.95);
   color: #fef08a;
   border: 1.5px solid #d4af37;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.38);
-  font-weight: 750;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.42);
+  font-weight: 800;
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
   gap: 0 !important;
   cursor: pointer;
+  touch-action: manipulation;
   transition: transform 0.14s ease, background-color 0.14s ease;
+}
+
+#btn-toggle-3d {
+  font-size: 1.05rem !important;
+  font-weight: 900 !important;
+  letter-spacing: 0.5px;
 }
 
 .route-corner-dot {
@@ -5319,9 +5340,7 @@ dialog:not([open]) {
 }
 
 .map-3d-camera-controls {
-  width: 44px !important;
-  flex-direction: column !important;
-  gap: 4px !important;
+  display: none !important;
 }
 
 .active-compass-widget {
@@ -5338,15 +5357,35 @@ dialog:not([open]) {
   display: inline-flex !important;
   align-items: center !important;
   margin-top: 4px !important;
-  padding: 3px 9px !important;
+  padding: 4px 10px !important;
   border-radius: 999px !important;
-  font-size: 0.72rem !important;
+  font-size: 0.78rem !important;
   font-weight: 700 !important;
 }
 
 .place-detail-sheet {
   bottom: 124px !important;
   z-index: 1150 !important;
+}
+
+.place-detail-sheet .pds-close-btn {
+  min-width: 44px !important;
+  min-height: 44px !important;
+  width: 44px !important;
+  height: 44px !important;
+  font-size: 1.3rem !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  touch-action: manipulation;
+}
+
+.place-detail-sheet .pds-action-btn {
+  min-height: 48px !important;
+  font-size: 0.98rem !important;
+  padding: 12px 18px !important;
+  font-weight: 800 !important;
+  touch-action: manipulation;
 }
 
 #sheet-body .top-route-itinerary-wrap {
@@ -5358,37 +5397,70 @@ dialog:not([open]) {
 }
 
 .stop-ctrl-btn {
-  padding: 8px 12px !important;
-  min-height: 42px !important;
-  min-width: 42px !important;
-  font-size: 13px !important;
-  font-weight: 700 !important;
+  padding: 8px 14px !important;
+  min-height: 44px !important;
+  min-width: 44px !important;
+  font-size: 14px !important;
+  font-weight: 750 !important;
   border-radius: 10px !important;
+  touch-action: manipulation;
+}
+
+.poi-legend-chip {
+  min-height: 38px !important;
+  padding: 6px 12px 6px 8px !important;
+  font-size: 0.88rem !important;
+  touch-action: manipulation;
+}
+
+.poi-legend-chip .czekpoint-marker-badge.legend-mini-badge {
+  width: 24px !important;
+  height: 24px !important;
+}
+
+.poi-legend-chip .czekpoint-marker-badge.legend-mini-badge .czekpoint-marker-glyph {
+  width: 15px !important;
+  height: 15px !important;
+}
+
+.poi-legend-all-dot {
+  width: 22px !important;
+  height: 22px !important;
+  font-size: 13px !important;
+}
+
+.poi-legend-count {
+  font-size: 0.82rem !important;
+  padding: 2px 7px !important;
 }
 
 #walk-places {
   display: grid !important;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)) !important;
-  gap: 10px !important;
-  margin-top: 8px !important;
+  gap: 12px !important;
+  margin-top: 10px !important;
 }
 
 .nearby-place {
   display: flex !important;
   flex-direction: row !important;
   align-items: center !important;
-  gap: 12px !important;
+  gap: 14px !important;
   background: #ffffff !important;
   border: 1.5px solid #cfd9c8 !important;
   border-radius: 14px !important;
-  padding: 10px 12px !important;
+  padding: 12px 14px !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
 }
 
 .toggle-plan-place-btn,
 .open-map-detail-btn {
-  min-height: 42px !important;
-  font-size: 13.5px !important;
-  font-weight: 700 !important;
+  min-height: 44px !important;
+  font-size: 14px !important;
+  font-weight: 800 !important;
+  padding: 10px 14px !important;
+  border-radius: 10px !important;
+  touch-action: manipulation;
 }
 
 
