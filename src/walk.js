@@ -2258,6 +2258,9 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
 
   let userZoomLocked = false;
   let lastUserZoomAt = 0;
+  let lastPlacesRenderPlayerPos = null;
+  let lastMoveendCenterPos = null;
+  let lastMoveendZoomVal = null;
 
   function centerMapOnPlayer(pos = lastFix || telemetry.lastKnownPosition, animate = false) {
     if (!follow || isUserTouchingMap) return;
@@ -2694,6 +2697,25 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     if (fogTextureCanvas.width !== 1024) {
       fogTextureCanvas.width = 1024;
       fogTextureCanvas.height = 1024;
+    }
+
+    // Optimalizace pro slabé telefony: ve 3D režimu nebo při vypnuté mlze (casual) je vrstva mlhy neviditelná (opacity 0),
+    // takže zcela přeskočíme náročné 2D kreslení 1024×1024 a synchronní PNG kompresi toDataURL()!
+    if (fogMode === 'none' || is3dMode || is3DMode) {
+      lastFogStateKey = fogStateKey;
+      lastFogUpdateAt = nowMs;
+      lastFogRenderedMode = fogMode;
+      lastFogCellsCount = progress.cells.length;
+      if (activePlayerPos && Number.isFinite(activePlayerPos.lat) && Number.isFinite(activePlayerPos.lng)) {
+        lastFogPlayerPos = { lat: activePlayerPos.lat, lng: activePlayerPos.lng };
+      }
+      try {
+        if (map.getLayer('czekpoint-fog-layer')) {
+          map.setLayoutProperty('czekpoint-fog-layer', 'visibility', 'none');
+          map.setPaintProperty('czekpoint-fog-layer', 'raster-opacity', 0);
+        }
+      } catch {}
+      return;
     }
 
     const fogBounds = fogGeographicBounds.coordinates;
@@ -4108,11 +4130,14 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     if (!coords || !maplibregl) return;
 
     if (appSettings.gameMode !== 'explorer') {
-      // 3. Zvýraznění detekovaných rohů ulic a odboček podél trasy (anchor: 'center')
-      if (lastRoutedGeometry && Array.isArray(lastRoutedGeometry.steps)) {
-        for (const step of lastRoutedGeometry.steps) {
+      // 3. Zvýraznění detekovaných rohů ulic a odboček podél trasy (anchor: 'center', omezeno max na 6 bodů pro výkon na telefonech)
+      if (!is3dMode && !is3DMode && lastRoutedGeometry && Array.isArray(lastRoutedGeometry.steps)) {
+        const turnSteps = lastRoutedGeometry.steps.filter(s => s && s.maneuverType === 'turn' && normalizePointLatLng(s));
+        const turnStride = Math.max(1, Math.ceil(turnSteps.length / 6));
+        for (let ti = 0; ti < turnSteps.length && routeOverlayMarkers.length < 6; ti += turnStride) {
+          const step = turnSteps[ti];
           const normStep = normalizePointLatLng(step);
-          if (step.maneuverType === 'turn' && normStep) {
+          if (normStep) {
             const dotEl = document.createElement('div');
             dotEl.className = 'route-corner-dot-marker';
             dotEl.style.width = '8px';
@@ -4127,8 +4152,9 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         }
       }
 
-      // 4. Směrové šipky podél plánované trasy (anchor: 'center')
-      for (let i = 0; i < coords.length - 1; i += Math.max(1, Math.floor(coords.length / 8))) {
+      // 4. Směrové šipky podél plánované trasy (anchor: 'center', max 5 šipek kvůli přehlednosti a výkonu na telefonech)
+      const arrowStride = Math.max(1, Math.ceil((coords.length - 1) / 5));
+      for (let i = 0; i < coords.length - 1; i += arrowStride) {
         const p1 = normalizePointLatLng(coords[i]);
         const p2 = normalizePointLatLng(coords[i + 1]);
         if (!p1 || !p2) continue;
@@ -4592,6 +4618,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         return `<div class="nearby-place cat-card-${e(visualCat.key)}" data-distance-m="${Math.round(p.distanceM || 0)}" data-visual-cat="${e(visualCat.key)}" data-shape="${e(visualCat.shape)}" style="display:flex;gap:12px;align-items:center">
           <img
             class="place-card-thumb"
+            data-place-img-id="${e(p.id)}"
             src="${e(photoInfo.photoUrl)}"
             alt="${e(p.title)}"
             width="88"
@@ -4612,7 +4639,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
               </span>
               <span style="font-size:0.82rem;color:#355245">${e(statusText)}</span>
             </div>
-            <small class="small-note" style="display:block;font-size:0.74rem">${e(photoSourceNote)}</small>
+            <small class="small-note" data-place-photo-note-id="${e(p.id)}" style="display:block;font-size:0.74rem">${e(photoSourceNote)}</small>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px">
               <button type="button" class="button small ${isPlanned ? 'ghost' : 'lime'} toggle-plan-place-btn" data-place-id="${e(p.id)}">
                 ${isPlanned ? '✓ V trase (odebrat)' : '+ Přidat do trasy'}
@@ -4645,25 +4672,63 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         memoryObj: m,
       }));
 
-    // Při nižším přiblížení mapy nebo ve 3D režimu zobrazíme optimální sadu nejzajímavějších a nejbližších bodů,
-    // aby okolí nikdy nepůsobilo prázdně, ale 3D projekce DOM značek běžela plynule na 60 FPS.
+    // Při nižším přiblížení mapy, na mobilním displeji nebo ve 3D režimu zobrazíme optimální a prostorově
+    // odstupňovanou sadu bodů (decluttering), aby se ikony na malém displeji nepřekrývaly v jeden shluk
+    // a na slabých telefonech neběžely desítky zbytečných DOM projekcí.
     const curZoom = (map && typeof map.getZoom === 'function') ? map.getZoom() : 15;
+    const isCompactViewport = typeof window !== 'undefined' && Number(window.innerWidth) > 0 && Number(window.innerWidth) <= 680;
     let displayMapPlaces = mapPlaces;
-    if (curZoom < 14 || is3dMode || is3DMode) {
-      const maxNormalPlaces = (is3dMode || is3DMode)
-        ? (curZoom < 13 ? 22 : 34)
-        : (curZoom < 11 ? 28 : curZoom < 13 ? 52 : 85);
+    if (curZoom < 14 || is3dMode || is3DMode || isCompactViewport || mapPlaces.length > 24) {
+      const maxNormalPlaces = isCompactViewport
+        ? (curZoom < 13 ? 14 : curZoom < 15.8 ? 18 : 24)
+        : (is3dMode || is3DMode)
+        ? (curZoom < 13 ? 20 : 28)
+        : (curZoom < 11 ? 24 : curZoom < 13 ? 40 : 56);
+      // Minimální rozestup v metrech mezi běžnými (neplánovanými) značkami podle přiblížení mapy,
+      // aby se v centru města nepřekrývaly desítky ikon přes sebe
+      const minSepMeters = curZoom >= 16.8
+        ? 0
+        : curZoom >= 16.0
+        ? (isCompactViewport ? 38 : 24)
+        : curZoom >= 15.0
+        ? (isCompactViewport ? 65 : 42)
+        : curZoom >= 14.0
+        ? 110
+        : 220;
+
       const mustHave = [];
       const others = [];
       for (const p of mapPlaces) {
-        if (plannedPlaceIds.has(p.id) || p.pointKind === 'route-start') {
+        if (
+          plannedPlaceIds.has(p.id) ||
+          p.pointKind === 'route-start' ||
+          (selectedDetailPlace && selectedDetailPlace.id === p.id)
+        ) {
           mustHave.push(p);
         } else {
           others.push(p);
         }
       }
       others.sort((a, b) => (a.distanceM || 9999) - (b.distanceM || 9999));
-      displayMapPlaces = [...mustHave, ...others.slice(0, Math.max(0, maxNormalPlaces - mustHave.length))];
+
+      const accepted = [...mustHave];
+      const maxOthers = Math.max(0, maxNormalPlaces - mustHave.length);
+      for (const cand of others) {
+        if (accepted.length - mustHave.length >= maxOthers) break;
+        if (minSepMeters > 0) {
+          let tooClose = false;
+          for (const ex of accepted) {
+            const dM = haversineMeters(cand, ex);
+            if (dM !== null && dM < minSepMeters) {
+              tooClose = true;
+              break;
+            }
+          }
+          if (tooClose) continue;
+        }
+        accepted.push(cand);
+      }
+      displayMapPlaces = accepted;
     }
 
     const activeMapPlaceIds = new Set();
@@ -4771,21 +4836,13 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         : '';
 
       const glyphHtml = renderCategoryMarkerGlyph(glyphKindKey, visited ? 'visited' : 'default');
-      const extPhotosOn = appSettings.showExternalPhotos !== false;
-      const cachedPhoto = extPhotosOn ? getCachedPlacePhoto(p) : null;
-      const hasRealPhoto = Boolean(extPhotosOn && cachedPhoto && cachedPhoto.photoUrl);
-      const photoInnerHtml = hasRealPhoto
-        ? `
-            <span class="czekpoint-marker-photo-wrap">
-              <img class="czekpoint-marker-photo-img" src="${e(cachedPhoto.photoUrl)}" alt="" onerror="this.parentElement.hidden=true;if(this.parentElement.nextElementSibling)this.parentElement.nextElementSibling.hidden=false;" />
-            </span>
-            <span class="czekpoint-marker-glyph kind-${e(categoryKey)} visual-cat-${e(visualCat.key)}" hidden>${glyphHtml}</span>
-          `
-        : `<span class="czekpoint-marker-glyph kind-${e(categoryKey)} visual-cat-${e(visualCat.key)}">${glyphHtml}</span>`;
+      // V mapě vždy zobrazujeme výraznou vektorovou ikonu kategorie a její tvar/barvu (štít, klenba, kosočtverec, kapka, lístek),
+      // aby se značky po načtení fotek nezmenšovaly na nečitelná kolečka a nevyvolávaly desítky překreslení DOMu.
+      const photoInnerHtml = `<span class="czekpoint-marker-glyph kind-${e(categoryKey)} visual-cat-${e(visualCat.key)}">${glyphHtml}</span>`;
 
-      const stateSig = `${p.lat},${p.lng}|${visualCat.key}|${visualCat.shape}|${tierClass}|${animClass}|${stopOrderIdx}|${hasRealPhoto ? cachedPhoto.photoUrl : 'glyph'}`;
+      const stateSig = `${p.lat},${p.lng}|${visualCat.key}|${visualCat.shape}|${tierClass}|${animClass}|${stopOrderIdx}|glyph`;
       const iconHtml = `
-        <span class="czekpoint-marker-badge cat-${e(visualCat.key)} shape-${e(visualCat.shape)} ${tierClass} ${animClass} ${hasRealPhoto ? 'has-real-photo' : 'has-bitmap-glyph'}" data-kind="${e(categoryKey)}" data-visual-cat="${e(visualCat.key)}" data-shape="${e(visualCat.shape)}" title="${e(`${p.title || ''} — ${visualCat.label}`)}">
+        <span class="czekpoint-marker-badge cat-${e(visualCat.key)} shape-${e(visualCat.shape)} ${tierClass} ${animClass} has-bitmap-glyph" data-kind="${e(categoryKey)}" data-visual-cat="${e(visualCat.key)}" data-shape="${e(visualCat.shape)}" title="${e(`${p.title || ''} — ${visualCat.label}`)}">
           ${photoInnerHtml}
           ${orderBadgeHtml}
         </span>
@@ -4857,39 +4914,72 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       renderPlannedRouteOnMap();
     }
 
-    // Asynchronně načteme fotky pouze pokud je zapnuté zobrazování externích fotografií
+    // Asynchronně načteme fotky pouze pro karty pod mapou a detail místa (BEZ opakovaného volání renderPlaces!)
     if (appSettings.showExternalPhotos !== false) {
-      const unprefetchedSidebar = [...plannedPlaces, ...sidebarList.slice(0, 14)].filter(p => p && p.id && !prefetchedPhotoPlaceIds.has(p.id));
+      const syncCardThumbForPlace = (placeItem) => {
+        if (disposed || !placeItem || !placeItem.id || typeof document === 'undefined') return;
+        const cached = getCachedPlacePhoto(placeItem);
+        if (!cached || !cached.photoUrl) return;
+        const container = $('walk-places');
+        if (container) {
+          const imgs = container.querySelectorAll('img.place-card-thumb[data-place-img-id]');
+          for (const img of imgs) {
+            if (img.getAttribute('data-place-img-id') === String(placeItem.id)) {
+              if (img.getAttribute('src') !== cached.photoUrl) {
+                img.setAttribute('src', cached.photoUrl);
+              }
+              break;
+            }
+          }
+          const notes = container.querySelectorAll('small[data-place-photo-note-id]');
+          for (const note of notes) {
+            if (note.getAttribute('data-place-photo-note-id') === String(placeItem.id)) {
+              note.textContent = `📸 ${formatPhotoSourceLabel(cached)}`;
+              break;
+            }
+          }
+        }
+        if (selectedDetailPlace && selectedDetailPlace.id === placeItem.id && !$('place-detail-sheet')?.hidden) {
+          const imgEl = $('pds-photo-img');
+          const badgeEl = $('pds-photo-badge');
+          if (imgEl && imgEl.getAttribute('src') !== cached.photoUrl) {
+            imgEl.src = cached.photoUrl;
+          }
+          if (badgeEl) {
+            badgeEl.textContent = `📸 Fotka · ${formatPhotoSourceLabel(cached)}`;
+            badgeEl.className = 'pds-photo-source-badge is-verified';
+          }
+        }
+      };
+
+      const unprefetchedSidebar = [...plannedPlaces, ...sidebarList.slice(0, 10)].filter(p => p && p.id && !prefetchedPhotoPlaceIds.has(p.id));
       if (unprefetchedSidebar.length > 0) {
         for (const p of unprefetchedSidebar) prefetchedPhotoPlaceIds.add(p.id);
         prefetchPlacePhotos(unprefetchedSidebar, {
           signal: aborter.signal,
-          maxCount: 14,
+          maxCount: 10,
           showExternalPhotos: true,
-          onUpdated: () => {
+          onUpdated: (updatedPlace) => {
             if (disposed) return;
-            renderPlaces({ skipListRebuild: true });
+            if (updatedPlace && updatedPlace.id) {
+              syncCardThumbForPlace(updatedPlace);
+            } else {
+              for (const item of unprefetchedSidebar) syncCardThumbForPlace(item);
+            }
           },
         });
       }
 
-      const unprefetchedMap = [...plannedPlaces, ...mapPlaces.slice(0, 16)].filter(p => p && p.id && !prefetchedVerifiedPlaceIds.has(p.id));
+      const unprefetchedMap = [...plannedPlaces, ...sidebarList.slice(0, 10)].filter(p => p && p.id && !prefetchedVerifiedPlaceIds.has(p.id));
       if (unprefetchedMap.length > 0) {
         for (const p of unprefetchedMap) prefetchedVerifiedPlaceIds.add(p.id);
         prefetchVerifiedPhotosForPlaces(unprefetchedMap, {
           signal: aborter.signal,
-          maxCount: 16,
+          maxCount: 10,
           onBatchUpdated: () => {
             if (disposed) return;
-            renderPlaces({ skipListRebuild: true });
+            for (const item of unprefetchedMap) syncCardThumbForPlace(item);
             renderNextCheckpointHero(lastFix || telemetry.lastKnownPosition);
-            if (selectedDetailPlace && !$('place-detail-sheet')?.hidden) {
-              const updatedPhoto = getCachedPlacePhoto(selectedDetailPlace);
-              const imgEl = $('pds-photo-img');
-              if (updatedPhoto?.photoUrl && imgEl && imgEl.getAttribute('src') !== updatedPhoto.photoUrl) {
-                imgEl.src = updatedPhoto.photoUrl;
-              }
-            }
           },
         });
       }
@@ -5015,7 +5105,16 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
             badgeEl.textContent = `📸 Fotka · ${formatPhotoSourceLabel(res)}`;
             badgeEl.className = 'pds-photo-source-badge is-verified';
           }
-          renderPlaces();
+          const container = $('walk-places');
+          if (container) {
+            const cardImgs = container.querySelectorAll('img.place-card-thumb[data-place-img-id]');
+            for (const cImg of cardImgs) {
+              if (cImg.getAttribute('data-place-img-id') === String(p.id)) {
+                cImg.setAttribute('src', res.photoUrl);
+                break;
+              }
+            }
+          }
         }
       }).catch(() => {});
     }
@@ -6705,7 +6804,15 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
 
     stats();
     if (stateChanged || result.accepted) {
-      renderPlaces({ skipListRebuild: true });
+      const movedSincePlaceRenderM = (validFix && lastPlacesRenderPlayerPos)
+        ? (haversineMeters(lastPlacesRenderPlayerPos, validFix) ?? 999)
+        : 999;
+      if (justConfirmedStopId || movedSincePlaceRenderM >= 30 || !lastPlacesRenderPlayerPos) {
+        if (validFix && Number.isFinite(validFix.lat) && Number.isFinite(validFix.lng)) {
+          lastPlacesRenderPlayerPos = { lat: validFix.lat, lng: validFix.lng };
+        }
+        renderPlaces({ skipListRebuild: true });
+      }
       scheduleFog();
       renderTrail();
     }
@@ -7792,6 +7899,8 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       if (mapContainer) mapContainer.innerHTML = '';
 
       lastApplied3DModeStateKey = null;
+      const rawDpr = (typeof window !== 'undefined' && Number(window.devicePixelRatio)) ? Number(window.devicePixelRatio) : 1;
+      const safeMobilePixelRatio = Math.min(rawDpr, 1.5);
       map = new maplibregl.Map({
         container: mapContainer,
         style: buildMapLibreStyle(config, { showContourLayer, showHikingTrails, is3dMode, show3dBuildings: appSettings.show3dBuildings !== false }),
@@ -7802,6 +7911,11 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         minZoom: 3,
         maxZoom: 19,
         maxPitch: 75,
+        pixelRatio: safeMobilePixelRatio,
+        fadeDuration: 0,
+        maxTileCacheSize: 20,
+        collectResourceTiming: false,
+        refreshExpiredTiles: false,
         attributionControl: false,
       });
       window.__czekpointMap = map;
@@ -8123,9 +8237,21 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     });
     map.on('moveend', () => {
       updateRecenterButtonVisibility();
-      renderPlaces({ skipListRebuild: true });
-      updateScanMapAreaButtonState();
-      scheduleMapPanAutoFetch();
+      const curC = typeof map.getCenter === 'function' ? map.getCenter() : null;
+      const curZ = typeof map.getZoom === 'function' ? map.getZoom() : 15;
+      const movedCenterM = (curC && lastMoveendCenterPos)
+        ? (haversineMeters(lastMoveendCenterPos, { lat: curC.lat, lng: curC.lng }) ?? 999)
+        : 999;
+      const zoomDelta = lastMoveendZoomVal !== null ? Math.abs(curZ - lastMoveendZoomVal) : 999;
+      if (movedCenterM >= 35 || zoomDelta >= 0.3) {
+        if (curC && Number.isFinite(curC.lat) && Number.isFinite(curC.lng)) {
+          lastMoveendCenterPos = { lat: curC.lat, lng: curC.lng };
+        }
+        lastMoveendZoomVal = curZ;
+        renderPlaces({ skipListRebuild: true });
+        updateScanMapAreaButtonState();
+        scheduleMapPanAutoFetch();
+      }
       updateDirectionalIndicators();
       scheduleFog(120);
     });

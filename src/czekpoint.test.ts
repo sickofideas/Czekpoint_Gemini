@@ -3304,5 +3304,28 @@ describe('Czekpoint revize 1–24 — Unit testy', () => {
     assert.equal(unlockSpeechSynthesis(), true);
     assert.ok(walkJs.includes('screen-lock-'), 'Při zhasnutí displeje (visibilitychange -> document.hidden) aplikace ohlásí navigační povel do kapsy');
   });
+
+  it('Detailní revize mapy pro slabé telefony a mobilní prohlížeč: konec "tisíce zobrazení", správná velikost ikon (42×42 / 22×22 px), decluttering a WebGL úspory', () => {
+    const walkJs = fs.readFileSync('src/walk.js', 'utf-8');
+    const walkCss = fs.readFileSync('assets/walk.css', 'utf-8');
+
+    // 1. Konec "tisíce zobrazení": asynchronní načítání fotek aktualizuje pouze miniatury v kartách (syncCardThumbForPlace), nevolá znovu renderPlaces
+    assert.ok(walkJs.includes('syncCardThumbForPlace'), 'Asynchronní načtení fotek aktualizuje pouze miniatury v DOM přes syncCardThumbForPlace');
+    assert.ok(walkJs.includes('data-place-img-id='), 'Karty míst pod mapou nesou atribut data-place-img-id pro přímou aktualizaci src bez překreslení');
+    assert.ok(walkJs.includes('movedCenterM >= 35 || zoomDelta >= 0.3'), 'Událost moveend je filtrována podle skutečného posunu středu (>= 35 m) nebo změny zoomu (>= 0.3)');
+    assert.ok(walkJs.includes('movedSincePlaceRenderM >= 30'), 'Během chůze se renderPlaces nevolá na každém kroku, ale až po posunu >= 30 m nebo při potvrzení zastávky');
+
+    // 2. Optimalizace pro slabé telefony: omezení pixelRatio na max 1.5, vypnutí fadeDuration a přeskočení 1024×1024 toDataURL() ve 3D/casual
+    assert.ok(walkJs.includes('Math.min(rawDpr, 1.5)'), 'MapLibre WebGL pixelRatio je zastropováno na max 1.5 pro plynulý běh na slabých telefonech');
+    assert.ok(walkJs.includes('fadeDuration: 0'), 'MapLibre má vypnuté prolínání dlaždic (fadeDuration: 0)');
+    assert.ok(walkJs.includes('maxTileCacheSize: 20'), 'MapLibre má omezenou cache dlaždic (maxTileCacheSize: 20) pro úsporu RAM v mobilním prohlížeči');
+    assert.ok(walkJs.includes("if (fogMode === 'none' || is3dMode || is3DMode)"), 'Ve 3D režimu a při vypnuté mlze se přeskakuje 1024×1024 kreslení a toDataURL()');
+
+    // 3. Prostorové odstupňování (decluttering) značek v mapě a zachování výrazných tvarů/ikon kategorií
+    assert.ok(walkJs.includes('minSepMeters'), 'renderPlaces aplikuje minimální rozestup minSepMeters mezi neplánovanými značkami proti překrývání');
+    assert.ok(walkCss.includes('.czekpoint-marker-badge:not(.legend-mini-badge) .czekpoint-marker-glyph'), 'CSS garantuje plnou velikost SVG ikony (22×22 px) uvnitř mapového odznaku');
+    assert.ok(walkCss.includes('72dvh'), 'V mobilním prohlížeči se výška mapy přizpůsobuje dynamické výšce okna (72dvh)');
+  });
 });
+
 
