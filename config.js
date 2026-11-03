@@ -1,7 +1,10 @@
+export const DEFAULT_3D_PITCH = 32;
+export const DEFAULT_TERRAIN_EXAGGERATION = 1.25;
+
 export const config = {
   appName: 'Czekpoint',
-  version: '2.3.0',
-  appVersion: 'v2.3',
+  version: '3.0.0',
+  appVersion: 'v3.0',
   regionName: 'Rožmitálsko a Brdy',
   defaultCity: 'Rožmitál pod Třemšínem',
   dataUrl: './data/routes.json',
@@ -16,7 +19,8 @@ export const config = {
   terrainEncoding: 'terrarium',
   terrainTileSize: 256,
   terrainMaxZoom: 14,
-  terrainExaggeration: 1.8,
+  terrainExaggeration: DEFAULT_TERRAIN_EXAGGERATION,
+  default3dPitch: DEFAULT_3D_PITCH,
   openFreeMapVectorUrl: 'https://tiles.openfreemap.org/planet',
   firebase: {
     enabled: false,
@@ -121,9 +125,9 @@ export function createGeoJsonCirclePolygon(center, radiusMeters, steps = 48) {
 }
 
 /**
- * Sestaví čistý MapLibre GL styl (v8) s rastrovými vrstvami (OSM, OpenTopoMap, Waymarked Trails),
- * skutečným výškovým zdrojem `raster-dem` (`terrain-dem`), prostorovým stínováním svahů (`terrain-hillshade`),
- * 3D lesy (`czekpoint-3d-forests`) a 3D budovami (`czekpoint-3d-buildings` z bezklíčového `openfreemap-v`).
+ * Sestaví čistý MapLibre GL styl (v8) pro 2.5D Reliéfní Diorama s rastrovými vrstvami (OSM, OpenTopoMap, Waymarked Trails),
+ * výškovým zdrojem `raster-dem` (`terrain-dem`) a jemným přírodním stínováním svahů (`terrain-hillshade`),
+ * bez šedých krabic budov (`czekpoint-3d-buildings` trvale vypnuto).
  */
 export function buildMapLibreStyle(cfg = config, options = {}) {
   const showContourLayer = Boolean(options.showContourLayer);
@@ -133,9 +137,8 @@ export function buildMapLibreStyle(cfg = config, options = {}) {
     : options.is3DMode !== undefined
     ? Boolean(options.is3DMode)
     : true;
-  const show3dBuildings = options.show3dBuildings !== false;
   const hasMaptilerKey = Boolean(cfg?.maptilerApiKey && String(cfg.maptilerApiKey).trim());
-  const exaggeration = Number(cfg?.terrainExaggeration) || 1.8;
+  const exaggeration = Number(cfg?.terrainExaggeration) || DEFAULT_TERRAIN_EXAGGERATION;
   const rawDemMaxZoom = Number(cfg?.terrainMaxZoom);
   const safeDemMaxZoom = Number.isFinite(rawDemMaxZoom) ? Math.min(15, Math.max(0, Math.floor(rawDemMaxZoom))) : 14;
 
@@ -207,10 +210,10 @@ export function buildMapLibreStyle(cfg = config, options = {}) {
         visibility: 'visible',
       },
       paint: {
-        'hillshade-exaggeration': 0.85,
-        'hillshade-shadow-color': '#0f291e',
+        'hillshade-exaggeration': 0.45,
+        'hillshade-shadow-color': '#1b3b2b',
         'hillshade-highlight-color': '#fffef2',
-        'hillshade-accent-color': '#2d6a4f',
+        'hillshade-accent-color': '#d4af37',
       },
     });
   }
@@ -254,7 +257,7 @@ export function buildMapLibreStyle(cfg = config, options = {}) {
       maxzoom: 22,
       filter: ['==', ['get', 'class'], 'wood'],
       layout: {
-        visibility: 'visible',
+        visibility: 'none',
       },
       paint: {
         'fill-extrusion-color': '#2d6a4f',
@@ -264,32 +267,23 @@ export function buildMapLibreStyle(cfg = config, options = {}) {
       },
     });
 
-    if (show3dBuildings) {
-      layers.push({
-        id: 'czekpoint-3d-buildings',
-        source: 'openfreemap-v',
-        'source-layer': 'building',
-        type: 'fill-extrusion',
-        minzoom: 13,
-        maxzoom: 22,
-        layout: {
-          visibility: 'visible',
-        },
-        paint: {
-          'fill-extrusion-color': [
-            'interpolate',
-            ['linear'],
-            ['coalesce', ['get', 'render_height'], ['get', 'height'], 10],
-            0, '#e6dec8',
-            12, '#d8b48a',
-            25, '#c98a63',
-          ],
-          'fill-extrusion-height': ['coalesce', ['get', 'render_height'], ['get', 'height'], 10],
-          'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0],
-          'fill-extrusion-opacity': 0.85,
-        },
-      });
-    }
+    layers.push({
+      id: 'czekpoint-3d-buildings',
+      source: 'openfreemap-v',
+      'source-layer': 'building',
+      type: 'fill-extrusion',
+      minzoom: 13,
+      maxzoom: 22,
+      layout: {
+        visibility: 'none',
+      },
+      paint: {
+        'fill-extrusion-color': '#d8b48a',
+        'fill-extrusion-height': 0,
+        'fill-extrusion-base': 0,
+        'fill-extrusion-opacity': 0,
+      },
+    });
   }
 
   const styleObj = {

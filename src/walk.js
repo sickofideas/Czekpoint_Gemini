@@ -1,5 +1,7 @@
 import {
   config as defaultAppConfig,
+  DEFAULT_3D_PITCH,
+  DEFAULT_TERRAIN_EXAGGERATION,
   normalizePointLatLng,
   toMapLibreLngLat,
   toLngLat,
@@ -399,8 +401,10 @@ export function buildPlannedRouteGeoJson(coords = [], isFallback = false) {
         type: 'Feature',
         properties: {
           isFallback: Boolean(isFallback),
-          lineColor: '#9333ea',
+          lineColor: '#f5b82e',
+          lineWidth: 5,
           casingColor: '#2e1065',
+          casingWidth: 9,
         },
         geometry: {
           type: 'LineString',
@@ -1107,6 +1111,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
   let nearbyRecordedIds = new Set();
   let pendingStopSamples = {};
   let justConfirmedStopId = null;
+  let justDiscoveredFlipIds = new Set();
   let replacingStopIndex = null;
   let appearedPlaceIds = new Set();
 
@@ -1423,35 +1428,10 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       <!-- DÁVKA 4 (Bod 1.1): Chybový pruh při nedostupném WebGL nebo ztrátě grafického kontextu (nezakrývá telemetrii a nemaže data) -->
       <div id="webgl-error-banner" class="webgl-error-banner" role="alert" hidden></div>
 
-      <!-- DÁVKA 3 (Bod 8.2): Sjednocená horní oblast mapy v odděleném flex sloupci (.map-top-overlays) -->
+      <!-- ZÓNA 1 — HORNÍ STŘEDOVÁ KAPSLE (.map-top-overlays) -->
       <div class="map-top-overlays" id="map-top-overlays">
-        <!-- 2.2 Horní vyhledávací pole s lupou přímo v mapě -->
-        <div class="map-search-overlay" id="map-search-overlay" role="search" aria-label="Vyhledávání v mapě" hidden>
-          <div class="map-search-bar">
-            <span class="map-search-icon" aria-hidden="true">🔍</span>
-            <input
-              type="search"
-              id="map-lupa-search-input"
-              class="map-search-input"
-              placeholder="Hledat město, památku nebo rozcestí..."
-              aria-label="Hledat město, památku nebo rozcestí"
-              autocomplete="off"
-            />
-            <button type="button" id="map-lupa-search-clear" class="map-search-clear" hidden aria-label="Vymazat hledání">✕</button>
-            <button type="button" id="map-lupa-search-submit" class="button small primary map-search-submit-btn" aria-label="Hledat">Hledat</button>
-          </div>
-          <div id="map-lupa-search-results" class="map-search-results" hidden role="listbox" aria-label="Výsledky vyhledávání"></div>
-        </div>
-
-        <!-- DÁVKA 1 (Bod 1.1): Plovoucí stavový indikátor načítání a výpočtu přímo v mapě (z-index: 1200) -->
-        <div id="map-busy-indicator" class="map-busy-indicator" role="status" aria-live="polite" hidden>
-          <span class="map-spinner" aria-hidden="true"></span>
-          <span id="map-busy-text" class="map-busy-text">⏳ Pracuji…</span>
-        </div>
-
-        <!-- Řada s kompasem a odbočovacím ukazatelem pod vyhledáváním -->
         <div class="map-top-subrow" id="map-top-subrow">
-          <!-- Aktivní otočný kompas -->
+          <!-- Aktivní otočný kompas spojený s horní kapslí -->
           <div class="active-compass-widget compass-widget" id="active-compass-widget" title="Aktivní kompas výpravy" role="button" tabindex="0">
             <div class="compass-dial compass-rose-svg" id="compass-dial">
               <svg viewBox="0 0 100 100" class="compass-dial-svg" id="compass-rose-svg">
@@ -1472,37 +1452,61 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
             <div class="compass-target-arrow" id="compass-target-arrow">
               <div class="target-gem" title="Směr k další zastávce">◆</div>
             </div>
-            <div class="compass-dist-badge" id="compass-dist-badge">-- m</div>
+            <div class="compass-dist-badge" id="compass-dist-badge" hidden>-- m</div>
           </div>
 
-          <!-- Odbočovací navigace u kompasu (.turn-nav-pill) -->
-          <div class="turn-nav-pill" id="turn-nav-pill" role="status" aria-live="polite" hidden>
-            <span class="turn-nav-icon" id="turn-nav-icon">↑</span>
-            <span class="turn-nav-text" id="turn-nav-text">Trasa připravena</span>
-            <button type="button" class="voice-nav-pill-btn ${voiceNavEnabled ? 'active' : ''}" id="btn-voice-nav-pill" title="Zapnout/vypnout českou hlasovou navigaci" aria-pressed="${voiceNavEnabled}">
+          <!-- Jediná čistá plovoucí kapsle (.turn-nav-pill) -->
+          <div class="turn-nav-pill" id="turn-nav-pill" role="status" aria-live="polite">
+            <span class="turn-nav-icon" id="turn-nav-icon">🧭</span>
+            <span class="turn-nav-text" id="turn-nav-text">🧭 Volný průzkum · Odkrývej okolí · 0 m</span>
+            <button type="button" class="voice-nav-pill-btn ${voiceNavEnabled ? 'active' : ''}" id="btn-voice-nav-pill" hidden title="Zapnout/vypnout českou hlasovou navigaci" aria-pressed="${voiceNavEnabled}">
               ${voiceNavEnabled ? '🔊 Hlas ZAP' : '🔈 Hlas'}
+            </button>
+            <button type="button" class="top-pill-style-btn" id="btn-top-pill-style" title="Nastavení stylu mapy (Objevování / Pergamen / Turistická mapa) a zvuku">
+              ⚙️ Styl
             </button>
           </div>
         </div>
 
-        <!-- Stavový štítek režimu Sledovat směr uvnitř .map-top-overlays -->
+        <!-- Vyhledávací pole #map-search-overlay (ve výchozím stavu skryté, zobrazí se pod horní kapslí po kliknutí na 🔍) -->
+        <div class="map-search-overlay" id="map-search-overlay" role="search" aria-label="Vyhledávání v mapě" hidden>
+          <div class="map-search-bar">
+            <span class="map-search-icon" aria-hidden="true">🔍</span>
+            <input
+              type="search"
+              id="map-lupa-search-input"
+              class="map-search-input"
+              placeholder="Hledat město, památku nebo rozcestí..."
+              aria-label="Hledat město, památku nebo rozcestí"
+              autocomplete="off"
+            />
+            <button type="button" id="map-lupa-search-clear" class="map-search-clear" hidden aria-label="Vymazat hledání">✕</button>
+            <button type="button" id="map-lupa-search-submit" class="button small primary map-search-submit-btn" aria-label="Hledat">Hledat</button>
+          </div>
+          <div id="map-lupa-search-results" class="map-search-results" hidden role="listbox" aria-label="Výsledky vyhledávání"></div>
+        </div>
+
+        <div id="map-busy-indicator" class="map-busy-indicator" role="status" aria-live="polite" hidden>
+          <span class="map-spinner" aria-hidden="true"></span>
+          <span id="map-busy-text" class="map-busy-text">⏳ Pracuji…</span>
+        </div>
+
         <div id="heading-mode-banner" class="heading-mode-banner" hidden role="status" aria-live="polite"></div>
 
-        <!-- Vizuální indikátor aktivního 3D terénu (reliéf, hory a 3D budovy) -->
-        <div id="map-3d-active-badge" class="map-3d-active-badge" role="status" aria-live="polite" title="3D reliéf terénu a 3D budovy jsou aktivní">
+        <div id="map-3d-active-badge" class="map-3d-active-badge" hidden role="status" aria-live="polite">
           <span class="map-3d-badge-status-dot" aria-hidden="true"></span>
           <span class="map-3d-badge-icon" aria-hidden="true">🏔️</span>
-          <span class="map-3d-badge-text" id="map-3d-badge-text">3D Terén aktivní</span>
+          <span class="map-3d-badge-text" id="map-3d-badge-text">2.5D Diorama</span>
         </div>
       </div>
 
       <!-- Ukazatel uložení offline oblasti -->
       <div id="offline-download-banner" class="offline-download-banner" hidden role="status" aria-live="polite"></div>
 
-      <!-- Bublina po kliknutí na ikonu v mapě (Vynechat zastávku / Přidat po cestě / Nastavit jako nový konec) -->
-      <div id="place-detail-sheet" class="place-detail-sheet" hidden role="dialog" aria-label="Úprava bodu na trase"></div>
+      <!-- Bublina po kliknutí na Tajemnou siluetu nebo místo v mapě -->
+      <div id="place-detail-sheet" class="place-detail-sheet" hidden role="dialog" aria-label="Detail místa a vodicí nit"></div>
 
-      <!-- Plovoucí tlačítko „🎯 Zpět na postavičku“ (#btn-recenter-avatar, z-index: 1100, min-height: 46px) -->
+      <!-- Plovoucí tlačítko „🎯 Zpět na postavičku“ (#btn-recenter-avatar) -->
       <button type="button" id="btn-recenter-avatar" class="recenter-avatar-btn" hidden title="Vycentrovat mapu zpět na postavičku (🎯 Zpět ke mně)">
         🎯 Zpět na postavičku
       </button>
@@ -1540,58 +1544,63 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       <!-- Okrajový ukazatel cíle mimo obrazovku -->
       <div id="offscreen-target-indicator" class="offscreen-target-indicator" hidden role="status" aria-live="polite"></div>
 
-      <!-- DÁVKA 1–3 (v2.0): Sjednocená ovládací tlačítka mapy (44 × 44 px) včetně 2D/3D, Sledovat směr a Severu nahoře -->
+      <!-- ZÓNA 2 — PRAVÝ OKRAJ MAPY (.map-right-toolbar — pouze 3 čistá kulatá tlačítka 48 × 48 px) -->
       <div class="walk-map-toolbar map-right-toolbar" role="toolbar" aria-label="Ovládání mapy">
-        <button type="button" class="map-right-btn" id="walk-zoom-in" title="Přiblížit mapu (+)" aria-label="Přiblížit mapu">➕</button>
-        <button type="button" class="map-right-btn" id="walk-zoom-out" title="Oddálit mapu (−)" aria-label="Oddálit mapu">➖</button>
-        <button type="button" class="map-right-btn map-3d-toggle-btn active" id="btn-toggle-3d" aria-pressed="true" title="Přepnout zpět na plochou 2D mapu shora" aria-label="Přepnout 2D a 3D terén">
-          <span class="btn-3d-label" id="btn-toggle-3d-label">3D</span>
+        <button type="button" class="map-right-btn map-3d-toggle-btn active" id="btn-toggle-3d" aria-pressed="true" title="Vycentrovat na postavičku a přepnout 2D / 2.5D Reliéfní Diorama" aria-label="Vycentrovat a přepnout 2D a 2.5D pohled">
+          <span class="btn-3d-label" id="btn-toggle-3d-label">🎯</span>
         </button>
-        <button type="button" class="map-right-btn map-follow-heading-btn" id="btn-follow-heading" aria-pressed="false" title="Sledovat směr — otáčet mapu kolem Avatara podle natočení telefonu" aria-label="🧭 Sledovat směr">
-          <span class="btn-follow-heading-icon" aria-hidden="true">🧭</span>
-        </button>
-        <button type="button" class="map-right-btn map-north-btn" id="btn-north-up" title="Sever nahoře (srovnat natočení mapy)" aria-label="Sever nahoře">⬆️</button>
-        <div class="map-3d-camera-controls" id="map-3d-camera-controls" role="group" aria-label="Ovládání náklonu a otočení 3D kamery">
-          <button type="button" class="map-right-btn map-cam-btn" id="btn-cam-tilt-up" title="Zvýšit náklon 3D pohledu" aria-label="Naklonit kameru více k horizontu">▴</button>
-          <button type="button" class="map-right-btn map-cam-btn" id="btn-cam-tilt-down" title="Snížit náklon 3D pohledu" aria-label="Narovnat pohled shora">▾</button>
-          <button type="button" class="map-right-btn map-cam-btn" id="btn-cam-rotate-left" title="Otočit pohled doleva" aria-label="Otočit mapu doleva">↺</button>
-          <button type="button" class="map-right-btn map-cam-btn" id="btn-cam-rotate-right" title="Otočit pohled doprava" aria-label="Otočit mapu doprava">↻</button>
-        </div>
         <button type="button" class="map-right-btn" id="walk-search-toggle" title="Hledat místo na mapě (🔍)" aria-label="Hledat v mapě">🔍</button>
         <button type="button" class="map-right-btn" id="walk-zen-toggle" aria-pressed="false" title="Celá obrazovka" aria-label="Celá obrazovka">⛶</button>
-        <button type="button" class="map-right-btn" id="walk-center" hidden title="Vycentrovat na mě" aria-label="Vycentrovat na mě">🎯</button>
-        <button type="button" class="map-right-btn active" id="walk-fog-toggle" hidden title="Přepnout pergamen / běžnou mapu">📜</button>
+
+        <!-- Skrytá přebytečná tlačítka pro zachování zpětné kompatibility -->
+        <button type="button" class="map-right-btn" id="walk-zoom-in" hidden style="display:none !important" aria-label="Přiblížit mapu">➕</button>
+        <button type="button" class="map-right-btn" id="walk-zoom-out" hidden style="display:none !important" aria-label="Oddálit mapu">➖</button>
+        <button type="button" class="map-right-btn map-follow-heading-btn" id="btn-follow-heading" hidden style="display:none !important" aria-pressed="false" aria-label="🧭 Sledovat směr">🧭</button>
+        <button type="button" class="map-right-btn map-north-btn" id="btn-north-up" hidden style="display:none !important" aria-label="Sever nahoře">⬆️</button>
+        <div class="map-3d-camera-controls" id="map-3d-camera-controls" hidden style="display:none !important" role="group" aria-label="Ovládání náklonu a otočení 3D kamery">
+          <button type="button" class="map-right-btn map-cam-btn" id="btn-cam-tilt-up">▴</button>
+          <button type="button" class="map-right-btn map-cam-btn" id="btn-cam-tilt-down">▾</button>
+          <button type="button" class="map-right-btn map-cam-btn" id="btn-cam-rotate-left">↺</button>
+          <button type="button" class="map-right-btn map-cam-btn" id="btn-cam-rotate-right">↻</button>
+        </div>
+        <button type="button" class="map-right-btn" id="walk-center" hidden style="display:none !important" aria-label="Vycentrovat na mě">🎯</button>
+        <button type="button" class="map-right-btn active" id="walk-fog-toggle" hidden style="display:none !important">📜</button>
       </div>
 
-      <!-- DÁVKA 3 (Bod 9.2): Kompaktní atribuce mapových zdrojů trvale viditelná i ve fullscreenu (.zen-mode) -->
+      <!-- Kompaktní atribuce mapových zdrojů -->
       <div class="map-in-wrap-attribution" id="map-in-wrap-attribution" aria-label="Atribuce mapových podkladů">
         <span class="attribution-text">© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> · <a href="https://waymarkedtrails.org" target="_blank" rel="noopener">Waymarked Trails</a> · AWS Terrarium DEM</span>
       </div>
 
-      <!-- TRVALE VIDITELNÁ AKČNÍ LIŠTA PŘÍMO U MAPY (.map-action-bar) -->
+      <!-- ZÓNA 3 — SPODNÍ DOCK (.map-action-bar, bottom: 14px) -->
       <div class="map-action-bar" id="map-action-bar" role="region" aria-label="Hlavní ovládání výpravy">
-        <!-- Stav 1 — Výprava ještě neběží (walkState === 'idle' | 'finished') -->
+        <!-- Před startem -->
         <div class="mab-inactive-group" id="mab-inactive-group">
           <button type="button" class="button mab-btn mab-start-btn" id="walk-start-unified">
-            ▶ Vyrazit
+            ▶ VYRAZIT NA PRŮZKUM
+          </button>
+          <button type="button" class="button mab-btn mab-places-drawer-btn" id="btn-open-places-drawer" data-open-places-drawer="1">
+            📍 Místa v okolí ▴
           </button>
         </div>
-        <!-- Stav 2 — Výprava se zaměřuje, běží nebo je pozastavena (walkState === 'locating' | 'running' | 'paused') -->
+        <!-- Během chůze (#mab-active-group): 3 velká tlačítka + Trasa a místa -->
         <div class="mab-active-group" id="mab-active-group" hidden>
+          <button type="button" class="button mab-btn mab-memory-btn" id="walk-save-memory" title="Uložit vlastní soukromou vzpomínku na toto místo">
+            ✨ Zapsat objev
+          </button>
           <button type="button" class="button mab-btn mab-pause-btn" id="walk-pause">
             ⏸ Pauza
-          </button>
-          <button type="button" class="button mab-btn mab-pocket-btn" id="btn-direct-pocket-mode" title="Kapesní režim — zhasne mapu na černou obrazovku a udrží záznam GPS i hlasovou navigaci v kapse">
-            🌙 Do kapsy
-          </button>
-          <!-- DÁVKA 2 (Bod 1.1) / DÁVKA 3 (Bod 8.2): Tlačítko Uložit vzpomínku uvnitř akční lišty -->
-          <button type="button" class="button mab-btn mab-memory-btn" id="walk-save-memory" title="Uložit vlastní soukromou vzpomínku na toto místo">
-            ✨ Uložit vzpomínku
           </button>
           <button type="button" class="button mab-btn mab-finish-btn" id="walk-finish">
             ⏹ Dokončit
           </button>
-          <div class="mab-more-wrap">
+          <button type="button" class="button mab-btn mab-places-drawer-btn" id="btn-open-places-drawer-active" data-open-places-drawer="1">
+            📍 Trasa a místa ▴
+          </button>
+          <button type="button" class="button mab-btn mab-pocket-btn" id="btn-direct-pocket-mode" hidden style="display:none !important">
+            🌙 Do kapsy
+          </button>
+          <div class="mab-more-wrap" hidden style="display:none !important">
             <button type="button" class="button mab-btn mab-more-btn" id="walk-more-btn" aria-expanded="false" aria-haspopup="menu" aria-controls="walk-more-menu">
               ⋯ Další
             </button>
@@ -1748,8 +1757,8 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       </div>
     </section>
 
-    <!-- Podrobný plán a zastávky výpravy pod mapou (vždy přístupný a přehledný) -->
-    <section class="bottom-sheet" id="walk-bottom-sheet" aria-label="Plán a zastávky procházky">
+    <!-- Vysouvací spodní šuplík míst a trasy (#walk-bottom-sheet — ve výchozím stavu sbalený/skrytý) -->
+    <section class="bottom-sheet" id="walk-bottom-sheet" hidden aria-label="Plán a zastávky procházky">
       <div class="bottom-sheet-bar">
         <div class="sheet-header-summary">
           <strong>🧭 Zastávky na trase (<span id="basket-count">${plannedRoute.selectedPlaceIds.length}</span>), osobní atlas a místa v okolí</strong>
@@ -1757,7 +1766,8 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         </div>
         <div class="sheet-bar-actions">
           <button type="button" class="button small ghost" id="btn-sheet-edit-walk" title="Otevřít sjednocený editor zastávek s potvrzením/zrušením změn">✏️ Upravit zastávky</button>
-          <button type="button" class="button small ghost sheet-toggle-btn" id="sheet-toggle-btn" aria-expanded="true">⬇ Sbalit panel</button>
+          <button type="button" class="button small primary sheet-close-drawer-btn" id="btn-close-places-drawer" aria-label="Zavřít šuplík">✕ Zavřít šuplík</button>
+          <button type="button" class="button small ghost sheet-toggle-btn" id="sheet-toggle-btn" hidden aria-expanded="true">⬇ Sbalit panel</button>
         </div>
       </div>
 
@@ -3669,16 +3679,19 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
    * a hlásí každý roh domu v předstihu i přímo u rohu a z kapsy při zhasnutém displeji.
    */
   function updateTurnNavPill(origin = lastFix) {
+    const pillEl = $('turn-nav-pill');
     const iconEl = $('turn-nav-icon');
     const textEl = $('turn-nav-text');
+    if (pillEl) pillEl.hidden = false;
 
     const plannedPlaces = getPlannedPlaces();
+    const unvisitedPlaces = plannedPlaces.filter(p => !isStopVisited(p));
     const currentPos = origin || lastFix || telemetry.lastKnownPosition || plannedRoute.origin;
-    if (!currentPos) return;
+    const gainedM = currentExpedition ? Math.max(0, progress.meters - (currentExpedition.startMeters || 0)) : (progress.meters || 0);
 
-    if (plannedPlaces.length === 0 && !lastRoutedGeometry) {
-      if (iconEl) iconEl.textContent = '↑';
-      if (textEl) textEl.textContent = 'Volná chůze · Vyber body v mapě nebo v seznamu';
+    if (!currentPos || (unvisitedPlaces.length === 0 && plannedPlaces.length === 0)) {
+      if (iconEl) iconEl.textContent = '🧭';
+      if (textEl) textEl.textContent = `🧭 Volný průzkum · Odkrývej okolí · ${formatMetersCz(gainedM)}`;
       return;
     }
 
@@ -3688,8 +3701,22 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       plannedPlaces,
       confirmedStopIds
     );
-    if (iconEl) iconEl.textContent = instr.icon || '↑';
-    if (textEl) textEl.textContent = instr.text || 'Pokračuj po trase';
+    const nextStop = unvisitedPlaces[0] || plannedPlaces[plannedPlaces.length - 1];
+    const directDistM = nextStop ? haversineMeters(currentPos, nextStop) : null;
+    const distLabel = instr.distanceToTurnM != null
+      ? `${Math.round(instr.distanceToTurnM)} m`
+      : (directDistM != null ? formatDistanceLabel(directDistM) : '');
+    const arrowChar = instr.icon || '↱';
+    const nextTitle = nextStop?.title || 'Cíl trasy';
+    if (iconEl) iconEl.textContent = arrowChar;
+    if (textEl) {
+      if (instr.text && instr.text.includes('→')) {
+        textEl.textContent = `${arrowChar} ${instr.text}`;
+      } else {
+        const turnPart = instr.text || 'Pokračuj po cestě';
+        textEl.textContent = `${arrowChar} ${distLabel ? `${distLabel} · ` : ''}${turnPart} → ${nextTitle}`;
+      }
+    }
 
     if ($('pocket-mode-overlay') && !$('pocket-mode-overlay').hidden && $('pocket-mode-stats')) {
       $('pocket-mode-stats').textContent = instr.text || 'GPS zaznamenává trasu na pozadí';
@@ -4003,7 +4030,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     if (!map) return;
     ensureCustomMapSourcesAndLayers();
     try {
-      const showLine = appSettings.gameMode !== 'explorer' && Array.isArray(coords) && coords.length >= 2;
+      const showLine = Array.isArray(coords) && coords.length >= 2;
       const geojson = buildPlannedRouteGeoJson(showLine ? coords : [], isFallbackGeom);
       const routeSrc = typeof map.getSource === 'function' ? map.getSource('planned-route-source') : null;
       if (routeSrc && typeof routeSrc.setData === 'function') {
@@ -4803,15 +4830,23 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       }
     }
 
-    // Aktualizujeme nebo vytvoříme markery bez blikání (in-place diffing, anchor: 'center')
+    // Aktualizujeme nebo vytvoříme 2.5D totemy míst (anchor: 'bottom') a Tajemné siluety vystupující z mlhy (.is-mystery-silhouette)
+    const playerRefPos = normalized || lastFix || telemetry.lastKnownPosition || getRouteOriginPoint();
+    const isMysteryGameMode = appSettings.gameMode === 'explorer' || appSettings.gameMode === 'gamified';
     for (const p of displayMapPlaces) {
       const visited = isStopVisitedInSession(p);
+      const isDiscovered = Boolean(visited || (Array.isArray(stateObj.discoveries) && stateObj.discoveries.includes(p.id)) || confirmedStopIds.has(p.id));
       const isRouteStart = p.pointKind === 'route-start';
       const isPlanned = plannedPlaceIds.has(p.id);
       const isNextTarget = nextUnvisitedStop && nextUnvisitedStop.id === p.id;
-      const isJustConfirmed = justConfirmedStopId === p.id;
+      const isJustConfirmed = justConfirmedStopId === p.id || justDiscoveredFlipIds.has(p.id);
+      const isSelected = Boolean(selectedDetailPlace && selectedDetailPlace.id === p.id);
       const isFirstAppear = !appearedPlaceIds.has(p.id);
       if (isFirstAppear) appearedPlaceIds.add(p.id);
+
+      const distFromPlayerM = playerRefPos ? (haversineMeters(playerRefPos, p) ?? Infinity) : Infinity;
+      const isMysterySilhouette = Boolean(!isDiscovered && !isRouteStart && isMysteryGameMode && distFromPlayerM > 35);
+      const isRareMystery = Boolean(p.wikipedia || p.wikidata || p.collectible || p.source === 'catalogue' || p.isRealPhoto);
 
       const visualCat = resolvePlaceVisualCategory(p);
       const categoryKey = isRouteStart ? 'route-start' : (p.kind || visualCat.kind || 'forest');
@@ -4824,11 +4859,11 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         ? 'tier-planned'
         : 'tier-default';
 
-      const animClass = isJustConfirmed
-        ? 'is-just-confirmed'
-        : isNextTarget
-        ? 'is-next-target'
-        : '';
+      const animClass = [
+        isJustConfirmed ? 'is-just-confirmed just-discovered-flip' : '',
+        isNextTarget ? 'is-next-target' : '',
+        isSelected ? 'is-selected' : '',
+      ].filter(Boolean).join(' ');
 
       const stopOrderIdx = plannedPlaces.findIndex(item => item.id === p.id);
       const orderBadgeHtml = stopOrderIdx >= 0
@@ -4836,17 +4871,41 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         : '';
 
       const glyphHtml = renderCategoryMarkerGlyph(glyphKindKey, visited ? 'visited' : 'default');
-      // V mapě vždy zobrazujeme výraznou vektorovou ikonu kategorie a její tvar/barvu (štít, klenba, kosočtverec, kapka, lístek),
-      // aby se značky po načtení fotek nezmenšovaly na nečitelná kolečka a nevyvolávaly desítky překreslení DOMu.
-      const photoInnerHtml = `<span class="czekpoint-marker-glyph kind-${e(categoryKey)} visual-cat-${e(visualCat.key)}">${glyphHtml}</span>`;
+      const distShortLabel = formatBigDist(distFromPlayerM);
 
-      const stateSig = `${p.lat},${p.lng}|${visualCat.key}|${visualCat.shape}|${tierClass}|${animClass}|${stopOrderIdx}|glyph`;
-      const iconHtml = `
-        <span class="czekpoint-marker-badge cat-${e(visualCat.key)} shape-${e(visualCat.shape)} ${tierClass} ${animClass} has-bitmap-glyph" data-kind="${e(categoryKey)}" data-visual-cat="${e(visualCat.key)}" data-shape="${e(visualCat.shape)}" title="${e(`${p.title || ''} — ${visualCat.label}`)}">
-          ${photoInnerHtml}
-          ${orderBadgeHtml}
-        </span>
-      `;
+      let iconHtml = '';
+      if (isMysterySilhouette) {
+        const mysteryPrefix = isRareMystery ? '🔥 Vzácný objev' : '❓ Tajemné místo';
+        const mysteryLabelText = Number.isFinite(distFromPlayerM) ? `${mysteryPrefix} · ${distShortLabel}` : mysteryPrefix;
+        iconHtml = `
+          <div class="place-marker-wrap is-mystery-silhouette ${isRareMystery ? 'is-rare-mystery' : ''} ${animClass}">
+            <div class="place-marker-inner">
+              <span class="czekpoint-marker-badge mystery-medallion cat-${e(visualCat.key)} shape-${e(visualCat.shape)} ${tierClass}" data-kind="${e(categoryKey)}" data-visual-cat="${e(visualCat.key)}" data-shape="${e(visualCat.shape)}" title="${e(`${mysteryLabelText} (${visualCat.shortLabel})`)}">
+                <span class="czekpoint-marker-glyph mystery-glyph kind-${e(categoryKey)}">${glyphHtml}</span>
+                <span class="mystery-question-mark" aria-hidden="true">❓</span>
+                ${orderBadgeHtml}
+              </span>
+              <span class="mystery-distance-pill">${e(mysteryLabelText)}</span>
+            </div>
+          </div>
+        `;
+      } else {
+        const photoInnerHtml = `<span class="czekpoint-marker-glyph kind-${e(categoryKey)} visual-cat-${e(visualCat.key)}">${glyphHtml}</span>`;
+        const shortTitle = String(p.title || '').length > 22 ? `${String(p.title).slice(0, 20)}…` : String(p.title || '');
+        iconHtml = `
+          <div class="place-marker-wrap is-revealed-totem ${animClass}">
+            <div class="place-marker-inner">
+              <span class="czekpoint-marker-badge cat-${e(visualCat.key)} shape-${e(visualCat.shape)} ${tierClass} ${animClass} has-bitmap-glyph" data-kind="${e(categoryKey)}" data-visual-cat="${e(visualCat.key)}" data-shape="${e(visualCat.shape)}" title="${e(`${p.title || ''} — ${visualCat.label}`)}">
+                ${photoInnerHtml}
+                ${orderBadgeHtml}
+              </span>
+              <span class="totem-title-pill">${e(shortTitle)}</span>
+            </div>
+          </div>
+        `;
+      }
+
+      const stateSig = `${p.lat},${p.lng}|${visualCat.key}|${visualCat.shape}|${tierClass}|${animClass}|${stopOrderIdx}|${isMysterySilhouette ? `mys:${Math.round((distFromPlayerM || 0) / 10)}` : 'rev'}`;
 
       const existing = placeMarkersById.get(p.id);
       if (existing) {
@@ -4857,19 +4916,21 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
           existing.lng = p.lng;
         }
         if (existing.stateSig !== stateSig && existing.element) {
+          existing.element.classList.toggle('is-mystery-silhouette', isMysterySilhouette);
+          existing.element.classList.toggle('just-discovered-flip', Boolean(isJustConfirmed));
           existing.element.innerHTML = iconHtml;
           existing.stateSig = stateSig;
           existing.iconStateKey = stateSig;
         }
       } else {
         const el = document.createElement('div');
-        el.className = 'czekpoint-marker-anchor';
-        el.style.width = '52px';
-        el.style.height = '52px';
-        el.title = p.title || '';
+        el.className = `czekpoint-marker-anchor ${isMysterySilhouette ? 'is-mystery-silhouette' : ''} ${isJustConfirmed ? 'just-discovered-flip' : ''}`.trim();
+        el.style.width = '56px';
+        el.style.height = '64px';
+        el.title = isMysterySilhouette ? 'Tajemné místo v mlze' : (p.title || '');
         el.innerHTML = iconHtml;
 
-        const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
+        const marker = new maplibregl.Marker({ element: el, anchor: 'bottom' })
           .setLngLat([p.lng, p.lat])
           .addTo(map);
 
@@ -5023,6 +5084,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     const visited = isStopVisitedInSession(p);
     const nearbyVisited = !visited && nearbyRecordedIds.has(p.id);
     const earlierStamp = !visited && hasLifetimeStamp(p);
+    const isDiscovered = Boolean(visited || (Array.isArray(stateObj.discoveries) && stateObj.discoveries.includes(p.id)) || confirmedStopIds.has(p.id));
     const isPlanned = (plannedRoute.selectedPlaceIds || []).includes(p.id);
     const curPos = lastFix || telemetry.lastKnownPosition || getRouteOriginPoint();
     const distM = curPos ? haversineMeters(curPos, p) : null;
@@ -5030,7 +5092,59 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     const speedKmH = getCompanionSpeedKmH();
     const mins = distM != null ? Math.max(1, Math.round((distM / 1000) / speedKmH * 60)) : null;
 
+    const visualCat = resolvePlaceVisualCategory(p);
+    const categoryLabel = visualCat?.shortLabel || (p.kind === 'water' ? 'Voda a klid' : p.kind === 'view' ? 'Vyhlídka' : p.kind === 'culture' ? 'Památka' : 'Příroda');
     const kindLabel = p.kind === 'water' ? '💧 Voda a klid' : p.kind === 'view' ? '⛰️ Vyhlídka' : p.kind === 'culture' ? '🏰 Památka' : '🌲 Příroda';
+
+    const isMysteryGameMode = appSettings.gameMode === 'explorer' || appSettings.gameMode === 'gamified';
+    const isUnexploredMystery = Boolean(!isDiscovered && p.pointKind !== 'route-start' && isMysteryGameMode && (distM == null || distM > 35));
+
+    if (isUnexploredMystery) {
+      const distRoundM = distM != null ? Math.round(distM) : '—';
+      sheet.hidden = false;
+      sheet.innerHTML = `
+        <div class="pds-card phase3-bubble-card is-mystery-card">
+          <div class="pds-header" style="display:flex;gap:12px;align-items:center">
+            <div class="pds-mystery-icon-box">❓</div>
+            <div class="pds-title-wrap" style="flex:1;min-width:0">
+              <span class="pds-kind-badge">🌫️ Neprozkoumaná silueta</span>
+              <h3 class="pds-title">❓ Tajemné místo v mlze (${e(categoryLabel)} · ${e(String(distRoundM))} m od tebe)</h3>
+              <span class="pds-photo-source-badge is-bitmap">Přibliž se na ≤ 25 m a odhal skutečnou podobu místa i razítko (+30 b.)!</span>
+            </div>
+            <button type="button" class="button small ghost pds-close-btn" id="btn-close-place-detail" aria-label="Zavřít bublinu">✕</button>
+          </div>
+          <div class="pds-actions phase3-bubble-actions" style="margin-top:10px">
+            <button type="button" class="button primary pds-action-btn guide-thread-btn" id="btn-p3-guide-thread" data-place-id="${e(p.id)}">
+              🧭 VYDAT SE SEM (Natáhnout vodicí nit)
+            </button>
+            ${isPlanned ? `
+              <button type="button" class="button danger phase3-action-btn" id="btn-p3-skip-stop" data-place-id="${e(p.id)}">
+                ✕ Zrušit vodicí nit
+              </button>
+            ` : ''}
+          </div>
+        </div>
+      `;
+      $('btn-close-place-detail')?.addEventListener('click', closePlaceDetail);
+      $('btn-p3-guide-thread')?.addEventListener('click', async () => {
+        closePlaceDetail();
+        playStampChord(stateObj.soundEnabled);
+        await addStopToRoute(p, {
+          setAsEnd: true,
+          reasonMsg: `🧭 Zlatá vodicí nit natažena k tajemnému místu (${distRoundM} m).`,
+        });
+        updateTurnNavPill(lastFix || getRouteOriginPoint());
+      });
+      $('btn-p3-skip-stop')?.addEventListener('click', async () => {
+        plannedRoute.selectedPlaceIds = (plannedRoute.selectedPlaceIds || []).filter(id => id !== p.id);
+        lastRoutedGeometry = null;
+        plannedRouteRenderKey = null;
+        closePlaceDetail();
+        playTick(stateObj.soundEnabled);
+        await recalculateRemainingRoute('Vodicí nit k místu byla zrušena.');
+      });
+      return;
+    }
 
     // DÁVKA 2 (Bod 2.1): Pravdivá terminologie a vysvětlení, že GPS měří přiblížení v terénu
     const statusBadge = visited
@@ -5058,10 +5172,13 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       `
       : `
         <div class="pds-actions phase3-bubble-actions">
+          <button type="button" class="button primary pds-action-btn guide-thread-btn" id="btn-p3-guide-thread" data-place-id="${e(p.id)}">
+            🧭 VYDAT SE SEM (Natáhnout vodicí nit)
+          </button>
           <button type="button" class="button lime phase3-action-btn" id="btn-p3-insert-stop" data-place-id="${e(p.id)}">
             + Přidat do trasy
           </button>
-          <button type="button" class="button primary phase3-action-btn" id="btn-p3-set-end" data-place-id="${e(p.id)}">
+          <button type="button" class="button ghost phase3-action-btn" id="btn-p3-set-end" data-place-id="${e(p.id)}">
             🏁 Nastavit jako konečný cíl
           </button>
         </div>
@@ -5120,6 +5237,16 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     }
 
     $('btn-close-place-detail')?.addEventListener('click', closePlaceDetail);
+
+    $('btn-p3-guide-thread')?.addEventListener('click', async () => {
+      closePlaceDetail();
+      playStampChord(stateObj.soundEnabled);
+      await addStopToRoute(p, {
+        setAsEnd: true,
+        reasonMsg: `🧭 Zlatá vodicí nit natažena k: ${p.title}.`,
+      });
+      updateTurnNavPill(lastFix || getRouteOriginPoint());
+    });
 
     // 1. Bod UŽ JE v trase -> [ ✕ Vynechat tuto zastávku ]
     $('btn-p3-skip-stop')?.addEventListener('click', async () => {
@@ -6713,18 +6840,34 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         }
       }
 
-      // 3. Kontrola GPS razítek pro všechna místa v katalogu/okolí
+      // 3. Kontrola GPS razítek a odhalení Tajemných siluet v mlze při přiblížení na <= 25 m
       const allPlaces = getAllAvailablePlaces();
-      const stampedProgress = discoverNearby(progress, validFix, allPlaces, pendingPlaceStamps);
+      let stampedProgress = discoverNearby(progress, validFix, allPlaces, pendingPlaceStamps);
+      for (const cand of allPlaces) {
+        if (!cand || !cand.id || cand.pointKind === 'route-start') continue;
+        if (!stampedProgress.discoveries.includes(cand.id) && !confirmedStopIds.has(cand.id)) {
+          const dM = haversineMeters(validFix, cand);
+          if (dM !== null && dM <= 25) {
+            stampedProgress = {
+              ...stampedProgress,
+              discoveries: [...stampedProgress.discoveries, cand.id],
+            };
+          }
+        }
+      }
 
       if (stampedProgress.discoveries.length > progress.discoveries.length) {
         stateChanged = true;
         const addedCount = stampedProgress.discoveries.length - progress.discoveries.length;
         const newStampIds = stampedProgress.discoveries.filter(id => !progress.discoveries.includes(id));
+        const revealedTitles = [];
         for (const newId of newStampIds) {
           stateObj = recordSummitEntry(stateObj, newId);
           confirmedStopIds.add(newId);
+          justConfirmedStopId = newId;
+          justDiscoveredFlipIds.add(newId);
           const foundPlace = allPlaces.find(p => p.id === newId);
+          if (foundPlace?.title) revealedTitles.push(foundPlace.title);
           if (foundPlace && currentExpedition) {
             currentExpedition = recordExpeditionVisit(currentExpedition, foundPlace);
             stateObj.activeExpedition = currentExpedition;
@@ -6744,7 +6887,8 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
           stateObj.pointsLedger = milestoneRes.updatedLedger;
         }
 
-        status(`🏆 Získáno GPS razítko ověřeného místa! +${addedCount * 30} bodů.`);
+        const placeNameNote = revealedTitles.length > 0 ? `: ${revealedTitles.join(', ')}` : '';
+        status(`🏆 Tajemné místo odhaleno${placeNameNote}! +${addedCount * 30} bodů.`);
       }
 
       // 4. Radar upozornění
@@ -7156,8 +7300,8 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
           },
           paint: {
             'line-color': ['coalesce', ['get', 'casingColor'], '#2e1065'],
-            'line-width': ['coalesce', ['get', 'casingWidth'], 8],
-            'line-opacity': ['coalesce', ['get', 'casingOpacity'], 0.9],
+            'line-width': ['coalesce', ['get', 'casingWidth'], 9],
+            'line-opacity': ['coalesce', ['get', 'casingOpacity'], 0.94],
           },
         });
       }
@@ -7172,9 +7316,9 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
             'line-join': 'round',
           },
           paint: {
-            'line-color': ['coalesce', ['get', 'lineColor'], '#9333ea'],
-            'line-width': ['coalesce', ['get', 'lineWidth'], 4.5],
-            'line-opacity': ['coalesce', ['get', 'lineOpacity'], 0.96],
+            'line-color': ['coalesce', ['get', 'lineColor'], '#f5b82e'],
+            'line-width': ['coalesce', ['get', 'lineWidth'], 5],
+            'line-opacity': ['coalesce', ['get', 'lineOpacity'], 0.98],
           },
         });
       }
@@ -7190,8 +7334,8 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
           },
           paint: {
             'line-color': ['coalesce', ['get', 'lineColor'], '#9333ea'],
-            'line-width': ['coalesce', ['get', 'lineWidth'], 4],
-            'line-opacity': ['coalesce', ['get', 'lineOpacity'], 0.88],
+            'line-width': ['coalesce', ['get', 'lineWidth'], 5],
+            'line-opacity': ['coalesce', ['get', 'lineOpacity'], 0.92],
             'line-dasharray': [2, 2],
           },
         });
@@ -7266,8 +7410,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       }
 
       const active3d = Boolean(is3dMode || is3DMode);
-      const want3dBuildings = Boolean(active3d && appSettings.show3dBuildings !== false);
-      const target3DStateKey = `${active3d ? '3d' : '2d'}:${want3dBuildings ? 'b1' : 'b0'}`;
+      const target3DStateKey = `${active3d ? '3d' : '2d'}:diorama`;
       const force3DSync = Boolean(options && options.force3DSync);
 
       if (force3DSync || lastApplied3DModeStateKey !== target3DStateKey) {
@@ -7309,83 +7452,26 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
                   visibility: 'visible',
                 },
                 paint: {
-                  'hillshade-exaggeration': 0.85,
-                  'hillshade-shadow-color': '#0f291e',
+                  'hillshade-exaggeration': 0.45,
+                  'hillshade-shadow-color': '#1b3b2b',
                   'hillshade-highlight-color': '#fffef2',
-                  'hillshade-accent-color': '#2d6a4f',
+                  'hillshade-accent-color': '#d4af37',
                 },
               },
               hillshadeBefore
             );
           }
 
-          if (!map.getSource('openfreemap-v')) {
-            map.addSource('openfreemap-v', {
-              type: 'vector',
-              url: 'https://tiles.openfreemap.org/planet',
-            });
+          if (map.getLayer('czekpoint-3d-buildings')) {
+            try { map.setLayoutProperty('czekpoint-3d-buildings', 'visibility', 'none'); } catch {}
           }
-          const extrusionBefore = map.getLayer('planned-route-casing')
-            ? 'planned-route-casing'
-            : map.getLayer('walked-segments-casing')
-            ? 'walked-segments-casing'
-            : undefined;
-          if (!map.getLayer('czekpoint-3d-forests')) {
-            map.addLayer(
-              {
-                id: 'czekpoint-3d-forests',
-                source: 'openfreemap-v',
-                'source-layer': 'landcover',
-                type: 'fill-extrusion',
-                minzoom: 15,
-                maxzoom: 22,
-                filter: ['==', ['get', 'class'], 'wood'],
-                layout: { visibility: 'visible' },
-                paint: {
-                  'fill-extrusion-color': '#2d6a4f',
-                  'fill-extrusion-height': 0,
-                  'fill-extrusion-base': 0,
-                  'fill-extrusion-opacity': 0,
-                },
-              },
-              extrusionBefore
-            );
-          }
-          if (want3dBuildings) {
-            if (!map.getLayer('czekpoint-3d-buildings')) {
-              map.addLayer(
-                {
-                  id: 'czekpoint-3d-buildings',
-                  source: 'openfreemap-v',
-                  'source-layer': 'building',
-                  type: 'fill-extrusion',
-                  minzoom: 13,
-                  maxzoom: 22,
-                  layout: { visibility: 'visible' },
-                  paint: {
-                    'fill-extrusion-color': [
-                      'interpolate',
-                      ['linear'],
-                      ['coalesce', ['get', 'render_height'], ['get', 'height'], 10],
-                      0, '#e6dec8',
-                      12, '#d8b48a',
-                      25, '#c98a63',
-                    ],
-                    'fill-extrusion-height': ['coalesce', ['get', 'render_height'], ['get', 'height'], 10],
-                    'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0],
-                    'fill-extrusion-opacity': 0.85,
-                  },
-                },
-                extrusionBefore
-              );
-            }
-          } else if (map.getLayer('czekpoint-3d-buildings')) {
-            try { map.removeLayer('czekpoint-3d-buildings'); } catch {}
+          if (map.getLayer('czekpoint-3d-forests')) {
+            try { map.setLayoutProperty('czekpoint-3d-forests', 'visibility', 'none'); } catch {}
           }
 
           if (appliedTerrain3D !== true) {
             try {
-              map.setTerrain({ source: 'terrain-dem', exaggeration: 1.8 });
+              map.setTerrain({ source: 'terrain-dem', exaggeration: DEFAULT_TERRAIN_EXAGGERATION });
               appliedTerrain3D = true;
             } catch {}
           }
@@ -7420,7 +7506,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     const terrainObj = typeof map.getTerrain === 'function' ? map.getTerrain() : null;
     const isTerrainActive = Boolean(terrainObj && terrainObj.source === 'terrain-dem');
     const curPitch = typeof map.getPitch === 'function' ? Number(map.getPitch().toFixed(1)) : 0;
-    const ok = is3DMode ? (hasTerrainDem && isTerrainActive) : (!hasTerrainDem && !hasBuildings && !terrainObj);
+    const ok = is3DMode ? (hasTerrainDem && isTerrainActive) : (!hasTerrainDem && !terrainObj);
 
     const result = {
       ok,
@@ -7434,16 +7520,6 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       terrain: terrainObj,
       pitch: curPitch,
     };
-
-    if (is3DMode) {
-      if (ok) {
-        console.log(`[Czekpoint 3D Diagnostika] ✓ 3D terén a budovy aktivní: terrain-dem=${hasTerrainDem}, terrain.exaggeration=${terrainObj?.exaggeration || 1.8}, 3D budovy=${hasBuildings}, pitch=${curPitch}°`);
-      } else {
-        console.warn(`[Czekpoint 3D Diagnostika] ⚠️ 3D režim zapnut, ale terrain-dem nebo getTerrain není plně aktivní:`, result);
-      }
-    } else {
-      console.log(`[Czekpoint 3D Diagnostika] 2D režim: 3D zdroje i vrstvy korektně odstraněny (terrain-dem=${hasTerrainDem}, budovy=${hasBuildings}).`);
-    }
 
     if (typeof window !== 'undefined') {
       window.__map = map;
@@ -7459,29 +7535,18 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     if (toggleBtn) {
       toggleBtn.setAttribute('aria-pressed', String(is3DMode));
       toggleBtn.classList.toggle('active', is3DMode);
-      toggleBtn.innerHTML = `<span class="btn-3d-label" id="btn-toggle-3d-label">${is3DMode ? '3D' : '2D'}</span>`;
+      toggleBtn.innerHTML = `<span class="btn-3d-label" id="btn-toggle-3d-label">${is3DMode ? '🎯' : '2D'}</span>`;
       toggleBtn.title = is3DMode
-        ? 'Přepnout zpět na plochou 2D mapu shora'
-        : 'Přepnout na 3D zobrazení terénu, hor, lesů a 3D budov';
+        ? '2.5D Reliéfní Diorama aktivní — kliknutím vycentruješ a přepneš na 2D pohled shora'
+        : '2D pohled shora — kliknutím vycentruješ a přepneš na 2.5D Reliéfní Diorama (32°)';
     }
     const camControls = $('map-3d-camera-controls');
     if (camControls) {
-      camControls.hidden = !is3DMode;
+      camControls.hidden = true;
     }
     const badge = $('map-3d-active-badge');
     if (badge) {
-      const hasTerrainSource = Boolean(map && typeof map.getSource === 'function' && map.getSource('terrain-dem'));
-      const hasBuildingsLoaded = Boolean(
-        map &&
-        typeof map.getSource === 'function' &&
-        (map.getSource('openfreemap-v') || (typeof map.getLayer === 'function' && map.getLayer('czekpoint-3d-buildings')) || appSettings.show3dBuildings === false)
-      );
-      const sourcesLoaded = !map || typeof map.getSource !== 'function' || (hasTerrainSource && hasBuildingsLoaded);
-      badge.hidden = !is3DMode || !sourcesLoaded;
-      const textEl = $('map-3d-badge-text');
-      if (textEl) {
-        textEl.textContent = (is3DMode && sourcesLoaded) ? '3D terén a budovy aktivní' : '';
-      }
+      badge.hidden = true;
     }
     $('walk-map-wrap')?.classList.toggle('is-3d-mode', is3DMode);
     updatePlayerAvatarIcon(Boolean(active || demo || simSandboxActive));
@@ -7509,57 +7574,60 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     is3dMode = next3D;
     enableAllMapInteractions();
 
+    const avatarCenter = visualPlayerPos || lastFix || telemetry.lastKnownPosition || getRouteOriginPoint();
+
     if (next3D) {
-      // DÁVKA 1 (v2.2.1 P0 Bod 2): Přirozený 3D pohled — nezapínat automaticky follow/kompas ani nevynucovat zoom 18.4
+      follow = true;
+      followHeadingMode = true;
       updateFollowUi();
       updateHeadingModeBannerUi();
 
-      const curZoom = typeof map.getZoom === 'function' ? map.getZoom() : 16.5;
-      const safeZoom = Number.isFinite(Number(curZoom)) ? Number(curZoom) : 15.6;
-      const rawBearing = typeof map.getBearing === 'function' ? Number(map.getBearing()) : 0;
-      const targetBearingVal = Number.isFinite(rawBearing) ? rawBearing : 28;
-      const rawCenter = typeof map.getCenter === 'function' ? map.getCenter() : null;
-      const curCenter = (rawCenter && Number.isFinite(rawCenter.lng) && Number.isFinite(rawCenter.lat)) ? rawCenter : null;
+      const targetZoom = 17;
+      const rawBearing = (currentDeviceHeading != null && Number.isFinite(currentDeviceHeading))
+        ? currentDeviceHeading
+        : (lastGpsCourseHeading != null && Number.isFinite(lastGpsCourseHeading))
+        ? lastGpsCourseHeading
+        : (typeof map.getBearing === 'function' ? Number(map.getBearing()) : 0);
+      const targetBearingVal = Number.isFinite(rawBearing) ? rawBearing : 0;
       const padding = getMapCameraPadding();
 
-      // Bezpečné přepnutí 2D/3D i během načítání stylu (!map.isStyleLoaded())
       const styleReady = typeof map.isStyleLoaded === 'function' ? map.isStyleLoaded() : true;
       if (!styleReady) {
         update3DUiState();
         try {
           map.easeTo({
-            pitch: 58,
-            zoom: curZoom,
+            pitch: DEFAULT_3D_PITCH,
+            zoom: targetZoom,
             bearing: targetBearingVal,
-            center: curCenter ? [curCenter.lng, curCenter.lat] : undefined,
+            center: avatarCenter ? [avatarCenter.lng, avatarCenter.lat] : undefined,
             padding,
-            duration: opts.instant ? 0 : 500,
+            duration: opts.instant ? 0 : 450,
           });
         } catch {}
         if (!opts.silent) {
-          status('🏔️ Zapnuto 3D zobrazení (náklon 58°, 3D hory, lesy a budovy).');
+          status('🎯 Zapnuto 2.5D Reliéfní Diorama (náklon 32°, zoom 17, sledování směru).');
         }
         return;
       }
       try {
         ensureCustomMapSourcesAndLayers({ force3DSync: true });
         if (appliedTerrain3D !== is3dMode) {
-          map.setTerrain({ source: 'terrain-dem', exaggeration: 1.8 });
+          map.setTerrain({ source: 'terrain-dem', exaggeration: DEFAULT_TERRAIN_EXAGGERATION });
           appliedTerrain3D = true;
         }
         sync3DBuildingsLayerState();
         update3DUiState();
         drawFog(true);
         map.easeTo({
-          pitch: 58,
-          zoom: safeZoom,
+          pitch: DEFAULT_3D_PITCH,
+          zoom: targetZoom,
           bearing: targetBearingVal,
-          center: curCenter ? [curCenter.lng, curCenter.lat] : undefined,
+          center: avatarCenter ? [avatarCenter.lng, avatarCenter.lat] : undefined,
           padding,
-          duration: opts.instant ? 0 : 500,
+          duration: opts.instant ? 0 : 450,
         });
         if (!opts.silent) {
-          status('🏔️ Zapnuto 3D zobrazení (náklon 58°, terén 1.8×, 3D lesy a budovy).');
+          status('🎯 Zapnuto 2.5D Reliéfní Diorama (náklon 32°, terén 1.25×, pohled za postavičkou).');
         }
         verify3DMapState('setMap3DMode');
       } catch {
@@ -7567,14 +7635,18 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         is3dMode = false;
         appliedTerrain3D = false;
         ensureCustomMapSourcesAndLayers({ force3DSync: true });
-        try { map.easeTo({ pitch: 0, padding: getMapCameraPadding(), duration: 300 }); } catch {}
+        try { map.easeTo({ pitch: 0, bearing: 0, padding: getMapCameraPadding(), duration: 300 }); } catch {}
         update3DUiState();
-        status('3D terén není momentálně dostupný, pokračuji ve 2D zobrazení.');
+        status('2.5D terén není momentálně dostupný, pokračuji ve 2D zobrazení.');
         verify3DMapState('fallback2D');
       }
     } else {
       is3DMode = false;
       is3dMode = false;
+      follow = true;
+      followHeadingMode = false;
+      updateFollowUi();
+      updateHeadingModeBannerUi();
       try {
         ensureCustomMapSourcesAndLayers({ force3DSync: true });
         drawFog(true);
@@ -7583,12 +7655,14 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       try {
         map.easeTo({
           pitch: 0,
+          bearing: 0,
+          center: avatarCenter ? [avatarCenter.lng, avatarCenter.lat] : undefined,
           padding: getMapCameraPadding(),
-          duration: opts.instant ? 0 : 500,
+          duration: opts.instant ? 0 : 450,
         });
       } catch {}
       if (!opts.silent) {
-        status(opts.fallbackMessage || '🗺️ Přepnuto na přehledné 2D zobrazení mapy shora.');
+        status(opts.fallbackMessage || '🗺️ Přepnuto na 2D pohled shora (sever nahoře).');
       }
       verify3DMapState('setMap2DMode');
     }
@@ -7903,14 +7977,14 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       const safeMobilePixelRatio = Math.min(rawDpr, 1.5);
       map = new maplibregl.Map({
         container: mapContainer,
-        style: buildMapLibreStyle(config, { showContourLayer, showHikingTrails, is3dMode, show3dBuildings: appSettings.show3dBuildings !== false }),
+        style: buildMapLibreStyle(config, { showContourLayer, showHikingTrails, is3dMode, show3dBuildings: false }),
         center: [center.lng, center.lat],
-        zoom: is3dMode ? 15.6 : 16.5,
-        pitch: is3dMode ? 58 : 0,
-        bearing: is3dMode ? 28 : 0,
+        zoom: is3dMode ? 17 : 16.5,
+        pitch: is3dMode ? DEFAULT_3D_PITCH : 0,
+        bearing: 0,
         minZoom: 3,
         maxZoom: 19,
-        maxPitch: 75,
+        maxPitch: 42,
         pixelRatio: safeMobilePixelRatio,
         fadeDuration: 0,
         maxTileCacheSize: 20,
@@ -8475,9 +8549,15 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     }
   });
 
-  // DÁVKA 1–3 (v2.0): Přepínač 2D / 3D, Sledovat směr (#btn-follow-heading), Sever nahoře a přístupná 3D tlačítka kamery
+  // ZÓNA 2: 🎯 (#btn-toggle-3d spojené s centrováním na postavičku a přepínáním 2D / 2.5D Diorama)
   $('btn-toggle-3d')?.addEventListener('click', () => {
     terrainFallbackTriggered = false;
+    follow = true;
+    userZoomLocked = false;
+    const pos = visualPlayerPos || lastFix || telemetry.lastKnownPosition || getRouteOriginPoint();
+    if (pos && map) {
+      centerMapOnPlayer(pos, true);
+    }
     setMap3DMode(!is3DMode);
     updateDirectionalIndicators();
     playTick(stateObj.soundEnabled);
@@ -8900,17 +8980,36 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     saveAppState();
   });
 
-  // Bod 25: Při sbalení/rozbalení spodního panelu nebo otočení telefonu znovu vycentrujeme hráče do viditelné části mapy
+  // ZÓNA 3: Otevírání a zavírání vysouvacího spodního šuplíku míst (#walk-bottom-sheet)
+  function setPlacesDrawerOpen(open) {
+    const sheetEl = $('walk-bottom-sheet');
+    if (!sheetEl) return;
+    const isOpen = Boolean(open);
+    sheetEl.hidden = !isOpen;
+    sheetEl.classList.toggle('is-drawer-open', isOpen);
+    sheetEl.classList.remove('collapsed');
+    if (isOpen) {
+      renderPlaces();
+      renderPlannerBasketAndXray();
+    }
+  }
+
+  root.querySelectorAll('[data-open-places-drawer]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const sheetEl = $('walk-bottom-sheet');
+      const isCurrentlyOpen = sheetEl && !sheetEl.hidden;
+      setPlacesDrawerOpen(!isCurrentlyOpen);
+      playTick(stateObj.soundEnabled);
+    });
+  });
+
+  $('btn-close-places-drawer')?.addEventListener('click', () => {
+    setPlacesDrawerOpen(false);
+    playTick(stateObj.soundEnabled);
+  });
+
   $('sheet-toggle-btn')?.addEventListener('click', () => {
-    sheetCollapsed = !sheetCollapsed;
-    $('walk-bottom-sheet')?.classList.toggle('collapsed', sheetCollapsed);
-    $('sheet-toggle-btn')?.setAttribute('aria-expanded', String(!sheetCollapsed));
-    if ($('sheet-toggle-btn')) {
-      $('sheet-toggle-btn').textContent = sheetCollapsed ? '⬆ Rozbalit panel' : '⬇ Sbalit panel';
-    }
-    if (follow && (lastFix || telemetry.lastKnownPosition)) {
-      centerMapOnPlayer(lastFix || telemetry.lastKnownPosition, false);
-    }
+    setPlacesDrawerOpen(false);
     playTick(stateObj.soundEnabled);
   });
 
@@ -10032,6 +10131,15 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     playTick(stateObj.soundEnabled);
   });
 
+  $('btn-top-pill-style')?.addEventListener('click', (ev) => {
+    ev?.stopPropagation?.();
+    appSettingsModalOpen = true;
+    const modal = $('app-settings-modal');
+    if (modal) modal.hidden = false;
+    renderAppSettingsModalUi();
+    playTick(stateObj.soundEnabled);
+  });
+
   $('btn-top-pause')?.addEventListener('click', () => {
     togglePauseUnified();
   });
@@ -10955,6 +11063,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       const clickedOpenSettings =
         t.closest('#btn-open-settings-modal') ||
         t.closest('#btn-top-settings') ||
+        t.closest('#btn-top-pill-style') ||
         t.closest('#walk-more-settings') ||
         t.closest('#walk-more-options') ||
         t.closest('#walk-more-menu') ||
@@ -11059,10 +11168,11 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       const placeId = openMapDetailBtn.dataset.placeId;
       const targetPlace = getAllAvailablePlaces().find(item => item.id === placeId);
       if (targetPlace) {
+        setPlacesDrawerOpen(false);
         if (map) {
           follow = false;
           updateFollowUi();
-          setMapView(targetPlace.lat, targetPlace.lng, Math.max(map.getZoom?.() || 14, 14), true);
+          setMapView(targetPlace.lat, targetPlace.lng, Math.max(map.getZoom?.() || 16, 16), true);
         }
         openPlaceDetail(targetPlace);
         playTick(stateObj.soundEnabled);

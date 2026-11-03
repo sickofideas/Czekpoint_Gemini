@@ -5803,6 +5803,405 @@ dialog:not([open]) {
   }
 }
 
+/* ==========================================================================
+   v3.0 — RADIKÁLNÍ PŘESTAVBA UX A MAPY: 2.5D RELIÉFNÍ DIORAMA & TAJEMNÉ SILUETY
+   ========================================================================== */
 
+/* 1. SKRYTÍ BALASTU MIMO MAPU & 100% MAPA */
+#phase1-top-bar,
+#phase1-bottom-bar,
+#map-command-bar,
+#next-checkpoint-hero-card,
+.map-sub-bar,
+.walk-test-strip {
+  display: none !important;
+}
 
+.walk-map-wrap {
+  position: relative !important;
+  width: 100% !important;
+  height: calc(100dvh - 76px) !important;
+  min-height: 520px !important;
+  border-radius: 20px !important;
+  overflow: hidden !important;
+}
 
+#walk-map {
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 520px !important;
+}
+
+/* 4. OPRAVA BLOKUJÍCÍ CLONY DIALOGŮ */
+.edit-walk-modal-backdrop[hidden],
+.walk-modal-backdrop[hidden],
+#app-settings-modal[hidden],
+#save-memory-modal[hidden],
+#memory-modal[hidden],
+#edit-walk-modal[hidden],
+#arrival-goal-modal[hidden],
+#pocket-mode-overlay[hidden],
+#session-summary-container:empty,
+dialog:not([open]) {
+  display: none !important;
+  pointer-events: none !important;
+}
+
+/* 2. ZÓNA 1 — HORNÍ STŘEDOVÁ KAPSLE (.map-top-overlays) */
+.map-top-overlays {
+  position: absolute !important;
+  top: 10px !important;
+  left: 10px !important;
+  right: 10px !important;
+  z-index: 1200 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  gap: 8px !important;
+  pointer-events: none !important;
+}
+
+.map-top-subrow {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 100% !important;
+  max-width: 640px !important;
+  pointer-events: none !important;
+}
+
+#turn-by-turn-nav-pill.turn-nav-pill {
+  pointer-events: auto !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 10px !important;
+  width: auto !important;
+  max-width: 100% !important;
+  min-height: 48px !important;
+  padding: 6px 10px 6px 14px !important;
+  background: rgba(15, 29, 21, 0.94) !important;
+  border: 2px solid #d4af37 !important;
+  border-radius: 999px !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45) !important;
+  color: #fef3c7 !important;
+}
+
+.top-pill-style-btn {
+  pointer-events: auto !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 4px !important;
+  min-height: 36px !important;
+  padding: 6px 12px !important;
+  border-radius: 999px !important;
+  background: #fef3c7 !important;
+  color: #143323 !important;
+  border: 1.5px solid #d4af37 !important;
+  font-size: 0.82rem !important;
+  font-weight: 800 !important;
+  cursor: pointer !important;
+  white-space: nowrap !important;
+  flex-shrink: 0 !important;
+}
+
+#map-search-overlay[hidden] {
+  display: none !important;
+}
+
+#map-search-overlay:not([hidden]) {
+  pointer-events: auto !important;
+  display: flex !important;
+  width: 100% !important;
+  max-width: 480px !important;
+}
+
+/* 3. ZÓNA 2 — PRAVÝ OKRAJ MAPY (.map-right-toolbar — pouze 3 kulatá tlačítka 48x48 px) */
+#walk-zoom-in,
+#walk-zoom-out,
+#map-3d-camera-controls,
+#walk-help-toggle,
+#walk-layer-toggle,
+#walk-contour-toggle,
+#walk-trails-toggle {
+  display: none !important;
+}
+
+.map-right-toolbar {
+  position: absolute !important;
+  top: 74px !important;
+  right: 12px !important;
+  z-index: 1150 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 10px !important;
+}
+
+.map-right-toolbar #btn-toggle-3d,
+.map-right-toolbar #walk-search-toggle,
+.map-right-toolbar #walk-zen-toggle {
+  width: 48px !important;
+  height: 48px !important;
+  min-width: 48px !important;
+  min-height: 48px !important;
+  max-width: 48px !important;
+  max-height: 48px !important;
+  border-radius: 50% !important;
+  padding: 0 !important;
+  display: inline-flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background: rgba(15, 29, 21, 0.94) !important;
+  color: #fef3c7 !important;
+  border: 2px solid #d4af37 !important;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45) !important;
+  font-weight: 900 !important;
+  cursor: pointer !important;
+}
+
+.map-right-toolbar #btn-toggle-3d.is-active,
+.map-right-toolbar #walk-search-toggle.is-active,
+.map-right-toolbar #walk-zen-toggle.is-active {
+  background: #d4af37 !important;
+  color: #0f1d15 !important;
+  border-color: #ffffff !important;
+}
+
+/* 4. ZÓNA 3 — SPODNÍ DOCK A VYSOUVACÍ ŠUPLÍK MÍST (.map-action-bar & #walk-bottom-sheet) */
+.map-action-bar {
+  position: absolute !important;
+  left: 12px !important;
+  right: 12px !important;
+  bottom: 14px !important;
+  z-index: 1140 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 8px !important;
+  pointer-events: none !important;
+}
+
+#mab-idle-group,
+#mab-active-group {
+  pointer-events: auto !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 8px !important;
+  width: 100% !important;
+  max-width: 680px !important;
+  background: rgba(15, 29, 21, 0.95) !important;
+  padding: 8px 10px !important;
+  border-radius: 18px !important;
+  border: 2px solid #d4af37 !important;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5) !important;
+}
+
+#mab-idle-group[hidden],
+#mab-active-group[hidden] {
+  display: none !important;
+}
+
+#walk-start-unified {
+  min-height: 54px !important;
+  font-size: 1.05rem !important;
+  font-weight: 900 !important;
+  flex: 1 1 auto !important;
+  border-radius: 14px !important;
+  background: linear-gradient(135deg, #f5b82e 0%, #d97706 100%) !important;
+  color: #0f1d15 !important;
+  border: 2px solid #fef3c7 !important;
+  padding: 10px 16px !important;
+  cursor: pointer !important;
+}
+
+#btn-open-places-drawer,
+#btn-open-places-drawer-active {
+  min-height: 54px !important;
+  padding: 10px 14px !important;
+  border-radius: 14px !important;
+  background: #1b3b2b !important;
+  color: #fef3c7 !important;
+  border: 1.5px solid #d4af37 !important;
+  font-size: 0.92rem !important;
+  font-weight: 800 !important;
+  cursor: pointer !important;
+  white-space: nowrap !important;
+}
+
+#mab-active-group .mab-btn {
+  min-height: 50px !important;
+  flex: 1 1 0 !important;
+  border-radius: 12px !important;
+  font-size: 0.88rem !important;
+  font-weight: 800 !important;
+}
+
+#walk-bottom-sheet[hidden] {
+  display: none !important;
+}
+
+#walk-bottom-sheet.is-drawer-open:not([hidden]) {
+  display: block !important;
+  position: fixed !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  max-height: 72dvh !important;
+  z-index: 9500 !important;
+  overflow-y: auto !important;
+  border-radius: 24px 24px 0 0 !important;
+  background: #f8f5ec !important;
+  box-shadow: 0 -12px 36px rgba(0, 0, 0, 0.35) !important;
+  padding: 16px 18px 28px 18px !important;
+  border-top: 3px solid #d4af37 !important;
+}
+
+.drawer-sheet-header-bar {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 12px !important;
+  padding-bottom: 12px !important;
+  margin-bottom: 12px !important;
+  border-bottom: 1px solid rgba(20, 51, 35, 0.15) !important;
+  position: sticky !important;
+  top: 0 !important;
+  background: #f8f5ec !important;
+  z-index: 10 !important;
+}
+
+.drawer-close-btn {
+  min-height: 42px !important;
+  padding: 8px 16px !important;
+  border-radius: 999px !important;
+  background: #143323 !important;
+  color: #fef3c7 !important;
+  border: 1.5px solid #d4af37 !important;
+  font-weight: 800 !important;
+  font-size: 0.9rem !important;
+  cursor: pointer !important;
+}
+
+/* 5. VYSTUPUJÍCÍ 3D TOTEMY MÍST (.place-marker-wrap & .place-marker-inner) */
+.place-marker-wrap {
+  position: relative !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  pointer-events: auto !important;
+  cursor: pointer !important;
+  transform-origin: bottom center !important;
+}
+
+.place-marker-wrap::after {
+  content: "" !important;
+  display: block !important;
+  width: 28px !important;
+  height: 9px !important;
+  margin-top: -3px !important;
+  border-radius: 50% !important;
+  background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0.58) 0%, rgba(0, 0, 0, 0) 75%) !important;
+  pointer-events: none !important;
+}
+
+.place-marker-inner {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  transition: transform 0.22s ease !important;
+}
+
+.czekpoint-place-marker.is-selected .place-marker-inner,
+.place-marker-wrap:hover .place-marker-inner {
+  transform: translateY(-5px) scale(1.08) !important;
+}
+
+/* 6. TAJEMNÉ SILUETY V MLZE (.is-mystery-silhouette) & .just-discovered-flip */
+.czekpoint-place-marker.is-mystery-silhouette {
+  z-index: 680 !important;
+}
+
+.czekpoint-place-marker.is-mystery-silhouette .czekpoint-marker-badge {
+  background: radial-gradient(circle at 35% 30%, #1b3b2b 0%, #09140e 100%) !important;
+  border: 2.5px solid #f5b82e !important;
+  box-shadow: 0 0 0 3px rgba(245, 184, 46, 0.28), 0 6px 14px rgba(0, 0, 0, 0.65) !important;
+  color: #f5b82e !important;
+  position: relative !important;
+}
+
+.czekpoint-place-marker.is-mystery-silhouette.is-mystery-rare .czekpoint-marker-badge {
+  border-color: #fbbf24 !important;
+  box-shadow: 0 0 14px rgba(251, 191, 36, 0.65), 0 6px 14px rgba(0, 0, 0, 0.7) !important;
+}
+
+.czekpoint-place-marker.is-mystery-silhouette .marker-glyph-svg {
+  color: rgba(245, 184, 46, 0.42) !important;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.8)) !important;
+}
+
+.mystery-question-mark {
+  position: absolute !important;
+  inset: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  font-size: 1.05rem !important;
+  font-weight: 900 !important;
+  color: #fef08a !important;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.95) !important;
+  pointer-events: none !important;
+}
+
+.mystery-distance-pill {
+  background: rgba(9, 20, 14, 0.94) !important;
+  color: #fde68a !important;
+  border: 1.5px solid #d4af37 !important;
+  font-weight: 800 !important;
+  font-size: 0.74rem !important;
+  padding: 2px 8px !important;
+  border-radius: 999px !important;
+  white-space: nowrap !important;
+}
+
+@keyframes justDiscoveredFlip {
+  0% {
+    transform: perspective(400px) rotateY(90deg) scale(0.7);
+    opacity: 0.4;
+  }
+  60% {
+    transform: perspective(400px) rotateY(-12deg) scale(1.18);
+    opacity: 1;
+  }
+  100% {
+    transform: perspective(400px) rotateY(0deg) scale(1);
+    opacity: 1;
+  }
+}
+
+.czekpoint-place-marker.just-discovered-flip .place-marker-inner {
+  animation: justDiscoveredFlip 0.65s cubic-bezier(0.22, 1, 0.36, 1) forwards !important;
+}
+
+/* 7. KARTA DETAILU MÍSTA & ZLATÁ VODICÍ NIT (#place-detail-sheet) */
+#place-detail-sheet.place-detail-sheet {
+  bottom: 84px !important;
+  z-index: 1150 !important;
+}
+
+.guide-thread-btn {
+  width: 100% !important;
+  min-height: 48px !important;
+  border-radius: 14px !important;
+  background: linear-gradient(135deg, #f5b82e 0%, #d97706 100%) !important;
+  color: #0f1d15 !important;
+  border: 2px solid #fef3c7 !important;
+  font-size: 0.95rem !important;
+  font-weight: 900 !important;
+  padding: 10px 16px !important;
+  cursor: pointer !important;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35) !important;
+}
