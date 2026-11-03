@@ -1385,6 +1385,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
             🗺️ Turistická mapa
           </button>
           <button type="button" class="p1-choice-btn" id="btn-open-settings-modal" title="Nastavení aplikace a herního stylu">⚙️ Nastavení</button>
+          <button type="button" class="p1-choice-btn p1-sim-btn" id="btn-top-sim-toggle" title="Otevřít/zavřít testovací simulátor GPS">🧪 Simulátor GPS</button>
         </div>
       </div>
     </section>
@@ -2595,11 +2596,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     }
     renderTrail();
 
-    // KRITICKÁ OPRAVA PROBLIKÁVÁNÍ 3D: Ve 3D režimu nevoláme updateImage na textuře mlhy při každém 5m posunu,
-    // protože re-bindování WebGL textury na 3D terénu vyvolává problikávání mapy.
-    if (!is3dActive) {
-      drawFog();
-    } else if (camStepDistM >= 35.0 || (nowMs - lastFogUpdateAt) >= 4000) {
+    if (distM >= 8.0 || (nowMs - lastFogUpdateAt) >= 900) {
       drawFog();
     }
   }
@@ -2709,9 +2706,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       fogTextureCanvas.height = 1024;
     }
 
-    // Optimalizace pro slabé telefony: ve 3D režimu nebo při vypnuté mlze (casual) je vrstva mlhy neviditelná (opacity 0),
-    // takže zcela přeskočíme náročné 2D kreslení 1024×1024 a synchronní PNG kompresi toDataURL()!
-    if (fogMode === 'none' || is3dMode || is3DMode) {
+    if (fogMode === 'none') {
       lastFogStateKey = fogStateKey;
       lastFogUpdateAt = nowMs;
       lastFogRenderedMode = fogMode;
@@ -2756,9 +2751,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     try {
       if (map.getLayer('czekpoint-fog-layer')) {
         map.setLayoutProperty('czekpoint-fog-layer', 'visibility', fogMode === 'none' ? 'none' : 'visible');
-        const targetFogOpacity = (is3dMode || is3DMode)
-          ? 0
-          : (fogMode === 'full' ? 0.94 : 0.82);
+        const targetFogOpacity = fogMode === 'full' ? 0.94 : (fogMode === 'none' ? 0 : 0.82);
         map.setPaintProperty('czekpoint-fog-layer', 'raster-opacity', targetFogOpacity);
       }
       const source = map.getSource('czekpoint-fog-source');
@@ -3406,7 +3399,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     }
 
     if (bottomBar) {
-      bottomBar.hidden = isWalking || p1PlannerCollapsed;
+      bottomBar.hidden = false;
     }
     if (toggleP1Btn) {
       toggleP1Btn.hidden = isWalking;
@@ -7400,7 +7393,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
             type: 'raster',
             source: 'czekpoint-fog-source',
             paint: {
-              'raster-opacity': (is3dMode || is3DMode) ? 0 : 0.82,
+              'raster-opacity': fogMode === 'none' ? 0 : (fogMode === 'full' ? 0.94 : 0.82),
               'raster-fade-duration': 0,
               'raster-resampling': 'linear',
             },
@@ -8481,6 +8474,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         toggleBtn.classList.add('active');
         toggleBtn.setAttribute('aria-expanded', 'true');
       }
+      $('btn-top-sim-toggle')?.classList.add('active');
       enterSimulatorSandbox();
     },
     onClose: () => {
@@ -8491,6 +8485,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         toggleBtn.classList.remove('active');
         toggleBtn.setAttribute('aria-expanded', 'false');
       }
+      $('btn-top-sim-toggle')?.classList.remove('active');
       exitSimulatorSandbox();
     },
     onAutopilotPause: (reason) => {
@@ -9606,8 +9601,14 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     );
   }
 
-  // Události Fáze 1: Panel voleb herního režimu a filtrů (#phase1-bottom-bar)
   $('phase1-bottom-bar')?.addEventListener('click', (ev) => {
+    const simBtn = ev.target.closest('#btn-top-sim-toggle');
+    if (simBtn) {
+      $('walk-fake-gps-toggle')?.click();
+      simBtn.classList.toggle('active', Boolean(fakeGpsSim?.isOpen));
+      return;
+    }
+
     const gmBtn = ev.target.closest('[data-p1-gamemode]');
     if (gmBtn) {
       const parent = gmBtn.parentElement;

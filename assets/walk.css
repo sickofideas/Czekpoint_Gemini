@@ -5804,24 +5804,31 @@ dialog:not([open]) {
 }
 
 /* ==========================================================================
-   v3.0 — RADIKÁLNÍ PŘESTAVBA UX A MAPY: 2.5D RELIÉFNÍ DIORAMA & TAJEMNÉ SILUETY
+   v3.0.1 — RADIKÁLNÍ PŘESTAVBA UX A MAPY: 2.5D RELIÉFNÍ DIORAMA & TAJEMNÉ SILUETY
    ========================================================================== */
 
-/* 1. SKRYTÍ BALASTU MIMO MAPU & 100% MAPA */
+/* 1. SKRYTÍ BALASTU MIMO MAPU & 100% MAPA + LIŠTA 3 MÓDŮ A SIMULÁTORU */
 #phase1-top-bar,
-#phase1-bottom-bar,
 #map-command-bar,
 #next-checkpoint-hero-card,
-.map-sub-bar,
-.walk-test-strip {
+.map-sub-bar {
   display: none !important;
+}
+
+#phase1-bottom-bar {
+  display: flex !important;
+  padding: 6px 10px !important;
+  margin-bottom: 8px !important;
+  background: rgba(15, 29, 21, 0.96) !important;
+  border: 1.5px solid #d4af37 !important;
+  border-radius: 14px !important;
 }
 
 .walk-map-wrap {
   position: relative !important;
   width: 100% !important;
-  height: calc(100dvh - 76px) !important;
-  min-height: 520px !important;
+  height: calc(100dvh - 134px) !important;
+  min-height: 480px !important;
   border-radius: 20px !important;
   overflow: hidden !important;
 }
@@ -5829,7 +5836,28 @@ dialog:not([open]) {
 #walk-map {
   width: 100% !important;
   height: 100% !important;
-  min-height: 520px !important;
+  min-height: 480px !important;
+}
+
+/* TESTOVACÍ SIMULÁTOR GPS (#simulator-test-zone) */
+#simulator-test-zone[hidden] {
+  display: none !important;
+}
+
+#simulator-test-zone:not([hidden]) {
+  position: fixed !important;
+  bottom: 82px !important;
+  left: 12px !important;
+  z-index: 1300 !important;
+  width: min(350px, calc(100vw - 24px)) !important;
+  max-height: 58dvh !important;
+  overflow-y: auto !important;
+  margin: 0 !important;
+  padding: 10px 12px !important;
+  background: rgba(15, 29, 21, 0.96) !important;
+  border: 2px solid #d8e99e !important;
+  border-radius: 16px !important;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.65) !important;
 }
 
 /* 4. OPRAVA BLOKUJÍCÍ CLONY DIALOGŮ */
@@ -5870,7 +5898,7 @@ dialog:not([open]) {
   pointer-events: none !important;
 }
 
-#turn-by-turn-nav-pill.turn-nav-pill {
+#turn-nav-pill.turn-nav-pill {
   pointer-events: auto !important;
   display: flex !important;
   align-items: center !important;
@@ -5983,8 +6011,8 @@ dialog:not([open]) {
   pointer-events: none !important;
 }
 
-#mab-idle-group,
-#mab-active-group {
+#mab-inactive-group:not([hidden]),
+#mab-active-group:not([hidden]) {
   pointer-events: auto !important;
   display: flex !important;
   align-items: center !important;
@@ -5999,7 +6027,7 @@ dialog:not([open]) {
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5) !important;
 }
 
-#mab-idle-group[hidden],
+#mab-inactive-group[hidden],
 #mab-active-group[hidden] {
   display: none !important;
 }
@@ -6085,7 +6113,15 @@ dialog:not([open]) {
   cursor: pointer !important;
 }
 
-/* 5. VYSTUPUJÍCÍ 3D TOTEMY MÍST (.place-marker-wrap & .place-marker-inner) */
+/* 5. VYSTUPUJÍCÍ 3D TOTEMY MÍST (.czekpoint-marker-anchor, .place-marker-wrap & .place-marker-inner) */
+.czekpoint-marker-anchor {
+  width: auto !important;
+  height: auto !important;
+  min-width: 48px !important;
+  min-height: 48px !important;
+  contain: none !important;
+}
+
 .place-marker-wrap {
   position: relative !important;
   display: flex !important;
@@ -6115,17 +6151,18 @@ dialog:not([open]) {
   transition: transform 0.22s ease !important;
 }
 
-.czekpoint-place-marker.is-selected .place-marker-inner,
+.czekpoint-marker-anchor.is-selected .place-marker-inner,
+.place-marker-wrap.is-selected .place-marker-inner,
 .place-marker-wrap:hover .place-marker-inner {
   transform: translateY(-5px) scale(1.08) !important;
 }
 
 /* 6. TAJEMNÉ SILUETY V MLZE (.is-mystery-silhouette) & .just-discovered-flip */
-.czekpoint-place-marker.is-mystery-silhouette {
-  z-index: 680 !important;
+.czekpoint-marker-anchor.is-mystery-silhouette {
+  z-index: 1160 !important;
 }
 
-.czekpoint-place-marker.is-mystery-silhouette .czekpoint-marker-badge {
+.place-marker-wrap.is-mystery-silhouette .czekpoint-marker-badge {
   background: radial-gradient(circle at 35% 30%, #1b3b2b 0%, #09140e 100%) !important;
   border: 2.5px solid #f5b82e !important;
   box-shadow: 0 0 0 3px rgba(245, 184, 46, 0.28), 0 6px 14px rgba(0, 0, 0, 0.65) !important;
@@ -6133,13 +6170,13 @@ dialog:not([open]) {
   position: relative !important;
 }
 
-.czekpoint-place-marker.is-mystery-silhouette.is-mystery-rare .czekpoint-marker-badge {
+.place-marker-wrap.is-mystery-silhouette.is-rare-mystery .czekpoint-marker-badge {
   border-color: #fbbf24 !important;
   box-shadow: 0 0 14px rgba(251, 191, 36, 0.65), 0 6px 14px rgba(0, 0, 0, 0.7) !important;
 }
 
-.czekpoint-place-marker.is-mystery-silhouette .marker-glyph-svg {
-  color: rgba(245, 184, 46, 0.42) !important;
+.place-marker-wrap.is-mystery-silhouette .marker-glyph-svg {
+  color: rgba(245, 184, 46, 0.38) !important;
   filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.8)) !important;
 }
 
@@ -6167,6 +6204,19 @@ dialog:not([open]) {
   white-space: nowrap !important;
 }
 
+.totem-title-pill {
+  margin-top: 2px !important;
+  background: rgba(15, 29, 21, 0.92) !important;
+  color: #f8f5ec !important;
+  border: 1px solid rgba(212, 175, 55, 0.65) !important;
+  font-weight: 800 !important;
+  font-size: 0.72rem !important;
+  padding: 2px 7px !important;
+  border-radius: 999px !important;
+  white-space: nowrap !important;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45) !important;
+}
+
 @keyframes justDiscoveredFlip {
   0% {
     transform: perspective(400px) rotateY(90deg) scale(0.7);
@@ -6182,7 +6232,8 @@ dialog:not([open]) {
   }
 }
 
-.czekpoint-place-marker.just-discovered-flip .place-marker-inner {
+.czekpoint-marker-anchor.just-discovered-flip .place-marker-inner,
+.place-marker-wrap.just-discovered-flip .place-marker-inner {
   animation: justDiscoveredFlip 0.65s cubic-bezier(0.22, 1, 0.36, 1) forwards !important;
 }
 
