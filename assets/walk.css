@@ -4202,16 +4202,11 @@ dialog:not([open]) {
   display: flex !important;
   flex-direction: column !important;
   align-items: center !important;
-  gap: 6px !important;
+  gap: 8px !important;
   z-index: 830 !important;
-  pointer-events: auto;
-  max-height: calc(100% - 145px);
-  overflow-y: auto;
-  scrollbar-width: none;
-  -webkit-overflow-scrolling: touch;
-}
-.map-right-toolbar::-webkit-scrollbar {
-  display: none;
+  pointer-events: none;
+  max-height: none;
+  overflow: visible;
 }
 
 .map-right-toolbar button,
@@ -4682,11 +4677,10 @@ dialog:not([open]) {
 @media (max-width: 480px) {
   .map-right-toolbar {
     right: 10px !important;
-    top: 10px !important;
-    gap: 6px !important;
-    max-height: calc(100% - 145px);
-    overflow-y: auto;
-    scrollbar-width: none;
+    top: 70px !important;
+    gap: 8px !important;
+    max-height: none;
+    overflow: visible;
   }
   .map-action-bar {
     left: 10px;
@@ -5729,10 +5723,11 @@ dialog:not([open]) {
   }
 
   .map-right-toolbar {
-    top: 8px !important;
-    right: 8px !important;
-    gap: 4px !important;
-    max-height: calc(100% - 110px) !important;
+    top: 70px !important;
+    right: 10px !important;
+    gap: 8px !important;
+    max-height: none !important;
+    overflow: visible !important;
   }
 
   .map-right-toolbar #walk-center,
@@ -5926,29 +5921,34 @@ dialog:not([open]) {
   text-overflow: ellipsis !important;
 }
 
-.top-pill-style-btn {
+.top-pill-style-btn,
+#btn-top-pill-style {
   pointer-events: auto !important;
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
-  gap: 4px !important;
-  min-height: 34px !important;
-  padding: 5px 12px !important;
+  gap: 5px !important;
+  min-height: 36px !important;
+  padding: 6px 13px !important;
   border-radius: 999px !important;
-  background: #fef3c7 !important;
-  color: #143323 !important;
-  border: 1.5px solid #d4af37 !important;
+  background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%) !important;
+  color: #09140e !important;
+  border: 2px solid #ffffff !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45) !important;
   font-size: 0.82rem !important;
   font-weight: 900 !important;
+  letter-spacing: 0.01em !important;
   cursor: pointer !important;
   white-space: nowrap !important;
   flex-shrink: 0 !important;
 }
 
-.top-pill-style-btn.is-open {
-  background: #f5b82e !important;
+.top-pill-style-btn.is-open,
+#btn-top-pill-style.is-open,
+#btn-top-pill-style[aria-expanded="true"] {
+  background: #fef08a !important;
   color: #09140e !important;
-  border-color: #ffffff !important;
+  border-color: #f59e0b !important;
 }
 
 /* PLOVOUCÍ PANEL VÝBĚRU HERNÍHO STYLU PŘÍMO NA MAPĚ (#map-style-popover) */
@@ -6103,8 +6103,8 @@ dialog:not([open]) {
 .map-right-toolbar,
 .walk-map-wrap.zen-mode .map-right-toolbar {
   position: absolute !important;
-  top: auto !important;
-  bottom: 80px !important;
+  top: 70px !important;
+  bottom: auto !important;
   right: 10px !important;
   left: auto !important;
   width: auto !important;
@@ -6116,15 +6116,31 @@ dialog:not([open]) {
   z-index: 1150 !important;
   display: flex !important;
   flex-direction: column !important;
+  align-items: center !important;
   gap: 10px !important;
-  background: transparent !important;
-  border: none !important;
+  background: none !important;
+  background-color: transparent !important;
+  border: 0 !important;
+  outline: 0 !important;
   box-shadow: none !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
+  filter: none !important;
   padding: 0 !important;
   margin: 0 !important;
   pointer-events: none !important;
+}
+
+.walk-map-toolbar.map-right-toolbar::before,
+.walk-map-toolbar.map-right-toolbar::after,
+.map-right-toolbar::before,
+.map-right-toolbar::after,
+.map-right-toolbar .map-right-btn::before,
+.map-right-toolbar .map-right-btn::after {
+  display: none !important;
+  content: none !important;
+  background: none !important;
+  box-shadow: none !important;
 }
 
 #zen-close-btn,
@@ -6144,6 +6160,7 @@ dialog:not([open]) {
   max-height: 46px !important;
   border-radius: 50% !important;
   padding: 0 !important;
+  margin: 0 !important;
   display: inline-flex !important;
   flex-direction: column !important;
   align-items: center !important;
@@ -6151,7 +6168,8 @@ dialog:not([open]) {
   background: #0f1d15 !important;
   color: #fef3c7 !important;
   border: 2px solid #d4af37 !important;
-  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.48) !important;
+  outline: none !important;
+  box-shadow: none !important;
   font-weight: 900 !important;
   cursor: pointer !important;
   backdrop-filter: none !important;
@@ -6164,6 +6182,7 @@ dialog:not([open]) {
   background: #d4af37 !important;
   color: #0f1d15 !important;
   border-color: #ffffff !important;
+  box-shadow: none !important;
 }
 
 /* 4. ZÓNA 3 — SPODNÍ DOCK A VYSOUVACÍ ŠUPLÍK MÍST (.map-action-bar & #walk-bottom-sheet) */
@@ -6513,7 +6532,7 @@ dialog:not([open]) {
 #quest-hud-panel:not([hidden]),
 .walk-map-wrap.zen-mode #quest-hud-panel:not([hidden]) {
   position: absolute !important;
-  top: 64px !important;
+  top: 70px !important;
   left: 10px !important;
   right: auto !important;
   bottom: auto !important;
@@ -6531,15 +6550,15 @@ dialog:not([open]) {
 #quest-hud-panel.collapsed:not([hidden]),
 .walk-map-wrap.zen-mode #quest-hud-panel.collapsed:not([hidden]) {
   width: auto !important;
-  max-width: calc(100% - 20px) !important;
+  max-width: calc(100% - 76px) !important;
   border-radius: 999px !important;
   padding: 0 !important;
 }
 
 #quest-hud-panel:not(.collapsed):not([hidden]),
 .walk-map-wrap.zen-mode #quest-hud-panel:not(.collapsed):not([hidden]) {
-  width: min(320px, calc(100% - 20px)) !important;
-  max-width: calc(100% - 20px) !important;
+  width: min(300px, calc(100% - 76px)) !important;
+  max-width: calc(100% - 76px) !important;
   border-radius: 18px !important;
   padding: 0 !important;
 }

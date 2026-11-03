@@ -1473,17 +1473,17 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
             <button type="button" class="voice-nav-pill-btn ${voiceNavEnabled ? 'active' : ''}" id="btn-voice-nav-pill" hidden title="Zapnout/vypnout českou hlasovou navigaci" aria-pressed="${voiceNavEnabled}">
               ${voiceNavEnabled ? '🔊 Hlas ZAP' : '🔈 Hlas'}
             </button>
-            <button type="button" class="top-pill-style-btn" id="btn-top-pill-style" aria-expanded="false" title="Vybrat herní styl přímo na mapě (Objevování / Pergamen / Turistická mapa)">
-              ${initialGameMode === 'explorer' ? '🧭 Styl ▾' : initialGameMode === 'casual' ? '🗺️ Styl ▾' : '📜 Styl ▾'}
+            <button type="button" class="top-pill-style-btn" id="btn-top-pill-style" aria-expanded="false" aria-controls="map-style-popover" title="Rychlý výběr herního stylu (Objevování / Pergamen / Turistická mapa)">
+              ${initialGameMode === 'explorer' ? '🧭 Herní styl ▾' : initialGameMode === 'casual' ? '🗺️ Herní styl ▾' : '📜 Herní styl ▾'}
             </button>
           </div>
         </div>
 
-        <!-- Rozbalovací výběr herního stylu přímo na mapě po kliknutí na tlačítko Styl -->
-        <div class="map-style-popover" id="map-style-popover" role="dialog" aria-label="Výběr herního stylu na mapě" hidden>
+        <!-- Rozbalovací výběr herního stylu přímo na mapě po kliknutí na tlačítko Herní styl -->
+        <div class="map-style-popover" id="map-style-popover" role="dialog" aria-label="Rychlý výběr herního stylu" hidden>
           <div class="map-style-popover-header">
-            <strong>🎨 Vyber herní styl mapy</strong>
-            <button type="button" class="map-style-popover-close" id="btn-close-style-popover" aria-label="Zavřít výběr stylu">✕</button>
+            <strong class="map-style-popover-title">🎨 Herní styl mapy</strong>
+            <button type="button" class="map-style-popover-close" id="btn-close-style-popover" aria-label="Zavřít výběr herního stylu">✕</button>
           </div>
           <div class="map-style-popover-options" role="group" aria-label="Tři herní styly">
             <button type="button" class="map-style-opt-btn ${initialGameMode === 'explorer' ? 'active' : ''}" data-p1-gamemode="explorer" aria-pressed="${initialGameMode === 'explorer'}">
@@ -5544,7 +5544,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     });
     const topStyleBtn = $('btn-top-pill-style');
     if (topStyleBtn) {
-      topStyleBtn.textContent = mode === 'explorer' ? '🧭 Styl ▾' : mode === 'casual' ? '🗺️ Styl ▾' : '📜 Styl ▾';
+      topStyleBtn.textContent = mode === 'explorer' ? '🧭 Herní styl ▾' : mode === 'casual' ? '🗺️ Herní styl ▾' : '📜 Herní styl ▾';
     }
     stateObj.appSettings = { ...appSettings };
     saveAppState();
@@ -9247,6 +9247,13 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         playTick(stateObj.soundEnabled);
         return;
       }
+      if ($('map-style-popover') && !$('map-style-popover').hidden) {
+        $('map-style-popover').hidden = true;
+        $('btn-top-pill-style')?.setAttribute('aria-expanded', 'false');
+        $('btn-top-pill-style')?.classList.remove('is-open');
+        playTick(stateObj.soundEnabled);
+        return;
+      }
       if (appSettingsModalOpen || ($('app-settings-modal') && !$('app-settings-modal').hidden)) {
         appSettingsModalOpen = false;
         if ($('app-settings-modal')) $('app-settings-modal').hidden = true;
@@ -10257,13 +10264,22 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     playTick(stateObj.soundEnabled);
   });
 
+  function setStylePopoverOpen(open) {
+    const pop = $('map-style-popover');
+    const btn = $('btn-top-pill-style');
+    if (pop) pop.hidden = !open;
+    if (btn) {
+      btn.setAttribute('aria-expanded', String(Boolean(open)));
+      btn.classList.toggle('is-open', Boolean(open));
+    }
+  }
+
   $('btn-top-pill-style')?.addEventListener('click', (ev) => {
     ev?.stopPropagation?.();
     const pop = $('map-style-popover');
     if (pop) {
       const nextOpen = Boolean(pop.hidden);
-      pop.hidden = !nextOpen;
-      $('btn-top-pill-style')?.setAttribute('aria-expanded', String(nextOpen));
+      setStylePopoverOpen(nextOpen);
       playTick(stateObj.soundEnabled);
       return;
     }
@@ -10276,29 +10292,26 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
 
   $('btn-close-style-popover')?.addEventListener('click', (ev) => {
     ev?.stopPropagation?.();
-    if ($('map-style-popover')) $('map-style-popover').hidden = true;
-    $('btn-top-pill-style')?.setAttribute('aria-expanded', 'false');
+    setStylePopoverOpen(false);
     playTick(stateObj.soundEnabled);
   });
 
   $('map-style-popover')?.addEventListener('click', (ev) => {
+    ev?.stopPropagation?.();
     const gmBtn = ev.target.closest('[data-p1-gamemode]');
     if (gmBtn) {
       applyGameMode(gmBtn.dataset.p1Gamemode);
       renderPhase1AndPhase4Ui(lastFix || telemetry.lastKnownPosition);
-      if ($('map-style-popover')) $('map-style-popover').hidden = true;
-      $('btn-top-pill-style')?.setAttribute('aria-expanded', 'false');
+      setStylePopoverOpen(false);
       return;
     }
     if (ev.target.closest('#btn-popover-sim-toggle')) {
-      if ($('map-style-popover')) $('map-style-popover').hidden = true;
-      $('btn-top-pill-style')?.setAttribute('aria-expanded', 'false');
+      setStylePopoverOpen(false);
       $('walk-fake-gps-toggle')?.click();
       return;
     }
     if (ev.target.closest('#btn-popover-all-settings')) {
-      if ($('map-style-popover')) $('map-style-popover').hidden = true;
-      $('btn-top-pill-style')?.setAttribute('aria-expanded', 'false');
+      setStylePopoverOpen(false);
       appSettingsModalOpen = true;
       const modal = $('app-settings-modal');
       if (modal) modal.hidden = false;
@@ -10306,6 +10319,13 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       playTick(stateObj.soundEnabled);
     }
   });
+
+  document.addEventListener('click', (ev) => {
+    const pop = $('map-style-popover');
+    if (!pop || pop.hidden) return;
+    if (ev.target.closest('#map-style-popover') || ev.target.closest('#btn-top-pill-style')) return;
+    setStylePopoverOpen(false);
+  }, { signal: aborter.signal });
 
   $('turn-pill-compass')?.addEventListener('click', (ev) => {
     ev?.stopPropagation?.();
@@ -11859,10 +11879,9 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
 
   const handleVisualViewportChange = () => {
     if (typeof window === 'undefined' || !window.visualViewport) return;
-    const vpHeight = window.visualViewport.height;
     const rightBar = root.querySelector('.map-right-toolbar');
     if (rightBar) {
-      rightBar.style.maxHeight = `calc(${Math.round(vpHeight)}px - 140px)`;
+      rightBar.style.removeProperty('max-height');
     }
   };
   if (typeof window !== 'undefined' && window.visualViewport) {
