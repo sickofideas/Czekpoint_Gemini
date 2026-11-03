@@ -1456,8 +1456,18 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
             <div class="compass-dist-badge" id="compass-dist-badge" hidden>-- m</div>
           </div>
 
-          <!-- Jediná čistá plovoucí kapsle (.turn-nav-pill) -->
+          <!-- Jediná čistá plovoucí kapsle (.turn-nav-pill) s integrovaným indikátorem orientace (kompasem) -->
           <div class="turn-nav-pill" id="turn-nav-pill" role="status" aria-live="polite">
+            <span class="turn-pill-compass" id="turn-pill-compass" title="Orientace mapy (Sever) — kliknutím srovnáš na sever" role="button" tabindex="0" aria-label="Kompas orientace mapy">
+              <span class="turn-pill-compass-rotor" id="turn-pill-compass-rotor" style="transform: rotate(0deg)">
+                <svg viewBox="0 0 36 36" class="turn-pill-compass-svg" aria-hidden="true">
+                  <circle cx="18" cy="18" r="16" fill="#14261c" stroke="#d4af37" stroke-width="2"/>
+                  <polygon points="18,4 22,18 18,15 14,18" fill="#ef4444"/>
+                  <polygon points="18,32 22,18 18,21 14,18" fill="#fef3c7"/>
+                  <text x="18" y="11" text-anchor="middle" font-size="6.5" font-weight="900" fill="#ffffff">S</text>
+                </svg>
+              </span>
+            </span>
             <span class="turn-nav-icon" id="turn-nav-icon">🧭</span>
             <span class="turn-nav-text" id="turn-nav-text">🧭 Volný průzkum · Odkrývej okolí · 0 m</span>
             <button type="button" class="voice-nav-pill-btn ${voiceNavEnabled ? 'active' : ''}" id="btn-voice-nav-pill" hidden title="Zapnout/vypnout českou hlasovou navigaci" aria-pressed="${voiceNavEnabled}">
@@ -2589,6 +2599,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       } else if (typeof map.jumpTo === 'function') {
         try { map.jumpTo(jumpOpts); } catch {}
       }
+      syncTurnPillCompassBearing();
     }
 
     if (!follow) {
@@ -3139,16 +3150,35 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     `;
   }
 
+  function syncTurnPillCompassBearing() {
+    const mapBrg = map && typeof map.getBearing === 'function' ? Number(map.getBearing()) || 0 : (Number(camBearing) || 0);
+    const activeBrg = (is3dMode || is3DMode)
+      ? (Number.isFinite(mapBrg) && mapBrg !== 0 ? mapBrg : (Number(currentDeviceHeading) || Number(currentWalkHeadingDeg) || 0))
+      : mapBrg;
+    const rotorEl = $('turn-pill-compass-rotor');
+    const pillCompassEl = $('turn-pill-compass');
+    if (rotorEl) {
+      rotorEl.style.transition = 'transform 0.22s ease-out';
+      rotorEl.style.transform = `rotate(${(-activeBrg).toFixed(1)}deg)`;
+      rotorEl.dataset.bearing = String(Math.round(activeBrg));
+    }
+    if (pillCompassEl) {
+      pillCompassEl.classList.toggle('is-25d-active', Boolean(is3dMode || is3DMode));
+      pillCompassEl.title = `Orientace mapy (${Math.round(((activeBrg % 360) + 360) % 360)}°) — kliknutím vycentruješ`;
+    }
+  }
+
   function updateDirectionalIndicators() {
     const currentMapBearingDeg = map && typeof map.getBearing === 'function' ? Number(map.getBearing()) || 0 : 0;
     const screenRelativeAngleDeg = computeScreenRelativeAngleDeg(targetBearing, currentMapBearingDeg);
 
     updatePlayerAvatarIcon(Boolean(active || demo));
     updateOffscreenTargetIndicator();
+    syncTurnPillCompassBearing();
 
     const dial = $('compass-dial');
     const targetArrow = $('compass-target-arrow');
-    if (currentDeviceHeading == null) {
+    if (currentDeviceHeading == null || is3dMode || is3DMode) {
       if (dial) {
         dial.style.transition = 'transform 0.2s ease-out';
         dial.style.transform = `rotate(${(-currentMapBearingDeg).toFixed(1)}deg)`;
@@ -3210,6 +3240,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     }
     updatePlayerAvatarIcon(Boolean(active || demo));
     updateOffscreenTargetIndicator();
+    syncTurnPillCompassBearing();
   }
 
   function handleDeviceOrientation(event) {
@@ -3676,6 +3707,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     const iconEl = $('turn-nav-icon');
     const textEl = $('turn-nav-text');
     if (pillEl) pillEl.hidden = false;
+    syncTurnPillCompassBearing();
 
     const plannedPlaces = getPlannedPlaces();
     const unvisitedPlaces = plannedPlaces.filter(p => !isStopVisited(p));
@@ -7543,6 +7575,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     }
     $('walk-map-wrap')?.classList.toggle('is-3d-mode', is3DMode);
     updatePlayerAvatarIcon(Boolean(active || demo || simSandboxActive));
+    syncTurnPillCompassBearing();
   }
 
   function enableAllMapInteractions() {

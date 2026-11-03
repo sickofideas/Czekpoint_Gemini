@@ -6256,3 +6256,62 @@ dialog:not([open]) {
   cursor: pointer !important;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35) !important;
 }
+
+/* 8. INDIKÁTOR ORIENTACE (KOMPAS) V HORNÍ KAPSLI #turn-nav-pill & PULZOVÁNÍ .planned-route-line */
+.turn-pill-compass {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 34px !important;
+  height: 34px !important;
+  min-width: 34px !important;
+  min-height: 34px !important;
+  border-radius: 50% !important;
+  background: radial-gradient(circle at 50% 50%, #1e3a2b 0%, #0d1912 100%) !important;
+  border: 1.5px solid #d4af37 !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5) !important;
+  flex-shrink: 0 !important;
+  cursor: pointer !important;
+}
+
+.turn-pill-compass.is-25d-active {
+  border-color: #f5b82e !important;
+  box-shadow: 0 0 10px rgba(245, 184, 46, 0.45), 0 2px 8px rgba(0, 0, 0, 0.5) !important;
+}
+
+.turn-pill-compass-rotor {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 28px !important;
+  height: 28px !important;
+  will-change: transform !important;
+  transform-origin: 50% 50% !important;
+}
+
+.turn-pill-compass-svg {
+  width: 28px !important;
+  height: 28px !important;
+  display: block !important;
+}
+
+@keyframes plannedRoutePulse {
+  0%, 100% {
+    opacity: 0.98;
+    filter: drop-shadow(0 0 4px rgba(245, 184, 46, 0.45));
+    stroke-width: 5px;
+  }
+  50% {
+    opacity: 0.78;
+    filter: drop-shadow(0 0 12px rgba(245, 184, 46, 0.92));
+    stroke-width: 6.5px;
+  }
+}
+
+.planned-route-line {
+  animation: plannedRoutePulse 2.4s ease-in-out infinite !important;
+  stroke: #f5b82e;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
