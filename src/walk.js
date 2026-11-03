@@ -3970,8 +3970,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       updatePlayerLead(origin || lastFix);
       return;
     }
-    // V režimu celé obrazovky (zenMode) zobrazíme plovoucí Quest HUD přímo na mapě
-    hudPanel.hidden = !zenMode;
+    hudPanel.hidden = false;
 
     const currentPos = origin || lastFix || telemetry.lastKnownPosition || plannedRoute.origin || { lat: 49.6014, lng: 13.8644 };
     const isLoop = plannedRoute.routeType === 'loop' && plannedPlaces.length >= 2;
@@ -3987,13 +3986,63 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
 
     const visitedCount = plannedPlaces.filter(p => isStopVisited(p)).length;
     if ($('qhud-progress')) $('qhud-progress').textContent = `${visitedCount}/${plannedPlaces.length}`;
+    if ($('qhud-compact-pill-label')) {
+      $('qhud-compact-pill-label').textContent = `📊 Trasa (${visitedCount}/${plannedPlaces.length})`;
+    }
+
+    const totalDistM = Number(rem.remainingDistanceM ?? plannedRoute.metrics?.distanceM ?? 0);
+    const speedKmH = getCompanionSpeedKmH();
+    const totalTimeMin = totalDistM > 0 ? Math.max(1, Math.round((totalDistM / 1000) / speedKmH * 60)) : 0;
+    if ($('qhud-total-dist')) $('qhud-total-dist').textContent = totalDistM > 0 ? formatDistanceLabel(totalDistM) : '0 m';
+    if ($('qhud-total-time')) $('qhud-total-time').textContent = `~${totalTimeMin} min`;
+    if ($('qhud-eta-clock')) {
+      const etaDate = new Date(Date.now() + totalTimeMin * 60000);
+      $('qhud-eta-clock').textContent = etaDate.toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit' });
+    }
+
+    const stopsListEl = $('qhud-stops-list');
+    if (stopsListEl) {
+      const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+      stopsListEl.innerHTML = plannedPlaces.map((p, idx) => {
+        const done = isStopVisited(p);
+        const isNext = rem.nextStop && String(rem.nextStop.id) === String(p.id);
+        const distM = currentPos ? Math.round(haversineMeters(currentPos, p)) : null;
+        return `<li class="qhud-stop-row ${done ? 'is-visited' : ''} ${isNext ? 'is-next' : ''}" data-stop-id="${esc(p.id)}">
+          <button type="button" class="qhud-stop-focus-btn" data-focus-stop-id="${esc(p.id)}">
+            <span class="qhud-stop-badge">${done ? '✓' : idx + 1}</span>
+            <span class="qhud-stop-title">${esc(p.title || 'Místo')}</span>
+            <span class="qhud-stop-dist">${distM != null ? formatDistanceLabel(distM) : ''}</span>
+          </button>
+          <button type="button" class="qhud-stop-remove-btn" data-remove-stop-id="${esc(p.id)}" title="Odebrat z trasy" aria-label="Odebrat z trasy">✕</button>
+        </li>`;
+      }).join('');
+
+      stopsListEl.querySelectorAll('[data-focus-stop-id]').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const stopId = btn.getAttribute('data-focus-stop-id');
+          const target = plannedPlaces.find(item => String(item.id) === String(stopId));
+          if (target && map) {
+            follow = false;
+            map.easeTo({ center: [target.lng, target.lat], zoom: Math.max(map.getZoom(), 16), duration: 450 });
+          }
+        });
+      });
+
+      stopsListEl.querySelectorAll('[data-remove-stop-id]').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const stopId = btn.getAttribute('data-remove-stop-id');
+          if (stopId) togglePlaceInRoute(stopId);
+        });
+      });
+    }
 
     if (plannedPlaces.length === 0) {
       if ($('qhud-next-name')) $('qhud-next-name').textContent = 'Volná chůze · Odkrývání mapy';
       if ($('qhud-next-eta')) $('qhud-next-eta').textContent = 'Bez pevného cíle';
     } else if (rem.nextStop) {
       const distStr = rem.nextStopDistanceM != null ? formatDistanceLabel(rem.nextStopDistanceM) : '—';
-      const speedKmH = getCompanionSpeedKmH();
       const nextTimeMin = rem.nextStopDistanceM != null
         ? Math.max(1, Math.round((rem.nextStopDistanceM / 1000) / speedKmH * 60))
         : null;
@@ -9113,9 +9162,9 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
   function updateZenMode() {
     $('walk-map-wrap').classList.toggle('zen-mode', zenMode);
     document.body?.classList.toggle('has-zen-mode', zenMode);
-    $('zen-close-btn').hidden = !zenMode;
-    if ($('zen-follow-btn')) $('zen-follow-btn').hidden = !zenMode;
-    if ($('quest-hud-panel')) $('quest-hud-panel').hidden = !zenMode || getPlannedPlaces().length === 0;
+    $('zen-close-btn').hidden = true;
+    if ($('zen-follow-btn')) $('zen-follow-btn').hidden = true;
+    if ($('quest-hud-panel')) $('quest-hud-panel').hidden = getPlannedPlaces().length === 0;
     const zenToggleBtn = $('walk-zen-toggle');
     if (zenToggleBtn) {
       zenToggleBtn.setAttribute('aria-pressed', String(zenMode));

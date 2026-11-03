@@ -6100,12 +6100,19 @@ dialog:not([open]) {
 }
 
 .walk-map-toolbar.map-right-toolbar,
-.map-right-toolbar {
+.map-right-toolbar,
+.walk-map-wrap.zen-mode .map-right-toolbar {
   position: absolute !important;
-  top: 68px !important;
-  right: 12px !important;
-  bottom: auto !important;
+  top: auto !important;
+  bottom: 80px !important;
+  right: 10px !important;
   left: auto !important;
+  width: auto !important;
+  height: auto !important;
+  max-height: none !important;
+  overflow: visible !important;
+  overflow-x: visible !important;
+  overflow-y: visible !important;
   z-index: 1150 !important;
   display: flex !important;
   flex-direction: column !important;
@@ -6116,7 +6123,13 @@ dialog:not([open]) {
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
   padding: 0 !important;
+  margin: 0 !important;
   pointer-events: none !important;
+}
+
+#zen-close-btn,
+#zen-follow-btn {
+  display: none !important;
 }
 
 .map-right-toolbar #btn-toggle-3d,
@@ -6138,7 +6151,7 @@ dialog:not([open]) {
   background: #0f1d15 !important;
   color: #fef3c7 !important;
   border: 2px solid #d4af37 !important;
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.55) !important;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.48) !important;
   font-weight: 900 !important;
   cursor: pointer !important;
   backdrop-filter: none !important;
@@ -6412,8 +6425,12 @@ dialog:not([open]) {
 
 /* 7. KARTA DETAILU MÍSTA & ZLATÁ VODICÍ NIT (#place-detail-sheet) */
 #place-detail-sheet.place-detail-sheet {
-  bottom: 84px !important;
-  z-index: 1150 !important;
+  bottom: 80px !important;
+  left: 10px !important;
+  right: 64px !important;
+  width: auto !important;
+  max-width: 420px !important;
+  z-index: 1230 !important;
 }
 
 .guide-thread-btn {
@@ -6487,4 +6504,240 @@ dialog:not([open]) {
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+
+/* 9. PANEL TRASY NA MAPĚ (#quest-hud-panel) — VLEVO NAHOŘE POD HORNÍ KAPSLÍ, BEZ PŘEKRYVU A BEZ POLOPRŮHLEDNÉHO ČTVERCE */
+#quest-hud-panel[hidden] {
+  display: none !important;
+}
+
+#quest-hud-panel:not([hidden]),
+.walk-map-wrap.zen-mode #quest-hud-panel:not([hidden]) {
+  position: absolute !important;
+  top: 64px !important;
+  left: 10px !important;
+  right: auto !important;
+  bottom: auto !important;
+  z-index: 1210 !important;
+  background: #0f1d15 !important;
+  border: 2px solid #d4af37 !important;
+  color: #fef3c7 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.6) !important;
+  pointer-events: auto !important;
+  overflow: hidden !important;
+}
+
+#quest-hud-panel.collapsed:not([hidden]),
+.walk-map-wrap.zen-mode #quest-hud-panel.collapsed:not([hidden]) {
+  width: auto !important;
+  max-width: calc(100% - 20px) !important;
+  border-radius: 999px !important;
+  padding: 0 !important;
+}
+
+#quest-hud-panel:not(.collapsed):not([hidden]),
+.walk-map-wrap.zen-mode #quest-hud-panel:not(.collapsed):not([hidden]) {
+  width: min(320px, calc(100% - 20px)) !important;
+  max-width: calc(100% - 20px) !important;
+  border-radius: 18px !important;
+  padding: 0 !important;
+}
+
+#quest-hud-panel .qhud-compact,
+#quest-hud-panel .quest-hud-header {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 8px !important;
+  padding: 6px 10px !important;
+  background: #0f1d15 !important;
+  color: #fef3c7 !important;
+  border: none !important;
+}
+
+#quest-hud-panel .qhud-compact-pill {
+  background: transparent !important;
+  color: #fef3c7 !important;
+  font-weight: 800 !important;
+  font-size: 0.84rem !important;
+  padding: 2px 4px !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+#quest-hud-panel .qhud-next {
+  display: flex !important;
+  flex-direction: column !important;
+  min-width: 0 !important;
+  flex: 1 1 auto !important;
+}
+
+#quest-hud-panel.collapsed .qhud-next,
+#quest-hud-panel .qhud-compact-stats {
+  display: none !important;
+}
+
+#quest-hud-panel #qhud-next-name {
+  color: #fef3c7 !important;
+  font-weight: 800 !important;
+  font-size: 0.82rem !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+#quest-hud-panel #qhud-next-eta {
+  color: #fde68a !important;
+  font-size: 0.74rem !important;
+  font-weight: 700 !important;
+}
+
+#quest-hud-panel .quest-hud-toggle-btn {
+  background: #1b3b2b !important;
+  color: #fde68a !important;
+  border: 1.5px solid #d4af37 !important;
+  border-radius: 999px !important;
+  padding: 4px 10px !important;
+  font-size: 0.76rem !important;
+  font-weight: 800 !important;
+  cursor: pointer !important;
+  white-space: nowrap !important;
+  flex-shrink: 0 !important;
+}
+
+#quest-hud-panel.collapsed .quest-hud-content {
+  display: none !important;
+}
+
+#quest-hud-panel:not(.collapsed) .quest-hud-content {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 8px !important;
+  padding: 10px 12px 12px 12px !important;
+  background: #13261b !important;
+  border-top: 1px solid rgba(212, 175, 55, 0.35) !important;
+  max-height: 46dvh !important;
+  overflow-y: auto !important;
+}
+
+#quest-hud-panel .qhud-eta-summary {
+  display: grid !important;
+  grid-template-columns: repeat(3, 1fr) !important;
+  gap: 6px !important;
+  background: #0f1d15 !important;
+  border: 1px solid rgba(212, 175, 55, 0.35) !important;
+  border-radius: 12px !important;
+  padding: 6px 8px !important;
+}
+
+#quest-hud-panel .qhud-eta-item {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  text-align: center !important;
+}
+
+#quest-hud-panel .qhud-eta-label {
+  font-size: 0.68rem !important;
+  color: #cbd5e1 !important;
+}
+
+#quest-hud-panel .qhud-eta-val {
+  font-size: 0.82rem !important;
+  font-weight: 800 !important;
+  color: #fde68a !important;
+}
+
+#quest-hud-panel .qhud-stops-list {
+  list-style: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 6px !important;
+}
+
+#quest-hud-panel .qhud-stop-row {
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  background: #0f1d15 !important;
+  border: 1px solid rgba(212, 175, 55, 0.35) !important;
+  border-radius: 10px !important;
+  padding: 4px 6px !important;
+}
+
+#quest-hud-panel .qhud-stop-row.is-next {
+  border-color: #f5b82e !important;
+  background: #1b3b2b !important;
+}
+
+#quest-hud-panel .qhud-stop-focus-btn {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  background: transparent !important;
+  border: none !important;
+  color: #fef3c7 !important;
+  font-size: 0.8rem !important;
+  font-weight: 700 !important;
+  text-align: left !important;
+  cursor: pointer !important;
+  padding: 2px 4px !important;
+}
+
+#quest-hud-panel .qhud-stop-badge {
+  width: 22px !important;
+  height: 22px !important;
+  border-radius: 50% !important;
+  background: #d4af37 !important;
+  color: #0f1d15 !important;
+  font-weight: 900 !important;
+  font-size: 0.74rem !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  flex-shrink: 0 !important;
+}
+
+#quest-hud-panel .qhud-stop-title {
+  flex: 1 1 auto !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+#quest-hud-panel .qhud-stop-dist {
+  font-size: 0.72rem !important;
+  color: #fde68a !important;
+  flex-shrink: 0 !important;
+}
+
+#quest-hud-panel .qhud-stop-remove-btn {
+  width: 26px !important;
+  height: 26px !important;
+  border-radius: 50% !important;
+  background: rgba(239, 68, 68, 0.2) !important;
+  color: #fca5a5 !important;
+  border: 1px solid rgba(239, 68, 68, 0.5) !important;
+  font-size: 0.75rem !important;
+  font-weight: 900 !important;
+  cursor: pointer !important;
+  flex-shrink: 0 !important;
+}
+
+#quest-hud-panel #btn-return-to-start {
+  background: #1b3b2b !important;
+  color: #fde68a !important;
+  border: 1.5px solid #d4af37 !important;
+  border-radius: 10px !important;
+  padding: 8px 10px !important;
+  font-weight: 800 !important;
+  font-size: 0.8rem !important;
+  cursor: pointer !important;
+}
+
 
