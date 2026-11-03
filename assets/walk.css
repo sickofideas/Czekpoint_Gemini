@@ -5804,31 +5804,24 @@ dialog:not([open]) {
 }
 
 /* ==========================================================================
-   v3.0.1 — RADIKÁLNÍ PŘESTAVBA UX A MAPY: 2.5D RELIÉFNÍ DIORAMA & TAJEMNÉ SILUETY
+   v3.0.2 — ČISTÁ MAPA, VÝBĚR HERNÍHO STYLU PŘÍMO NA MAPĚ & BEZCHYBNÉ 2.5D IKONY
    ========================================================================== */
 
-/* 1. SKRYTÍ BALASTU MIMO MAPU & 100% MAPA + LIŠTA 3 MÓDŮ A SIMULÁTORU */
+/* 1. SKRYTÍ BALASTU MIMO MAPU & 100% MAPA */
 #phase1-top-bar,
+#phase1-bottom-bar,
 #map-command-bar,
 #next-checkpoint-hero-card,
-.map-sub-bar {
+.map-sub-bar,
+#active-compass-widget {
   display: none !important;
-}
-
-#phase1-bottom-bar {
-  display: flex !important;
-  padding: 6px 10px !important;
-  margin-bottom: 8px !important;
-  background: rgba(15, 29, 21, 0.96) !important;
-  border: 1.5px solid #d4af37 !important;
-  border-radius: 14px !important;
 }
 
 .walk-map-wrap {
   position: relative !important;
   width: 100% !important;
-  height: calc(100dvh - 134px) !important;
-  min-height: 480px !important;
+  height: calc(100dvh - 76px) !important;
+  min-height: 500px !important;
   border-radius: 20px !important;
   overflow: hidden !important;
 }
@@ -5836,7 +5829,7 @@ dialog:not([open]) {
 #walk-map {
   width: 100% !important;
   height: 100% !important;
-  min-height: 480px !important;
+  min-height: 500px !important;
 }
 
 /* TESTOVACÍ SIMULÁTOR GPS (#simulator-test-zone) */
@@ -5854,10 +5847,10 @@ dialog:not([open]) {
   overflow-y: auto !important;
   margin: 0 !important;
   padding: 10px 12px !important;
-  background: rgba(15, 29, 21, 0.96) !important;
+  background: #0f1d15 !important;
   border: 2px solid #d8e99e !important;
   border-radius: 16px !important;
-  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.65) !important;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.7) !important;
 }
 
 /* 4. OPRAVA BLOKUJÍCÍ CLONY DIALOGŮ */
@@ -5875,13 +5868,13 @@ dialog:not([open]) {
   pointer-events: none !important;
 }
 
-/* 2. ZÓNA 1 — HORNÍ STŘEDOVÁ KAPSLE (.map-top-overlays) */
+/* 2. ZÓNA 1 — HORNÍ STŘEDOVÁ KAPSLE (.map-top-overlays) & HERNÍ STYL PŘÍMO NA MAPĚ */
 .map-top-overlays {
   position: absolute !important;
   top: 10px !important;
   left: 10px !important;
   right: 10px !important;
-  z-index: 1200 !important;
+  z-index: 1220 !important;
   display: flex !important;
   flex-direction: column !important;
   align-items: center !important;
@@ -5894,7 +5887,7 @@ dialog:not([open]) {
   align-items: center !important;
   justify-content: center !important;
   width: 100% !important;
-  max-width: 640px !important;
+  max-width: 540px !important;
   pointer-events: none !important;
 }
 
@@ -5903,16 +5896,34 @@ dialog:not([open]) {
   display: flex !important;
   align-items: center !important;
   justify-content: space-between !important;
-  gap: 10px !important;
-  width: auto !important;
-  max-width: 100% !important;
-  min-height: 48px !important;
-  padding: 6px 10px 6px 14px !important;
-  background: rgba(15, 29, 21, 0.94) !important;
+  gap: 8px !important;
+  width: 100% !important;
+  max-width: 520px !important;
+  min-height: 46px !important;
+  max-height: 52px !important;
+  padding: 5px 8px 5px 10px !important;
+  background: #0f1d15 !important;
   border: 2px solid #d4af37 !important;
   border-radius: 999px !important;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45) !important;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.55) !important;
   color: #fef3c7 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+#turn-nav-pill .turn-nav-icon {
+  display: none !important;
+}
+
+#turn-nav-pill .turn-nav-text {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  font-size: 0.88rem !important;
+  font-weight: 800 !important;
+  color: #fef3c7 !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
 }
 
 .top-pill-style-btn {
@@ -5921,17 +5932,149 @@ dialog:not([open]) {
   align-items: center !important;
   justify-content: center !important;
   gap: 4px !important;
-  min-height: 36px !important;
-  padding: 6px 12px !important;
+  min-height: 34px !important;
+  padding: 5px 12px !important;
   border-radius: 999px !important;
   background: #fef3c7 !important;
   color: #143323 !important;
   border: 1.5px solid #d4af37 !important;
   font-size: 0.82rem !important;
-  font-weight: 800 !important;
+  font-weight: 900 !important;
   cursor: pointer !important;
   white-space: nowrap !important;
   flex-shrink: 0 !important;
+}
+
+.top-pill-style-btn.is-open {
+  background: #f5b82e !important;
+  color: #09140e !important;
+  border-color: #ffffff !important;
+}
+
+/* PLOVOUCÍ PANEL VÝBĚRU HERNÍHO STYLU PŘÍMO NA MAPĚ (#map-style-popover) */
+#map-style-popover[hidden] {
+  display: none !important;
+}
+
+#map-style-popover:not([hidden]) {
+  pointer-events: auto !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 8px !important;
+  width: 100% !important;
+  max-width: 380px !important;
+  padding: 12px !important;
+  background: #0f1d15 !important;
+  border: 2px solid #d4af37 !important;
+  border-radius: 18px !important;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.72) !important;
+  color: #fef3c7 !important;
+  z-index: 1250 !important;
+}
+
+.map-style-popover-header {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 8px !important;
+  padding-bottom: 6px !important;
+  border-bottom: 1px solid rgba(212, 175, 55, 0.3) !important;
+}
+
+.map-style-popover-title {
+  font-size: 0.9rem !important;
+  font-weight: 900 !important;
+  color: #f5b82e !important;
+  letter-spacing: 0.02em !important;
+}
+
+.map-style-popover-close {
+  width: 30px !important;
+  height: 30px !important;
+  border-radius: 50% !important;
+  background: #1b3b2b !important;
+  color: #fef3c7 !important;
+  border: 1px solid #d4af37 !important;
+  font-weight: 900 !important;
+  cursor: pointer !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+.map-style-popover-options {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 6px !important;
+}
+
+#map-style-popover .map-style-opt-btn {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  width: 100% !important;
+  padding: 9px 12px !important;
+  border-radius: 12px !important;
+  background: #162b1f !important;
+  color: #fef3c7 !important;
+  border: 1.5px solid rgba(212, 175, 55, 0.45) !important;
+  text-align: left !important;
+  cursor: pointer !important;
+}
+
+#map-style-popover .map-style-opt-btn.active {
+  background: #244b36 !important;
+  color: #ffffff !important;
+  border: 2px solid #f5b82e !important;
+  box-shadow: 0 0 0 2px rgba(245, 184, 46, 0.35) !important;
+}
+
+#map-style-popover .ms-opt-icon {
+  font-size: 1.3rem !important;
+  flex-shrink: 0 !important;
+}
+
+#map-style-popover .ms-opt-body {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 2px !important;
+}
+
+#map-style-popover .ms-opt-body strong {
+  font-size: 0.88rem !important;
+  font-weight: 900 !important;
+  color: #fef3c7 !important;
+}
+
+#map-style-popover .ms-opt-body small {
+  font-size: 0.75rem !important;
+  color: #d8e99e !important;
+}
+
+.map-style-popover-footer {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  padding-top: 6px !important;
+  border-top: 1px solid rgba(212, 175, 55, 0.25) !important;
+}
+
+#map-style-popover .map-style-sub-btn {
+  flex: 1 1 0 !important;
+  min-height: 36px !important;
+  padding: 6px 10px !important;
+  border-radius: 10px !important;
+  background: #1b3b2b !important;
+  color: #fef3c7 !important;
+  border: 1px solid #d4af37 !important;
+  font-size: 0.78rem !important;
+  font-weight: 800 !important;
+  cursor: pointer !important;
+}
+
+#map-style-popover .map-style-sub-btn.active {
+  background: #f5b82e !important;
+  color: #09140e !important;
 }
 
 #map-search-overlay[hidden] {
@@ -5945,7 +6088,7 @@ dialog:not([open]) {
   max-width: 480px !important;
 }
 
-/* 3. ZÓNA 2 — PRAVÝ OKRAJ MAPY (.map-right-toolbar — pouze 3 kulatá tlačítka 48x48 px) */
+/* 3. ZÓNA 2 — PRAVÝ OKRAJ MAPY (.map-right-toolbar — pouze 3 čistá kulatá tlačítka bez pozadí za nimi) */
 #walk-zoom-in,
 #walk-zoom-out,
 #map-3d-camera-controls,
@@ -5956,37 +6099,50 @@ dialog:not([open]) {
   display: none !important;
 }
 
+.walk-map-toolbar.map-right-toolbar,
 .map-right-toolbar {
   position: absolute !important;
-  top: 74px !important;
+  top: 68px !important;
   right: 12px !important;
+  bottom: auto !important;
+  left: auto !important;
   z-index: 1150 !important;
   display: flex !important;
   flex-direction: column !important;
   gap: 10px !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  padding: 0 !important;
+  pointer-events: none !important;
 }
 
 .map-right-toolbar #btn-toggle-3d,
 .map-right-toolbar #walk-search-toggle,
 .map-right-toolbar #walk-zen-toggle {
-  width: 48px !important;
-  height: 48px !important;
-  min-width: 48px !important;
-  min-height: 48px !important;
-  max-width: 48px !important;
-  max-height: 48px !important;
+  pointer-events: auto !important;
+  width: 46px !important;
+  height: 46px !important;
+  min-width: 46px !important;
+  min-height: 46px !important;
+  max-width: 46px !important;
+  max-height: 46px !important;
   border-radius: 50% !important;
   padding: 0 !important;
   display: inline-flex !important;
   flex-direction: column !important;
   align-items: center !important;
   justify-content: center !important;
-  background: rgba(15, 29, 21, 0.94) !important;
+  background: #0f1d15 !important;
   color: #fef3c7 !important;
   border: 2px solid #d4af37 !important;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45) !important;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.55) !important;
   font-weight: 900 !important;
   cursor: pointer !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
 }
 
 .map-right-toolbar #btn-toggle-3d.is-active,
@@ -6000,9 +6156,9 @@ dialog:not([open]) {
 /* 4. ZÓNA 3 — SPODNÍ DOCK A VYSOUVACÍ ŠUPLÍK MÍST (.map-action-bar & #walk-bottom-sheet) */
 .map-action-bar {
   position: absolute !important;
-  left: 12px !important;
-  right: 12px !important;
-  bottom: 14px !important;
+  left: 10px !important;
+  right: 10px !important;
+  bottom: 12px !important;
   z-index: 1140 !important;
   display: flex !important;
   align-items: center !important;
@@ -6019,12 +6175,12 @@ dialog:not([open]) {
   justify-content: center !important;
   gap: 8px !important;
   width: 100% !important;
-  max-width: 680px !important;
-  background: rgba(15, 29, 21, 0.95) !important;
-  padding: 8px 10px !important;
+  max-width: 640px !important;
+  background: #0f1d15 !important;
+  padding: 7px 9px !important;
   border-radius: 18px !important;
   border: 2px solid #d4af37 !important;
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5) !important;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.6) !important;
 }
 
 #mab-inactive-group[hidden],
@@ -6033,37 +6189,37 @@ dialog:not([open]) {
 }
 
 #walk-start-unified {
-  min-height: 54px !important;
-  font-size: 1.05rem !important;
+  min-height: 48px !important;
+  font-size: 0.98rem !important;
   font-weight: 900 !important;
   flex: 1 1 auto !important;
-  border-radius: 14px !important;
+  border-radius: 13px !important;
   background: linear-gradient(135deg, #f5b82e 0%, #d97706 100%) !important;
   color: #0f1d15 !important;
   border: 2px solid #fef3c7 !important;
-  padding: 10px 16px !important;
+  padding: 8px 12px !important;
   cursor: pointer !important;
 }
 
 #btn-open-places-drawer,
 #btn-open-places-drawer-active {
-  min-height: 54px !important;
-  padding: 10px 14px !important;
-  border-radius: 14px !important;
+  min-height: 48px !important;
+  padding: 8px 12px !important;
+  border-radius: 13px !important;
   background: #1b3b2b !important;
   color: #fef3c7 !important;
   border: 1.5px solid #d4af37 !important;
-  font-size: 0.92rem !important;
+  font-size: 0.88rem !important;
   font-weight: 800 !important;
   cursor: pointer !important;
   white-space: nowrap !important;
 }
 
 #mab-active-group .mab-btn {
-  min-height: 50px !important;
+  min-height: 46px !important;
   flex: 1 1 0 !important;
   border-radius: 12px !important;
-  font-size: 0.88rem !important;
+  font-size: 0.85rem !important;
   font-weight: 800 !important;
 }
 
@@ -6082,7 +6238,7 @@ dialog:not([open]) {
   overflow-y: auto !important;
   border-radius: 24px 24px 0 0 !important;
   background: #f8f5ec !important;
-  box-shadow: 0 -12px 36px rgba(0, 0, 0, 0.35) !important;
+  box-shadow: 0 -12px 36px rgba(0, 0, 0, 0.45) !important;
   padding: 16px 18px 28px 18px !important;
   border-top: 3px solid #d4af37 !important;
 }
@@ -6113,13 +6269,16 @@ dialog:not([open]) {
   cursor: pointer !important;
 }
 
-/* 5. VYSTUPUJÍCÍ 3D TOTEMY MÍST (.czekpoint-marker-anchor, .place-marker-wrap & .place-marker-inner) */
+/* 5. VYSTUPUJÍCÍ 3D TOTEMY MÍST — BEZ PRŮHLEDNÉHO MOTIVU ZA IKONAMI A S JASNÝM KLIKACÍM PROSTOREM */
 .czekpoint-marker-anchor {
   width: auto !important;
   height: auto !important;
-  min-width: 48px !important;
-  min-height: 48px !important;
+  min-width: 44px !important;
+  min-height: 44px !important;
   contain: none !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
 }
 
 .place-marker-wrap {
@@ -6131,90 +6290,104 @@ dialog:not([open]) {
   pointer-events: auto !important;
   cursor: pointer !important;
   transform-origin: bottom center !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 2px !important;
 }
 
-.place-marker-wrap::after {
-  content: "" !important;
-  display: block !important;
-  width: 28px !important;
-  height: 9px !important;
-  margin-top: -3px !important;
-  border-radius: 50% !important;
-  background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0.58) 0%, rgba(0, 0, 0, 0) 75%) !important;
-  pointer-events: none !important;
+.place-marker-wrap::before,
+.place-marker-wrap::after,
+.czekpoint-marker-badge::before,
+.czekpoint-marker-badge::after {
+  display: none !important;
+  content: none !important;
 }
 
 .place-marker-inner {
   display: flex !important;
   flex-direction: column !important;
   align-items: center !important;
-  transition: transform 0.22s ease !important;
+  transition: transform 0.2s ease !important;
+  background: transparent !important;
+}
+
+.czekpoint-marker-badge {
+  opacity: 1 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  width: 40px !important;
+  height: 40px !important;
+  min-width: 40px !important;
+  min-height: 40px !important;
+  border-radius: 50% !important;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.55) !important;
 }
 
 .czekpoint-marker-anchor.is-selected .place-marker-inner,
 .place-marker-wrap.is-selected .place-marker-inner,
 .place-marker-wrap:hover .place-marker-inner {
-  transform: translateY(-5px) scale(1.08) !important;
+  transform: translateY(-4px) scale(1.1) !important;
 }
 
-/* 6. TAJEMNÉ SILUETY V MLZE (.is-mystery-silhouette) & .just-discovered-flip */
+/* 6. TAJEMNÉ SILUETY V MLZE (.is-mystery-silhouette) — ČISTÝ MEDAILON BEZ DUPLICITNÍHO POZADÍ */
 .czekpoint-marker-anchor.is-mystery-silhouette {
   z-index: 1160 !important;
 }
 
 .place-marker-wrap.is-mystery-silhouette .czekpoint-marker-badge {
-  background: radial-gradient(circle at 35% 30%, #1b3b2b 0%, #09140e 100%) !important;
+  background: #12291d !important;
   border: 2.5px solid #f5b82e !important;
-  box-shadow: 0 0 0 3px rgba(245, 184, 46, 0.28), 0 6px 14px rgba(0, 0, 0, 0.65) !important;
-  color: #f5b82e !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.65) !important;
+  color: #fef08a !important;
   position: relative !important;
+  opacity: 1 !important;
 }
 
 .place-marker-wrap.is-mystery-silhouette.is-rare-mystery .czekpoint-marker-badge {
   border-color: #fbbf24 !important;
-  box-shadow: 0 0 14px rgba(251, 191, 36, 0.65), 0 6px 14px rgba(0, 0, 0, 0.7) !important;
+  box-shadow: 0 0 10px rgba(251, 191, 36, 0.55), 0 4px 12px rgba(0, 0, 0, 0.7) !important;
 }
 
-.place-marker-wrap.is-mystery-silhouette .marker-glyph-svg {
-  color: rgba(245, 184, 46, 0.38) !important;
-  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.8)) !important;
+.mystery-glyph {
+  display: none !important;
 }
 
 .mystery-question-mark {
-  position: absolute !important;
-  inset: 0 !important;
+  position: static !important;
   display: flex !important;
   align-items: center !important;
   justify-content: center !important;
-  font-size: 1.05rem !important;
+  font-size: 1.15rem !important;
   font-weight: 900 !important;
   color: #fef08a !important;
-  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.95) !important;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9) !important;
   pointer-events: none !important;
 }
 
 .mystery-distance-pill {
-  background: rgba(9, 20, 14, 0.94) !important;
+  margin-top: 2px !important;
+  background: #0f1d15 !important;
   color: #fde68a !important;
   border: 1.5px solid #d4af37 !important;
   font-weight: 800 !important;
-  font-size: 0.74rem !important;
-  padding: 2px 8px !important;
+  font-size: 0.72rem !important;
+  padding: 1px 7px !important;
   border-radius: 999px !important;
   white-space: nowrap !important;
 }
 
 .totem-title-pill {
   margin-top: 2px !important;
-  background: rgba(15, 29, 21, 0.92) !important;
+  background: #0f1d15 !important;
   color: #f8f5ec !important;
-  border: 1px solid rgba(212, 175, 55, 0.65) !important;
+  border: 1.5px solid #d4af37 !important;
   font-weight: 800 !important;
   font-size: 0.72rem !important;
-  padding: 2px 7px !important;
+  padding: 1px 7px !important;
   border-radius: 999px !important;
   white-space: nowrap !important;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45) !important;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5) !important;
 }
 
 @keyframes justDiscoveredFlip {
@@ -6262,36 +6435,36 @@ dialog:not([open]) {
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
-  width: 34px !important;
-  height: 34px !important;
-  min-width: 34px !important;
-  min-height: 34px !important;
+  width: 32px !important;
+  height: 32px !important;
+  min-width: 32px !important;
+  min-height: 32px !important;
   border-radius: 50% !important;
   background: radial-gradient(circle at 50% 50%, #1e3a2b 0%, #0d1912 100%) !important;
   border: 1.5px solid #d4af37 !important;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5) !important;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5) !important;
   flex-shrink: 0 !important;
   cursor: pointer !important;
 }
 
 .turn-pill-compass.is-25d-active {
   border-color: #f5b82e !important;
-  box-shadow: 0 0 10px rgba(245, 184, 46, 0.45), 0 2px 8px rgba(0, 0, 0, 0.5) !important;
+  box-shadow: 0 0 10px rgba(245, 184, 46, 0.45), 0 2px 6px rgba(0, 0, 0, 0.5) !important;
 }
 
 .turn-pill-compass-rotor {
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
-  width: 28px !important;
-  height: 28px !important;
+  width: 26px !important;
+  height: 26px !important;
   will-change: transform !important;
   transform-origin: 50% 50% !important;
 }
 
 .turn-pill-compass-svg {
-  width: 28px !important;
-  height: 28px !important;
+  width: 26px !important;
+  height: 26px !important;
   display: block !important;
 }
 

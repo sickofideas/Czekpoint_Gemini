@@ -1456,7 +1456,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
             <div class="compass-dist-badge" id="compass-dist-badge" hidden>-- m</div>
           </div>
 
-          <!-- Jediná čistá plovoucí kapsle (.turn-nav-pill) s integrovaným indikátorem orientace (kompasem) -->
+          <!-- Jediná čistá plovoucí kapsle (.turn-nav-pill) s integrovaným indikátorem orientace (kompasem) a tlačítkem Herní styl přímo na mapě -->
           <div class="turn-nav-pill" id="turn-nav-pill" role="status" aria-live="polite">
             <span class="turn-pill-compass" id="turn-pill-compass" title="Orientace mapy (Sever) — kliknutím srovnáš na sever" role="button" tabindex="0" aria-label="Kompas orientace mapy">
               <span class="turn-pill-compass-rotor" id="turn-pill-compass-rotor" style="transform: rotate(0deg)">
@@ -1468,13 +1468,52 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
                 </svg>
               </span>
             </span>
-            <span class="turn-nav-icon" id="turn-nav-icon">🧭</span>
-            <span class="turn-nav-text" id="turn-nav-text">🧭 Volný průzkum · Odkrývej okolí · 0 m</span>
+            <span class="turn-nav-icon" id="turn-nav-icon" hidden>🧭</span>
+            <span class="turn-nav-text" id="turn-nav-text">Volný průzkum · 0 m</span>
             <button type="button" class="voice-nav-pill-btn ${voiceNavEnabled ? 'active' : ''}" id="btn-voice-nav-pill" hidden title="Zapnout/vypnout českou hlasovou navigaci" aria-pressed="${voiceNavEnabled}">
               ${voiceNavEnabled ? '🔊 Hlas ZAP' : '🔈 Hlas'}
             </button>
-            <button type="button" class="top-pill-style-btn" id="btn-top-pill-style" title="Nastavení stylu mapy (Objevování / Pergamen / Turistická mapa) a zvuku">
-              ⚙️ Styl
+            <button type="button" class="top-pill-style-btn" id="btn-top-pill-style" aria-expanded="false" title="Vybrat herní styl přímo na mapě (Objevování / Pergamen / Turistická mapa)">
+              ${initialGameMode === 'explorer' ? '🧭 Styl ▾' : initialGameMode === 'casual' ? '🗺️ Styl ▾' : '📜 Styl ▾'}
+            </button>
+          </div>
+        </div>
+
+        <!-- Rozbalovací výběr herního stylu přímo na mapě po kliknutí na tlačítko Styl -->
+        <div class="map-style-popover" id="map-style-popover" role="dialog" aria-label="Výběr herního stylu na mapě" hidden>
+          <div class="map-style-popover-header">
+            <strong>🎨 Vyber herní styl mapy</strong>
+            <button type="button" class="map-style-popover-close" id="btn-close-style-popover" aria-label="Zavřít výběr stylu">✕</button>
+          </div>
+          <div class="map-style-popover-options" role="group" aria-label="Tři herní styly">
+            <button type="button" class="map-style-opt-btn ${initialGameMode === 'explorer' ? 'active' : ''}" data-p1-gamemode="explorer" aria-pressed="${initialGameMode === 'explorer'}">
+              <span class="ms-opt-icon">🧭</span>
+              <span class="ms-opt-body">
+                <strong>Objevování v mlze</strong>
+                <small>Plná mlha + tajemné siluety míst</small>
+              </span>
+            </button>
+            <button type="button" class="map-style-opt-btn ${initialGameMode === 'gamified' ? 'active' : ''}" data-p1-gamemode="gamified" aria-pressed="${initialGameMode === 'gamified'}">
+              <span class="ms-opt-icon">📜</span>
+              <span class="ms-opt-body">
+                <strong>Výprava s pergamenem</strong>
+                <small>Poloprůhledný pergamen + vodicí nit</small>
+              </span>
+            </button>
+            <button type="button" class="map-style-opt-btn ${initialGameMode === 'casual' ? 'active' : ''}" data-p1-gamemode="casual" aria-pressed="${initialGameMode === 'casual'}">
+              <span class="ms-opt-icon">🗺️</span>
+              <span class="ms-opt-body">
+                <strong>Turistická mapa</strong>
+                <small>Zcela odkrytá mapa se všemi názvy</small>
+              </span>
+            </button>
+          </div>
+          <div class="map-style-popover-footer">
+            <button type="button" class="map-style-sub-btn" id="btn-popover-sim-toggle" title="Otevřít/zavřít testovací simulátor GPS">
+              🧪 Simulátor GPS
+            </button>
+            <button type="button" class="map-style-sub-btn" id="btn-popover-all-settings" title="Otevřít podrobné nastavení zvuku a mapy">
+              ⚙️ Další nastavení
             </button>
           </div>
         </div>
@@ -3716,7 +3755,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
 
     if (!currentPos || (unvisitedPlaces.length === 0 && plannedPlaces.length === 0)) {
       if (iconEl) iconEl.textContent = '🧭';
-      if (textEl) textEl.textContent = `🧭 Volný průzkum · Odkrývej okolí · ${formatMetersCz(gainedM)}`;
+      if (textEl) textEl.textContent = `Volný průzkum · ${formatMetersCz(gainedM)}`;
       return;
     }
 
@@ -4543,6 +4582,8 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     //    nebo jsou do 9 km od uživatele (pokud je poloha známá).
     const activeVisualCat = plannedRoute.visualCategoryFilter || 'all';
     const mapPlaces = all.filter(p => {
+      // Skryjeme body typu 'route-start' ("Start trasy: ..."), aby na mapě nepřekrývaly 2.5D ikony míst
+      if (p.pointKind === 'route-start') return false;
       if (plannedPlaceIds.has(p.id)) return true;
       if (
         plannedRoute.categories.length > 0 &&
@@ -4730,30 +4771,28 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     const curZoom = (map && typeof map.getZoom === 'function') ? map.getZoom() : 15;
     const isCompactViewport = typeof window !== 'undefined' && Number(window.innerWidth) > 0 && Number(window.innerWidth) <= 680;
     let displayMapPlaces = mapPlaces;
-    if (curZoom < 14 || is3dMode || is3DMode || isCompactViewport || mapPlaces.length > 24) {
+    {
       const maxNormalPlaces = isCompactViewport
-        ? (curZoom < 13 ? 14 : curZoom < 15.8 ? 18 : 24)
+        ? (curZoom < 14 ? 8 : curZoom < 16 ? 10 : 14)
         : (is3dMode || is3DMode)
-        ? (curZoom < 13 ? 20 : 28)
-        : (curZoom < 11 ? 24 : curZoom < 13 ? 40 : 56);
-      // Minimální rozestup v metrech mezi běžnými (neplánovanými) značkami podle přiblížení mapy,
-      // aby se v centru města nepřekrývaly desítky ikon přes sebe
-      const minSepMeters = curZoom >= 16.8
-        ? 0
-        : curZoom >= 16.0
-        ? (isCompactViewport ? 38 : 24)
+        ? (curZoom < 14 ? 12 : 16)
+        : (curZoom < 12 ? 16 : curZoom < 14 ? 22 : 28);
+      // Dostatečný rozestup mezi 2.5D ikonami, aby se nepřekrývaly a šlo na každou pohodlně kliknout
+      const minSepMeters = curZoom >= 17.3
+        ? 28
+        : curZoom >= 16.3
+        ? (isCompactViewport ? 62 : 45)
         : curZoom >= 15.0
-        ? (isCompactViewport ? 65 : 42)
+        ? (isCompactViewport ? 95 : 68)
         : curZoom >= 14.0
-        ? 110
-        : 220;
+        ? 150
+        : 260;
 
       const mustHave = [];
       const others = [];
       for (const p of mapPlaces) {
         if (
           plannedPlaceIds.has(p.id) ||
-          p.pointKind === 'route-start' ||
           (selectedDetailPlace && selectedDetailPlace.id === p.id)
         ) {
           mustHave.push(p);
@@ -4906,7 +4945,6 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
           <div class="place-marker-wrap is-mystery-silhouette ${isRareMystery ? 'is-rare-mystery' : ''} ${animClass}">
             <div class="place-marker-inner">
               <span class="czekpoint-marker-badge mystery-medallion cat-${e(visualCat.key)} shape-${e(visualCat.shape)} ${tierClass}" data-kind="${e(categoryKey)}" data-visual-cat="${e(visualCat.key)}" data-shape="${e(visualCat.shape)}" title="${e(`${mysteryLabelText} (${visualCat.shortLabel})`)}">
-                <span class="czekpoint-marker-glyph mystery-glyph kind-${e(categoryKey)}">${glyphHtml}</span>
                 <span class="mystery-question-mark" aria-hidden="true">❓</span>
                 ${orderBadgeHtml}
               </span>
@@ -5455,6 +5493,10 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       btn.classList.toggle('active', isAct);
       btn.setAttribute('aria-pressed', String(isAct));
     });
+    const topStyleBtn = $('btn-top-pill-style');
+    if (topStyleBtn) {
+      topStyleBtn.textContent = mode === 'explorer' ? '🧭 Styl ▾' : mode === 'casual' ? '🗺️ Styl ▾' : '📜 Styl ▾';
+    }
     stateObj.appSettings = { ...appSettings };
     saveAppState();
     updateFogToggleLabel();
@@ -5463,6 +5505,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     setContourLayer(showContourLayer);
     plannedRouteRenderKey = null;
     renderPlannedRouteOnMap(true);
+    renderPlaces({ skipListRebuild: true });
     renderTripWizardUi();
     renderAppSettingsModalUi();
     renderNextCheckpointHero(lastFix || telemetry.lastKnownPosition);
@@ -10167,10 +10210,67 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
 
   $('btn-top-pill-style')?.addEventListener('click', (ev) => {
     ev?.stopPropagation?.();
+    const pop = $('map-style-popover');
+    if (pop) {
+      const nextOpen = Boolean(pop.hidden);
+      pop.hidden = !nextOpen;
+      $('btn-top-pill-style')?.setAttribute('aria-expanded', String(nextOpen));
+      playTick(stateObj.soundEnabled);
+      return;
+    }
     appSettingsModalOpen = true;
     const modal = $('app-settings-modal');
     if (modal) modal.hidden = false;
     renderAppSettingsModalUi();
+    playTick(stateObj.soundEnabled);
+  });
+
+  $('btn-close-style-popover')?.addEventListener('click', (ev) => {
+    ev?.stopPropagation?.();
+    if ($('map-style-popover')) $('map-style-popover').hidden = true;
+    $('btn-top-pill-style')?.setAttribute('aria-expanded', 'false');
+    playTick(stateObj.soundEnabled);
+  });
+
+  $('map-style-popover')?.addEventListener('click', (ev) => {
+    const gmBtn = ev.target.closest('[data-p1-gamemode]');
+    if (gmBtn) {
+      applyGameMode(gmBtn.dataset.p1Gamemode);
+      renderPhase1AndPhase4Ui(lastFix || telemetry.lastKnownPosition);
+      if ($('map-style-popover')) $('map-style-popover').hidden = true;
+      $('btn-top-pill-style')?.setAttribute('aria-expanded', 'false');
+      return;
+    }
+    if (ev.target.closest('#btn-popover-sim-toggle')) {
+      if ($('map-style-popover')) $('map-style-popover').hidden = true;
+      $('btn-top-pill-style')?.setAttribute('aria-expanded', 'false');
+      $('walk-fake-gps-toggle')?.click();
+      return;
+    }
+    if (ev.target.closest('#btn-popover-all-settings')) {
+      if ($('map-style-popover')) $('map-style-popover').hidden = true;
+      $('btn-top-pill-style')?.setAttribute('aria-expanded', 'false');
+      appSettingsModalOpen = true;
+      const modal = $('app-settings-modal');
+      if (modal) modal.hidden = false;
+      renderAppSettingsModalUi();
+      playTick(stateObj.soundEnabled);
+    }
+  });
+
+  $('turn-pill-compass')?.addEventListener('click', (ev) => {
+    ev?.stopPropagation?.();
+    if (!map) return;
+    follow = true;
+    const pos = visualPlayerPos || lastFix || telemetry.lastKnownPosition || getRouteOriginPoint();
+    try {
+      map.easeTo({
+        bearing: 0,
+        center: pos ? [pos.lng, pos.lat] : undefined,
+        duration: 400,
+      });
+    } catch {}
+    syncTurnPillCompassBearing();
     playTick(stateObj.soundEnabled);
   });
 
@@ -11077,6 +11177,13 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         setPocketModeUi(false);
         playTick(stateObj.soundEnabled);
         return;
+      }
+    }
+
+    // 3b. Zavření plovoucího výběru herního stylu na mapě (#map-style-popover) při kliknutí mimo něj
+    if ($('map-style-popover') && !$('map-style-popover').hidden) {
+      if (!t.closest('#map-style-popover') && !t.closest('#btn-top-pill-style')) {
+        $('map-style-popover').hidden = true;
       }
     }
 
