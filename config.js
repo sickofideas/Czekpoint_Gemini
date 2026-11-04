@@ -3,8 +3,8 @@ export const DEFAULT_TERRAIN_EXAGGERATION = 1.25;
 
 export const config = {
   appName: 'Czekpoint',
-  version: '3.0.0',
-  appVersion: 'v3.0',
+  version: '3.0.4',
+  appVersion: 'v3.0.4',
   regionName: 'Rožmitálsko a Brdy',
   defaultCity: 'Rožmitál pod Třemšínem',
   dataUrl: './data/routes.json',

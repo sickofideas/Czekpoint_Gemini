@@ -5833,29 +5833,24 @@ dialog:not([open]) {
 }
 
 #simulator-test-zone:not([hidden]) {
-  position: static !important;
-  display: block !important;
-  width: 100% !important;
-  max-width: 680px !important;
-  margin: 18px auto !important;
-  padding: 16px 20px !important;
-  background: linear-gradient(135deg, #112217 0%, #1a3324 100%) !important;
+  position: fixed !important;
+  bottom: 78px !important;
+  left: 12px !important;
+  right: auto !important;
+  width: min(350px, calc(100vw - 24px)) !important;
+  max-height: calc(100dvh - 160px) !important;
+  overflow-y: auto !important;
+  margin: 0 !important;
+  padding: 12px 14px !important;
+  background: rgba(15, 29, 21, 0.96) !important;
   border: 2px solid #d4af37 !important;
   border-radius: 18px !important;
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45) !important;
-  box-sizing: border-box !important;
-  z-index: 10 !important;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.7) !important;
+  z-index: 2150 !important;
 }
 
 .walk-test-strip {
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  gap: 12px !important;
-  margin: 14px auto 6px !important;
-  padding: 0 12px !important;
-  max-width: 680px !important;
-  box-sizing: border-box !important;
+  display: none !important;
 }
 
 .walk-test-strip .fake-gps-toggle-btn {
@@ -6804,5 +6799,25 @@ dialog:not([open]) {
   font-size: 0.8rem !important;
   cursor: pointer !important;
 }
+
+@media (max-width: 480px) {
+  #mab-active-group:not([hidden]) {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 6px !important;
+  }
+  #turn-nav-pill.turn-nav-pill {
+    padding: 4px 6px 4px 8px !important;
+    gap: 5px !important;
+  }
+  .top-pill-style-btn,
+  #btn-top-pill-style,
+  #btn-top-pill-sim {
+    padding: 5px 9px !important;
+    font-size: 0.76rem !important;
+    min-height: 34px !important;
+  }
+}
+
 
 

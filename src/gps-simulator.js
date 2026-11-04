@@ -676,19 +676,25 @@ export class GpsSimulator {
       };
     }
 
-    // Propojíme aktuální polohu s prvním bodem trasy po pěší cestě, pokud ještě nejsme na začátku
-    const firstCoord = { lat: activeRoute.coordinates[0][0], lng: activeRoute.coordinates[0][1] };
-    let fullCoords = activeRoute.coordinates.map(([lat, lng]) => ({ lat, lng }));
+    const firstRaw = activeRoute.coordinates[0];
+    const firstCoord = Array.isArray(firstRaw)
+      ? { lat: Number(firstRaw[0]), lng: Number(firstRaw[1]) }
+      : { lat: Number(firstRaw.lat), lng: Number(firstRaw.lng) };
+    let fullCoords = activeRoute.coordinates.map(c =>
+      Array.isArray(c) ? { lat: Number(c[0]), lng: Number(c[1]) } : { lat: Number(c.lat), lng: Number(c.lng) }
+    );
     if ((haversineMeters(this.position, firstCoord) ?? 0) > 15) {
       const leadIn = buildLocalRoutedGeometry([this.position, firstCoord], { useLocalFootpathGraph: true, isFallback: false });
       if (leadIn.coordinates && leadIn.coordinates.length >= 2) {
-        const leadPts = leadIn.coordinates.slice(0, -1).map(([lat, lng]) => ({ lat, lng }));
+        const leadPts = leadIn.coordinates.slice(0, -1).map(c =>
+          Array.isArray(c) ? { lat: Number(c[0]), lng: Number(c[1]) } : { lat: Number(c.lat), lng: Number(c.lng) }
+        );
         fullCoords = [...leadPts, ...fullCoords];
       }
     }
 
     this.autopilotRouteCoords = fullCoords;
-    this.autopilotCoordIndex = 0;
+    this.autopilotCoordIndex = fullCoords.length > 1 ? 1 : 0;
     this.mode = 'autopilot';
     this.autopilotPauseReason = '';
     this.autopilotIndex = 0;
@@ -697,9 +703,10 @@ export class GpsSimulator {
     this.stampedPlaces = new Set();
     this.currentDirectionDeg = null;
     this.clearDottedLine();
+    this.startLoop();
 
     if (this.autopilotRouteCoords.length > 0) {
-      const target = this.autopilotRouteCoords[Math.min(1, this.autopilotRouteCoords.length - 1)];
+      const target = this.autopilotRouteCoords[this.autopilotCoordIndex];
       this.heading = calculateBearing(this.position, target);
       this.onHeadingChange(this.heading);
       this.drawDottedPolyline(this.autopilotRouteCoords);

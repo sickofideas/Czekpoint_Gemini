@@ -1474,10 +1474,10 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
               ${voiceNavEnabled ? '🔊 Hlas ZAP' : '🔈 Hlas'}
             </button>
             <button type="button" class="top-pill-style-btn" id="btn-top-pill-style" aria-expanded="false" aria-controls="map-style-popover" title="Rychlý výběr herního stylu (Objevování / Pergamen / Turistická mapa)">
-              ${initialGameMode === 'explorer' ? '🧭 Herní styl ▾' : initialGameMode === 'casual' ? '🗺️ Herní styl ▾' : '📜 Herní styl ▾'}
+              ${initialGameMode === 'explorer' ? '🧭 Styl ▾' : initialGameMode === 'casual' ? '🗺️ Styl ▾' : '📜 Styl ▾'}
             </button>
             <button type="button" class="top-pill-style-btn top-pill-sim-btn" id="btn-top-pill-sim" title="Otevřít / zavřít testovací simulátor GPS">
-              🧪 Test GPS
+              🧪 GPS
             </button>
           </div>
         </div>
@@ -2334,7 +2334,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       padding,
     };
     if (is3dMode || is3DMode) {
-      opts.pitch = 58;
+      opts.pitch = DEFAULT_3D_PITCH;
       if (Number.isFinite(currentWalkHeadingDeg) && followHeadingMode) {
         opts.bearing = currentWalkHeadingDeg;
       }
@@ -3468,7 +3468,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     topBar.classList.toggle('is-walking', isWalking);
 
     if ($('turn-nav-pill')) {
-      $('turn-nav-pill').hidden = !(shouldShowTopBar || Boolean(lastRoutedGeometry));
+      $('turn-nav-pill').hidden = false;
     }
 
     if (bottomBar) {
@@ -4146,7 +4146,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     if (!map) return;
     ensureCustomMapSourcesAndLayers();
     try {
-      const showLine = Array.isArray(coords) && coords.length >= 2;
+      const showLine = appSettings.gameMode !== 'explorer' && Array.isArray(coords) && coords.length >= 2;
       const geojson = buildPlannedRouteGeoJson(showLine ? coords : [], isFallbackGeom);
       const routeSrc = typeof map.getSource === 'function' ? map.getSource('planned-route-source') : null;
       if (routeSrc && typeof routeSrc.setData === 'function') {
@@ -5547,7 +5547,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     });
     const topStyleBtn = $('btn-top-pill-style');
     if (topStyleBtn) {
-      topStyleBtn.textContent = mode === 'explorer' ? '🧭 Herní styl ▾' : mode === 'casual' ? '🗺️ Herní styl ▾' : '📜 Herní styl ▾';
+      topStyleBtn.textContent = mode === 'explorer' ? '🧭 Styl ▾' : mode === 'casual' ? '🗺️ Styl ▾' : '📜 Styl ▾';
     }
     stateObj.appSettings = { ...appSettings };
     saveAppState();
@@ -7130,26 +7130,6 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     follow = true;
     updateFollowUi();
     unlockSpeechSynthesis();
-
-    // Pokud uživatel odstartuje výpravu bez vybraných zastávek, automaticky mu připravíme pěší okruh po stezkách,
-    // aby hlasová navigace z kapsy ihned dávala konkrétní povely k chůzi.
-    if ((!plannedRoute.selectedPlaceIds || plannedRoute.selectedPlaceIds.length === 0) && !lastRoutedGeometry) {
-      const avail = getAllAvailablePlaces();
-      const preferred = ['zamek-rozmital', 'podbrdske-muzeum', 'kostel-stary-rozmital'].filter(id =>
-        avail.some(p => p.id === id)
-      );
-      const defaultStops = preferred.length > 0 ? preferred : avail.slice(0, 3).map(p => p.id);
-      if (defaultStops.length > 0) {
-        plannedRoute.selectedPlaceIds = defaultStops;
-        const orig = getRouteOriginPoint();
-        const places = getPlannedPlaces(defaultStops);
-        lastRoutedGeometry = buildLocalRoutedGeometry([orig, ...places], { useLocalFootpathGraph: true, isFallback: false });
-        plannedRouteCoords = lastRoutedGeometry.coordinates;
-        fakeGpsSim?.setSharedWalkingRoute(lastRoutedGeometry);
-        applyPlannedRouteGeoJsonToMap(plannedRouteCoords, false);
-        updateTurnNavPill(lastFix || orig);
-      }
-    }
 
     if (simSandboxActive) {
       if (!currentExpedition || currentExpedition.state === 'ended') {
@@ -11060,7 +11040,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         map.flyTo({
           center: [playerPos.lng, playerPos.lat],
           zoom: Math.max(map.getZoom(), 16.5),
-          pitch: is3DMode ? 55 : 0,
+          pitch: is3DMode ? DEFAULT_3D_PITCH : 0,
           duration: 700,
         });
       } else {
