@@ -19,6 +19,7 @@ export const DEFAULT_APP_SETTINGS = Object.freeze({
   orbitalArrow: true,     // 🎯 Zlatá směrová šipka u Avatara
   voiceNav: true,         // 🗣️ Česká hlasová navigace
   soundFx: true,          // 🔊 Zvukové efekty a fanfáry
+  hapticFeedback: true,   // 📳 Haptická odezva (vibrace při razítku a zastávce)
   keepAwake: true,        // 📱 Držet rozsvícený displej
   autoSortStops: true,    // 🔄 Chytré řazení zastávek podle pěší trasy
   showExternalPhotos: true, // 🖼️ Zobrazovat externí fotografie míst (Wikipedie)

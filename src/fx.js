@@ -23,14 +23,36 @@ function getAudioContext() {
 }
 
 /**
+ * Checks whether the current browser/device supports the Web Vibration API.
+ */
+export function isVibrationSupported() {
+  return typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function';
+}
+
+/**
  * Triggers safe haptic vibration if supported and enabled.
  */
-export function triggerHaptic(pattern = 40) {
-  if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
-    try {
-      navigator.vibrate(pattern);
-    } catch {}
+export function triggerHaptic(pattern = 40, enabled = true) {
+  if (!enabled || !isVibrationSupported()) return false;
+  try {
+    return Boolean(navigator.vibrate(pattern));
+  } catch {
+    return false;
   }
+}
+
+/**
+ * Haptic vibration pattern when arriving at a new stop/checkpoint.
+ */
+export function vibrateStopArrival(enabled = true) {
+  return triggerHaptic([140, 70, 220], enabled);
+}
+
+/**
+ * Celebratory haptic vibration pattern when a GPS stamp is successfully recorded.
+ */
+export function vibrateStampRecorded(enabled = true) {
+  return triggerHaptic([80, 50, 120, 50, 200], enabled);
 }
 
 /**
@@ -66,6 +88,7 @@ export function playTick(enabled = true) {
  */
 export function playHammer(enabled = true) {
   if (!enabled) return;
+  triggerHaptic([30, 40, 30]);
   const ctx = getAudioContext();
   if (!ctx) return;
 
@@ -90,7 +113,6 @@ export function playHammer(enabled = true) {
     const now = ctx.currentTime;
     playClinkPulse(now, 1760, 0.15); // A6
     playClinkPulse(now + 0.07, 2349, 0.18); // D7
-    triggerHaptic([30, 40, 30]);
   } catch {}
 }
 
@@ -99,6 +121,7 @@ export function playHammer(enabled = true) {
  */
 export function playRadar(enabled = true) {
   if (!enabled) return;
+  triggerHaptic(60);
   const ctx = getAudioContext();
   if (!ctx) return;
 
@@ -120,7 +143,6 @@ export function playRadar(enabled = true) {
 
     osc.start(now);
     osc.stop(now + 0.48);
-    triggerHaptic(60);
   } catch {}
 }
 
@@ -129,6 +151,7 @@ export function playRadar(enabled = true) {
  */
 export function playStampChord(enabled = true) {
   if (!enabled) return;
+  triggerHaptic([50, 60, 90]);
   const ctx = getAudioContext();
   if (!ctx) return;
 
@@ -153,7 +176,6 @@ export function playStampChord(enabled = true) {
       osc.start(time);
       osc.stop(time + 0.38);
     });
-    triggerHaptic([50, 60, 90]);
   } catch {}
 }
 
@@ -218,4 +240,71 @@ export function applyStaggerAnimation(containerOrSelector, itemSelector = ':scop
     void item.offsetWidth; // Trigger reflow for re-animation
     item.classList.add('tile-animate-in', 'route-card-fade-in');
   });
+}
+
+let stampToastTimer = null;
+
+/**
+ * Triggers a visual scale-up and pulse transition when a GPS stamp is recorded into the passport.
+ */
+export function animateStampEarned(placeTitle = '', options = {}) {
+  if (typeof document === 'undefined') return;
+  const { totalStamps = null, mapContainer = null } = options;
+
+  const passportCountEl = document.getElementById('passport-count');
+  if (passportCountEl && totalStamps !== null && Number.isFinite(Number(totalStamps))) {
+    passportCountEl.textContent = String(totalStamps);
+  }
+
+  const passportLink = document.querySelector('[data-nav="passport"]');
+  const targets = [passportLink, passportCountEl, document.getElementById('turn-nav-pill')].filter(Boolean);
+  for (const el of targets) {
+    el.classList.remove('stamp-earned-pulse');
+    void el.offsetWidth;
+    el.classList.add('stamp-earned-pulse');
+  }
+  setTimeout(() => {
+    for (const el of targets) {
+      el.classList.remove('stamp-earned-pulse');
+    }
+  }, 1100);
+
+  const host = mapContainer || document.querySelector('.walk-map-wrap') || document.body;
+  if (!host) return;
+
+  let toast = document.getElementById('stamp-earned-toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'stamp-earned-toast';
+    toast.className = 'stamp-earned-toast';
+    toast.setAttribute('role', 'status');
+    toast.setAttribute('aria-live', 'polite');
+    host.appendChild(toast);
+  }
+
+  const label = placeTitle ? `🏅 Razítko v pasu: ${placeTitle}` : '🏅 Nové GPS razítko zapsáno do pasu!';
+  toast.innerHTML = '';
+  const iconSpan = document.createElement('span');
+  iconSpan.className = 'stamp-earned-toast-icon';
+  iconSpan.setAttribute('aria-hidden', 'true');
+  iconSpan.textContent = '🎒';
+  const textSpan = document.createElement('strong');
+  textSpan.className = 'stamp-earned-toast-text';
+  textSpan.textContent = label;
+  toast.append(iconSpan, textSpan);
+
+  toast.hidden = false;
+  toast.classList.remove('is-active');
+  void toast.offsetWidth;
+  toast.classList.add('is-active');
+
+  if (stampToastTimer) clearTimeout(stampToastTimer);
+  stampToastTimer = setTimeout(() => {
+    toast.classList.remove('is-active');
+    setTimeout(() => {
+      if (!toast.classList.contains('is-active')) {
+        toast.hidden = true;
+      }
+    }, 320);
+  }, 2600);
 }

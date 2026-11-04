@@ -6819,5 +6819,620 @@ dialog:not([open]) {
   }
 }
 
+/* VIZUÁLNÍ ANIMACE PŘI ZÁPISU GPS RAZÍTKA DO PASU */
+@keyframes stampIconPop {
+  0% {
+    transform: scale(1);
+  }
+  35% {
+    transform: scale(1.28) rotate(-6deg);
+    box-shadow: 0 0 0 6px rgba(212, 175, 55, 0.55), 0 6px 20px rgba(212, 175, 55, 0.65);
+  }
+  70% {
+    transform: scale(0.95) rotate(3deg);
+    box-shadow: 0 0 0 12px rgba(212, 175, 55, 0);
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+  }
+}
 
+@keyframes stampBadgePopIn {
+  0% {
+    transform: scale(0.4) rotate(-18deg);
+    opacity: 0;
+  }
+  55% {
+    transform: scale(1.32) rotate(8deg);
+    opacity: 1;
+  }
+  80% {
+    transform: scale(0.92) rotate(-3deg);
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+    opacity: 1;
+  }
+}
 
+.stamp-earned-pulse {
+  animation: stampIconPop 0.78s cubic-bezier(0.22, 1, 0.36, 1) !important;
+}
+
+#passport-count.stamp-earned-pulse {
+  display: inline-block;
+  background: #f5b82e !important;
+  color: #14261c !important;
+  transform-origin: center;
+}
+
+.czekpoint-marker-badge.is-just-confirmed {
+  animation: stampIconPop 0.85s cubic-bezier(0.22, 1, 0.36, 1) !important;
+}
+
+.stamp-earned-toast {
+  position: absolute;
+  top: 66px;
+  left: 50%;
+  transform: translate(-50%, -14px) scale(0.92);
+  z-index: 1550;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 16px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(20, 42, 30, 0.96) 0%, rgba(31, 66, 46, 0.96) 100%);
+  border: 2px solid #f5b82e;
+  color: #fef3c7;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55), 0 0 0 4px rgba(245, 184, 46, 0.25);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.28s ease, transform 0.34s cubic-bezier(0.22, 1, 0.36, 1);
+  max-width: calc(100% - 28px);
+}
+
+.stamp-earned-toast[hidden] {
+  display: none !important;
+}
+
+.stamp-earned-toast.is-active {
+  opacity: 1;
+  transform: translate(-50%, 0) scale(1);
+}
+
+.stamp-earned-toast.is-active .stamp-earned-toast-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #f5b82e;
+  color: #14261c;
+  font-size: 1.05rem;
+  flex-shrink: 0;
+  animation: stampBadgePopIn 0.68s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.stamp-earned-toast-text {
+  font-size: 0.86rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stamp-earned-pulse,
+  .czekpoint-marker-badge.is-just-confirmed,
+  .stamp-earned-toast.is-active .stamp-earned-toast-icon {
+    animation: none !important;
+  }
+}
+
+/* ==========================================================================
+   APPLE HIG & MOBILE UX REVISION (v3.0.4):
+   - Čitelné ikony a dotykové cíle >= 44–48 px
+   - Nulové překrývání plovoucích panelů (Trasa, Lupa, Detail místa, Styl, Simulátor)
+   - Kompaktní hlavička na telefonu bez ořezávání „🎒 Můj pas“
+   ========================================================================== */
+
+@media (max-width: 640px) {
+  body header.site-header {
+    padding: 6px 10px !important;
+    gap: 8px !important;
+    flex-wrap: nowrap !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+  }
+
+  body header.site-header .brand {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+    font-size: 0.95rem !important;
+    letter-spacing: -0.02em !important;
+    white-space: nowrap !important;
+    flex-shrink: 0 !important;
+  }
+
+  body header.site-header .header-logo-slot {
+    width: 34px !important;
+    height: 34px !important;
+    min-width: 34px !important;
+    border-radius: 9px !important;
+  }
+
+  body header.site-header .header-region {
+    display: none !important;
+  }
+
+  body header.site-header .main-nav {
+    display: flex !important;
+    align-items: center !important;
+    gap: 5px !important;
+    flex-wrap: nowrap !important;
+    flex-shrink: 1 !important;
+    min-width: 0 !important;
+  }
+
+  body header.site-header .main-nav a {
+    padding: 6px 9px !important;
+    min-height: 36px !important;
+    font-size: 0.78rem !important;
+    font-weight: 800 !important;
+    border-radius: 10px !important;
+    white-space: nowrap !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 4px !important;
+  }
+
+  body header.site-header #passport-count.nav-count {
+    padding: 1px 6px !important;
+    font-size: 0.72rem !important;
+    min-width: 18px !important;
+    height: 18px !important;
+  }
+
+  #mode-banner,
+  #walk-sandbox-banner {
+    display: none !important;
+  }
+}
+
+@media (max-width: 520px) {
+  body header.site-header .brand > span:not(.header-logo-slot) {
+    display: none !important;
+  }
+}
+
+/* Horní navigační kapsle (#turn-nav-pill) */
+#turn-nav-pill.turn-nav-pill {
+  top: 10px !important;
+  left: 10px !important;
+  right: 10px !important;
+  min-height: 50px !important;
+  padding: 6px 8px !important;
+  border-radius: 25px !important;
+  gap: 7px !important;
+  display: flex !important;
+  align-items: center !important;
+  background: rgba(15, 29, 21, 0.94) !important;
+  backdrop-filter: blur(14px) !important;
+  -webkit-backdrop-filter: blur(14px) !important;
+  border: 1.5px solid rgba(212, 175, 55, 0.65) !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45) !important;
+  z-index: 1600 !important;
+}
+
+#turn-nav-pill .turn-pill-compass {
+  width: 38px !important;
+  height: 38px !important;
+  min-width: 38px !important;
+  min-height: 38px !important;
+  flex-shrink: 0 !important;
+}
+
+#turn-nav-pill .turn-nav-main {
+  flex: 1 1 0 !important;
+  min-width: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 5px !important;
+  overflow: hidden !important;
+}
+
+#turn-nav-pill #turn-nav-icon {
+  font-size: 1.05rem !important;
+  flex-shrink: 0 !important;
+}
+
+#turn-nav-pill #turn-nav-text {
+  font-size: 0.82rem !important;
+  font-weight: 700 !important;
+  line-height: 1.22 !important;
+  color: #f8fafc !important;
+  display: -webkit-box !important;
+  -webkit-line-clamp: 2 !important;
+  -webkit-box-orient: vertical !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: normal !important;
+}
+
+#turn-nav-pill #btn-top-pill-style,
+#turn-nav-pill #btn-top-pill-sim {
+  min-height: 36px !important;
+  padding: 6px 10px !important;
+  font-size: 0.78rem !important;
+  font-weight: 800 !important;
+  border-radius: 999px !important;
+  flex-shrink: 0 !important;
+  white-space: nowrap !important;
+}
+
+/* Pravý sloupec 3 kulatých tlačítek (.map-right-toolbar) — Apple HIG 48×48 px */
+.walk-map-toolbar.map-right-toolbar {
+  position: absolute !important;
+  top: 70px !important;
+  right: 10px !important;
+  left: auto !important;
+  bottom: auto !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 10px !important;
+  padding: 0 !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  z-index: 1550 !important;
+}
+
+.walk-map-toolbar.map-right-toolbar .map-right-btn {
+  width: 48px !important;
+  height: 48px !important;
+  min-width: 48px !important;
+  min-height: 48px !important;
+  border-radius: 50% !important;
+  font-size: 1.25rem !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background: rgba(15, 29, 21, 0.92) !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+  border: 1.5px solid rgba(212, 175, 55, 0.6) !important;
+  color: #ffffff !important;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45) !important;
+}
+
+.walk-map-toolbar.map-right-toolbar .map-right-btn.active {
+  background: linear-gradient(135deg, #1b4332 0%, #143325 100%) !important;
+  border-color: #f5b82e !important;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5), 0 0 0 2px rgba(245, 184, 46, 0.28) !important;
+}
+
+/* Kartička Trasa (#quest-hud-panel) — žádné lámání metrů na 3 řádky a žádná kolize s pravou lištou */
+#quest-hud-panel:not([hidden]),
+#quest-hud-panel.collapsed:not([hidden]),
+.walk-map-wrap.zen-mode #quest-hud-panel.collapsed:not([hidden]) {
+  position: absolute !important;
+  top: 70px !important;
+  left: 10px !important;
+  right: auto !important;
+  width: calc(100% - 76px) !important;
+  max-width: 310px !important;
+  padding: 9px 12px !important;
+  border-radius: 18px !important;
+  background: rgba(15, 29, 21, 0.94) !important;
+  backdrop-filter: blur(14px) !important;
+  -webkit-backdrop-filter: blur(14px) !important;
+  border: 1.5px solid rgba(212, 175, 55, 0.55) !important;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.48) !important;
+  z-index: 1540 !important;
+  box-sizing: border-box !important;
+  transition: top 0.2s ease !important;
+}
+
+#walk-map-wrap.has-search-open #quest-hud-panel:not([hidden]),
+#walk-map-wrap.has-search-open #quest-hud-panel.collapsed:not([hidden]) {
+  top: 134px !important;
+}
+
+#quest-hud-panel:not(.collapsed):not([hidden]),
+.walk-map-wrap.zen-mode #quest-hud-panel:not(.collapsed):not([hidden]) {
+  z-index: 1750 !important;
+  width: calc(100% - 76px) !important;
+  max-width: 330px !important;
+  padding: 10px 12px !important;
+  border-radius: 18px !important;
+  background: rgba(15, 29, 21, 0.97) !important;
+}
+
+#quest-hud-panel .quest-hud-header {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  width: 100% !important;
+  min-height: 30px !important;
+  padding: 0 !important;
+  background: transparent !important;
+  border: none !important;
+  color: #ffffff !important;
+  font-size: 0.85rem !important;
+  font-weight: 800 !important;
+}
+
+#quest-hud-panel .quest-hud-toggle-icon {
+  padding: 3px 9px !important;
+  border-radius: 999px !important;
+  background: rgba(245, 184, 46, 0.16) !important;
+  border: 1px solid rgba(245, 184, 46, 0.45) !important;
+  color: #fde68a !important;
+  font-size: 0.74rem !important;
+  font-weight: 800 !important;
+  white-space: nowrap !important;
+}
+
+#quest-hud-panel .qhud-compact {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: flex-start !important;
+  gap: 2px !important;
+  margin-top: 6px !important;
+  padding-top: 6px !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+
+#quest-hud-panel .qhud-target-name {
+  font-size: 0.84rem !important;
+  font-weight: 800 !important;
+  color: #ffffff !important;
+  width: 100% !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+#quest-hud-panel .qhud-target-eta {
+  font-size: 0.77rem !important;
+  font-weight: 700 !important;
+  color: #fde68a !important;
+  white-space: nowrap !important;
+}
+
+#quest-hud-panel.collapsed .quest-hud-content {
+  display: none !important;
+}
+
+#quest-hud-panel:not(.collapsed) .quest-hud-content {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 8px !important;
+  margin-top: 8px !important;
+  padding-top: 8px !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.12) !important;
+  max-height: 46dvh !important;
+  overflow-y: auto !important;
+}
+
+#quest-hud-panel .qhud-eta-summary {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 6px 14px !important;
+  padding: 8px 10px !important;
+  border-radius: 12px !important;
+  background: rgba(255, 255, 255, 0.06) !important;
+}
+
+#quest-hud-panel .qhud-eta-row {
+  font-size: 0.8rem !important;
+  color: #f8fafc !important;
+  white-space: nowrap !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+}
+
+/* Vyhledávání v mapě (#map-search-overlay) — žádné oříznutí tlačítka „Hledat“ a žádné překrytí 🔍 */
+#map-search-overlay:not([hidden]) {
+  position: absolute !important;
+  top: 70px !important;
+  left: 10px !important;
+  right: 66px !important;
+  width: auto !important;
+  max-width: 420px !important;
+  z-index: 1820 !important;
+  box-sizing: border-box !important;
+}
+
+#map-search-overlay .map-search-bar {
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+  padding: 5px 7px !important;
+  border-radius: 16px !important;
+  background: rgba(15, 29, 21, 0.96) !important;
+  backdrop-filter: blur(14px) !important;
+  -webkit-backdrop-filter: blur(14px) !important;
+  border: 1.5px solid #f5b82e !important;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55) !important;
+}
+
+#map-search-overlay .map-search-input {
+  flex: 1 1 0 !important;
+  min-width: 0 !important;
+  width: 100% !important;
+  font-size: 0.86rem !important;
+  padding: 6px 4px !important;
+  background: transparent !important;
+  border: none !important;
+  color: #ffffff !important;
+}
+
+#map-search-overlay .map-search-submit-btn {
+  flex-shrink: 0 !important;
+  padding: 6px 11px !important;
+  min-height: 36px !important;
+  font-size: 0.78rem !important;
+  font-weight: 800 !important;
+  border-radius: 11px !important;
+  white-space: nowrap !important;
+}
+
+/* Detail místa (#place-detail-sheet) — symetrická Apple karta nad spodním dockem */
+#place-detail-sheet.place-detail-sheet:not([hidden]) {
+  position: absolute !important;
+  left: 10px !important;
+  right: 10px !important;
+  bottom: 126px !important;
+  width: auto !important;
+  max-width: 440px !important;
+  margin: 0 auto !important;
+  padding: 0 !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  z-index: 1800 !important;
+  box-sizing: border-box !important;
+}
+
+#place-detail-sheet .pds-card {
+  width: 100% !important;
+  padding: 13px 14px !important;
+  border-radius: 20px !important;
+  background: rgba(16, 32, 23, 0.97) !important;
+  backdrop-filter: blur(16px) !important;
+  -webkit-backdrop-filter: blur(16px) !important;
+  border: 1.5px solid rgba(245, 184, 46, 0.65) !important;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.65) !important;
+  box-sizing: border-box !important;
+}
+
+#place-detail-sheet .pds-header {
+  display: flex !important;
+  align-items: flex-start !important;
+  gap: 10px !important;
+}
+
+#place-detail-sheet .pds-mystery-icon-box {
+  width: 48px !important;
+  height: 48px !important;
+  min-width: 48px !important;
+  border-radius: 14px !important;
+  background: rgba(245, 184, 46, 0.16) !important;
+  border: 1.5px solid rgba(245, 184, 46, 0.5) !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  font-size: 1.45rem !important;
+  flex-shrink: 0 !important;
+}
+
+#place-detail-sheet .pds-title {
+  font-size: 0.96rem !important;
+  font-weight: 800 !important;
+  line-height: 1.25 !important;
+  margin: 2px 0 6px !important;
+  color: #ffffff !important;
+}
+
+#place-detail-sheet .pds-photo-source-badge {
+  display: block !important;
+  border-radius: 10px !important;
+  padding: 5px 9px !important;
+  font-size: 0.76rem !important;
+  line-height: 1.35 !important;
+  white-space: normal !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: #e2e8f0 !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+}
+
+#place-detail-sheet .pds-close-btn {
+  width: 36px !important;
+  height: 36px !important;
+  min-width: 36px !important;
+  min-height: 36px !important;
+  padding: 0 !important;
+  border-radius: 50% !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  flex-shrink: 0 !important;
+  background: rgba(255, 255, 255, 0.1) !important;
+  color: #ffffff !important;
+  border: 1px solid rgba(255, 255, 255, 0.22) !important;
+}
+
+#place-detail-sheet .pds-actions {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 8px !important;
+  margin-top: 10px !important;
+}
+
+#place-detail-sheet .pds-actions .button {
+  min-height: 44px !important;
+  font-size: 0.85rem !important;
+  font-weight: 800 !important;
+  border-radius: 12px !important;
+  flex: 1 1 auto !important;
+  justify-content: center !important;
+}
+
+/* Plovoucí tlačítko „🎯 Zpět na postavičku“ bezpečně nad 2řádkovým spodním dockem */
+#btn-recenter-avatar:not([hidden]),
+#btn-return-to-gps:not([hidden]) {
+  bottom: 132px !important;
+  left: 50% !important;
+  transform: translateX(-50%) !important;
+  min-height: 42px !important;
+  padding: 8px 16px !important;
+  font-size: 0.84rem !important;
+  font-weight: 800 !important;
+  border-radius: 999px !important;
+  white-space: nowrap !important;
+  z-index: 1520 !important;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.5) !important;
+}
+
+/* Ikony míst v mapě (.czekpoint-marker-badge) — 44×44 px dotyková plocha a čitelné štítky */
+.czekpoint-marker-badge {
+  width: 44px !important;
+  height: 44px !important;
+  min-width: 44px !important;
+  min-height: 44px !important;
+}
+
+.czekpoint-marker-glyph {
+  font-size: 1.2rem !important;
+}
+
+.czekpoint-marker-label {
+  font-size: 0.75rem !important;
+  font-weight: 800 !important;
+  padding: 2px 8px !important;
+  border-radius: 999px !important;
+  max-width: 152px !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+/* Kompaktní GPS simulátor na telefonu — bezpečně nad 2řádkovým spodním dockem */
+@media (max-width: 640px) {
+  #simulator-test-zone:not([hidden]) {
+    bottom: 126px !important;
+    left: 10px !important;
+    right: 10px !important;
+    width: auto !important;
+    max-height: 40dvh !important;
+    padding: 10px 12px !important;
+    border-radius: 18px !important;
+  }
+}

@@ -289,13 +289,15 @@ export function unlockSpeechSynthesis() {
   }
 }
 
-export function triggerPocketProximityAlert(kind = 'proximity') {
-  // Vibrace: [250, 120, 250] dle zadání #10
-  try {
-    if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
-      navigator.vibrate([250, 120, 250]);
-    }
-  } catch (_) {}
+export function triggerPocketProximityAlert(kind = 'proximity', hapticsEnabled = true) {
+  // Vibrace: [250, 120, 250] dle zadání #10 (pokud jsou vibrace povoleny a podporovány prohlížečem)
+  if (hapticsEnabled !== false) {
+    try {
+      if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+        navigator.vibrate([250, 120, 250]);
+      }
+    } catch (_) {}
+  }
 
   // Jemný dvoutónový gong přes Web Audio API
   try {

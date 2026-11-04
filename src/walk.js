@@ -164,6 +164,9 @@ import {
   playStampChord,
   animateValue,
   triggerHaptic,
+  vibrateStopArrival,
+  vibrateStampRecorded,
+  animateStampEarned,
   applyStaggerAnimation,
 } from './fx.js';
 import { initGpsSimulator, ROZMITAL_CENTER, moveCoordinates, calculateBearing } from './gps-simulator.js';
@@ -3777,11 +3780,14 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     const nextTitle = nextStop?.title || 'Cíl trasy';
     if (iconEl) iconEl.textContent = arrowChar;
     if (textEl) {
-      if (instr.text && instr.text.includes('→')) {
-        textEl.textContent = `${arrowChar} ${instr.text}`;
+      const cleanTurnText = String(instr.text || 'Pokračuj po cestě')
+        .replace(/^[↑↗→↘↓↙←↖↱↰⬆⬇⬅➡🧭🎯🏁]+\s*/u, '')
+        .trim();
+      if (cleanTurnText.includes('→')) {
+        textEl.textContent = cleanTurnText;
       } else {
-        const turnPart = instr.text || 'Pokračuj po cestě';
-        textEl.textContent = `${arrowChar} ${distLabel ? `${distLabel} · ` : ''}${turnPart} → ${nextTitle}`;
+        const hasDist = distLabel && cleanTurnText.includes(distLabel);
+        textEl.textContent = `${distLabel && !hasDist ? `${distLabel} · ` : ''}${cleanTurnText} → ${nextTitle}`;
       }
     }
 
@@ -5162,8 +5168,60 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     }
   }
 
+  function closeCompetingMapOverlays(keepKey = '') {
+    if (keepKey !== 'style') {
+      const pop = $('map-style-popover');
+      const btn = $('btn-top-pill-style');
+      if (pop && !pop.hidden) pop.hidden = true;
+      if (btn) {
+        btn.setAttribute('aria-expanded', 'false');
+        btn.classList.remove('is-open');
+      }
+    }
+    if (keepKey !== 'search') {
+      const searchOverlay = $('map-search-overlay');
+      if (searchOverlay && !searchOverlay.hidden) {
+        searchOverlay.hidden = true;
+      }
+      if ($('map-lupa-search-results')) $('map-lupa-search-results').hidden = true;
+      $('walk-search-toggle')?.classList.remove('active');
+      $('walk-map-wrap')?.classList.remove('has-search-open');
+    }
+    if (keepKey !== 'route-detail') {
+      const hudPanel = $('quest-hud-panel');
+      if (hudPanel && !hudPanel.classList.contains('collapsed')) {
+        hudPanel.classList.add('collapsed');
+        $('quest-hud-toggle-btn')?.setAttribute('aria-expanded', 'false');
+        if ($('qhud-toggle-icon')) $('qhud-toggle-icon').textContent = '▼ Detail';
+      }
+    }
+    if (keepKey !== 'place-detail') {
+      if ($('place-detail-sheet') && !$('place-detail-sheet').hidden) {
+        selectedDetailPlace = null;
+        $('place-detail-sheet').hidden = true;
+      }
+    }
+    if (keepKey !== 'drawer') {
+      const sheetEl = $('walk-bottom-sheet');
+      if (sheetEl && !sheetEl.hidden) {
+        sheetEl.hidden = true;
+        sheetEl.classList.remove('is-drawer-open');
+      }
+    }
+    if (keepKey !== 'sim' && (keepKey === 'place-detail' || keepKey === 'drawer' || keepKey === 'search')) {
+      const zone = $('simulator-test-zone');
+      if (zone && !zone.hidden) {
+        zone.hidden = true;
+        if (fakeGpsSim && fakeGpsSim.isOpen) {
+          fakeGpsSim.isOpen = false;
+        }
+      }
+    }
+  }
+
   function openPlaceDetail(p) {
     if (!p) return;
+    closeCompetingMapOverlays('place-detail');
     selectedDetailPlace = p;
     const sheet = $('place-detail-sheet');
     if (!sheet) return;
@@ -5578,6 +5636,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     { key: 'orbitalArrow', icon: '🎯', title: 'Zlatá směrová šipka u Avatara', desc: 'Šipka obíhající postavičku ukazující směr k další zastávce' },
     { key: 'voiceNav', icon: '🗣️', title: 'Česká hlasová navigace', desc: 'Hlasové hlášení odboček a cílů v českém jazyce' },
     { key: 'soundFx', icon: '🔊', title: 'Zvukové efekty a fanfáry', desc: 'Zvuky při potvrzení zastávky, razítku a odškrtnutí cíle' },
+    { key: 'hapticFeedback', icon: '📳', title: 'Haptická odezva (vibrace)', desc: 'Jemné zavibrování zařízení při zaznamenání GPS razítka nebo příchodu k nové zastávce (pokud prohlížeč podporuje vibrace)' },
     { key: 'keepAwake', icon: '📱', title: 'Držet rozsvícený displej', desc: 'Zabrání zhasnutí obrazovky při chůzi v terénu' },
     { key: 'autoSortStops', icon: '🔄', title: 'Chytré řazení zastávek', desc: 'Automatické seřazení cílů podle pěších mostů a stezek' },
   ];
@@ -6903,7 +6962,8 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
           if (!confirmedStopIds.has(sp.id) && !alertedProximityStopIds.has(sp.id)) {
             if (dToStop < 35) {
               alertedProximityStopIds.add(sp.id);
-              triggerPocketProximityAlert('proximity');
+              vibrateStopArrival(appSettings.hapticFeedback !== false);
+              triggerPocketProximityAlert('proximity', appSettings.hapticFeedback !== false);
             }
           }
         }
@@ -6932,10 +6992,15 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
           stateObj.confirmedStopIds = [...confirmedStopIds];
           stateObj.discoveries = progress.discoveries;
 
+          vibrateStopArrival(appSettings.hapticFeedback !== false);
           playStampChord(stateObj.soundEnabled);
-          triggerPocketProximityAlert('stamp');
+          triggerPocketProximityAlert('stamp', appSettings.hapticFeedback !== false);
 
           const confirmedNames = stopEval.newlyConfirmedStops.map(s => s.title).join(', ');
+          animateStampEarned(confirmedNames, {
+            totalStamps: progress.discoveries.length,
+            mapContainer: root.querySelector('.walk-map-wrap'),
+          });
           const nextStop = getPlannedPlaces().find(p => !isStopVisitedInSession(p));
           speakCzechNav(
             nextStop
@@ -6994,9 +7059,15 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
             stateObj.activeExpedition = currentExpedition;
           }
         }
+        vibrateStampRecorded(appSettings.hapticFeedback !== false);
         playStampChord(stateObj.soundEnabled);
+        triggerPocketProximityAlert('stamp', appSettings.hapticFeedback !== false);
         progress = { ...progress, discoveries: stampedProgress.discoveries };
         stateObj = { ...stateObj, discoveries: progress.discoveries, confirmedStopIds: [...confirmedStopIds] };
+        animateStampEarned(revealedTitles.join(', '), {
+          totalStamps: progress.discoveries.length,
+          mapContainer: root.querySelector('.walk-map-wrap'),
+        });
 
         // DÁVKA 4: Idempotentní zápis získaných GPS razítek do pointsLedger a vyhodnocení 8 milníků
         if (!simSandboxActive && !demo) {
@@ -9030,6 +9101,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       if (zone) {
         zone.hidden = !fakeGpsSim.isOpen;
         if (fakeGpsSim.isOpen) {
+          closeCompetingMapOverlays('sim');
           // Zajistíme, aby měl simulátor ihned platnou pěší trasu po chodnících a stezkách (ne vzduchem přes budovy)
           if (!plannedRoute.selectedPlaceIds || plannedRoute.selectedPlaceIds.length === 0) {
             const avail = getAllAvailablePlaces();
@@ -9089,6 +9161,9 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     const sheetEl = $('walk-bottom-sheet');
     if (!sheetEl) return;
     const isOpen = Boolean(open);
+    if (isOpen) {
+      closeCompetingMapOverlays('drawer');
+    }
     sheetEl.hidden = !isOpen;
     sheetEl.classList.toggle('is-drawer-open', isOpen);
     sheetEl.classList.remove('collapsed');
@@ -10249,12 +10324,16 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
   });
 
   function setStylePopoverOpen(open) {
+    const isOpen = Boolean(open);
+    if (isOpen) {
+      closeCompetingMapOverlays('style');
+    }
     const pop = $('map-style-popover');
     const btn = $('btn-top-pill-style');
-    if (pop) pop.hidden = !open;
+    if (pop) pop.hidden = !isOpen;
     if (btn) {
-      btn.setAttribute('aria-expanded', String(Boolean(open)));
-      btn.classList.toggle('is-open', Boolean(open));
+      btn.setAttribute('aria-expanded', String(isOpen));
+      btn.classList.toggle('is-open', isOpen);
     }
   }
 
@@ -10468,14 +10547,21 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
   $('walk-search-toggle')?.addEventListener('click', () => {
     const searchOverlay = $('map-search-overlay');
     if (searchOverlay) {
-      searchOverlay.hidden = !searchOverlay.hidden;
-      $('walk-search-toggle')?.classList.toggle('active', !searchOverlay.hidden);
-      if (!searchOverlay.hidden) {
+      const willOpen = Boolean(searchOverlay.hidden);
+      if (willOpen) {
+        closeCompetingMapOverlays('search');
+      }
+      searchOverlay.hidden = !willOpen;
+      $('walk-search-toggle')?.classList.toggle('active', willOpen);
+      $('walk-map-wrap')?.classList.toggle('has-search-open', willOpen);
+      if (willOpen) {
         const searchInput = $('map-lupa-search-input');
         if (searchInput) {
           searchInput.focus();
           searchInput.select?.();
         }
+      } else if ($('map-lupa-search-results')) {
+        $('map-lupa-search-results').hidden = true;
       }
     }
     playTick(stateObj.soundEnabled);
@@ -11009,6 +11095,10 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
   $('quest-hud-toggle-btn')?.addEventListener('click', () => {
     const panel = $('quest-hud-panel');
     if (!panel) return;
+    const willExpand = panel.classList.contains('collapsed');
+    if (willExpand) {
+      closeCompetingMapOverlays('route-detail');
+    }
     const collapsed = panel.classList.toggle('collapsed');
     $('quest-hud-toggle-btn').setAttribute('aria-expanded', String(!collapsed));
     $('qhud-toggle-icon').textContent = collapsed ? '▼ Detail' : '▲ Sbalit';
@@ -11474,6 +11564,9 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       }
       if (key === 'soundFx') {
         stateObj.soundEnabled = val;
+      }
+      if (key === 'hapticFeedback' && val) {
+        vibrateStopArrival(true);
       }
       if (key === 'showExternalPhotos') {
         renderPlaces();
