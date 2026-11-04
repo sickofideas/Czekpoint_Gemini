@@ -5827,25 +5827,59 @@ dialog:not([open]) {
   min-height: 500px !important;
 }
 
-/* TESTOVACÍ SIMULÁTOR GPS (#simulator-test-zone) */
+/* TESTOVACÍ SIMULÁTOR GPS (#simulator-test-zone) — KARTA POD MAPOU */
 #simulator-test-zone[hidden] {
   display: none !important;
 }
 
 #simulator-test-zone:not([hidden]) {
-  position: fixed !important;
-  bottom: 82px !important;
-  left: 12px !important;
-  z-index: 1300 !important;
-  width: min(350px, calc(100vw - 24px)) !important;
-  max-height: 58dvh !important;
-  overflow-y: auto !important;
-  margin: 0 !important;
-  padding: 10px 12px !important;
-  background: #0f1d15 !important;
-  border: 2px solid #d8e99e !important;
-  border-radius: 16px !important;
-  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.7) !important;
+  position: static !important;
+  display: block !important;
+  width: 100% !important;
+  max-width: 680px !important;
+  margin: 18px auto !important;
+  padding: 16px 20px !important;
+  background: linear-gradient(135deg, #112217 0%, #1a3324 100%) !important;
+  border: 2px solid #d4af37 !important;
+  border-radius: 18px !important;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45) !important;
+  box-sizing: border-box !important;
+  z-index: 10 !important;
+}
+
+.walk-test-strip {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 12px !important;
+  margin: 14px auto 6px !important;
+  padding: 0 12px !important;
+  max-width: 680px !important;
+  box-sizing: border-box !important;
+}
+
+.walk-test-strip .fake-gps-toggle-btn {
+  background: #193527 !important;
+  color: #fef08a !important;
+  border: 1.5px solid #d4af37 !important;
+  border-radius: 999px !important;
+  padding: 8px 18px !important;
+  font-weight: 750 !important;
+  font-size: 0.88rem !important;
+  cursor: pointer !important;
+  transition: all 0.15s ease !important;
+}
+
+.walk-test-strip .fake-gps-toggle-btn:hover {
+  background: #234d38 !important;
+  transform: translateY(-1px) !important;
+}
+
+.walk-test-strip .fake-gps-toggle-btn.active {
+  background: #2a6a4a !important;
+  border-color: #86efac !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 10px rgba(134, 239, 172, 0.4) !important;
 }
 
 /* 4. OPRAVA BLOKUJÍCÍ CLONY DIALOGŮ */
@@ -5949,6 +5983,18 @@ dialog:not([open]) {
   background: #fef08a !important;
   color: #09140e !important;
   border-color: #f59e0b !important;
+}
+
+.top-pill-sim-btn,
+#btn-top-pill-sim {
+  background: #142e20 !important;
+  color: #bbf7d0 !important;
+  border: 1.5px solid #4ade80 !important;
+}
+.top-pill-sim-btn:hover,
+#btn-top-pill-sim:hover {
+  background: #1c412e !important;
+  color: #ffffff !important;
 }
 
 /* PLOVOUCÍ PANEL VÝBĚRU HERNÍHO STYLU PŘÍMO NA MAPĚ (#map-style-popover) */

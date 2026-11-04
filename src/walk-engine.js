@@ -358,7 +358,7 @@ export function validateGpsSample(fix, lastAcceptedFix = null, now = Date.now())
     };
   }
 
-  if (now - fix.timestamp > 15000 || fix.timestamp > now + 5000) {
+  if (!fix.simulated && (now - fix.timestamp > 15000 || fix.timestamp > now + 5000)) {
     return {
       valid: false,
       criterion: 'stale',
@@ -369,7 +369,7 @@ export function validateGpsSample(fix, lastAcceptedFix = null, now = Date.now())
   }
 
   // (d) Přiměřená rychlost posunu vůči času (odfiltruje nereálné GPS teleporty)
-  if (Number.isFinite(fix.speed) && fix.speed > 3.5) {
+  if ((!fix.simulated || fix.overspeedTest) && Number.isFinite(fix.speed) && fix.speed > 3.5) {
     return {
       valid: false,
       criterion: 'speed',
@@ -379,7 +379,7 @@ export function validateGpsSample(fix, lastAcceptedFix = null, now = Date.now())
     };
   }
 
-  if (lastAcceptedFix && Number.isFinite(lastAcceptedFix.lat) && Number.isFinite(lastAcceptedFix.lng) && Number.isFinite(lastAcceptedFix.timestamp)) {
+  if ((!fix.simulated || fix.overspeedTest) && lastAcceptedFix && Number.isFinite(lastAcceptedFix.lat) && Number.isFinite(lastAcceptedFix.lng) && Number.isFinite(lastAcceptedFix.timestamp)) {
     const dtSec = (fix.timestamp - lastAcceptedFix.timestamp) / 1000;
     if (dtSec > 0 && dtSec <= 60) {
       const distM = haversineMeters(lastAcceptedFix, fix) ?? 0;
@@ -443,13 +443,13 @@ export function acceptFix(progress, anchor, fix, now = Date.now()) {
     );
   }
 
-  if (now - fix.timestamp > 15000 || fix.timestamp > now + 5000) {
+  if (!fix.simulated && (now - fix.timestamp > 15000 || fix.timestamp > now + 5000)) {
     return reject('Čekám na čerstvou GPS polohu.', { staleFix: true });
   }
 
   // Session start (first valid sample or after pause/teleport)
   if (!currentLastValid || !currentDistanceAnchor) {
-    if (Number.isFinite(fix.speed) && fix.speed > 3.5) {
+    if ((!fix.simulated || fix.overspeedTest) && Number.isFinite(fix.speed) && fix.speed > 3.5) {
       return reject('Příliš vysoká rychlost. Počkej, až se budeš pohybovat pěšky.', { speedJump: true });
     }
     const id = cellId(fix);
@@ -521,7 +521,7 @@ export function acceptFix(progress, anchor, fix, now = Date.now()) {
 
   // Speed jump check relative to lastValidFix
   const distFromLast = haversineMeters(currentLastValid, fix);
-  if (distFromLast / dtLast > 3.5 || (Number.isFinite(fix.speed) && fix.speed > 3.5)) {
+  if ((!fix.simulated || fix.overspeedTest) && (distFromLast / dtLast > 3.5 || (Number.isFinite(fix.speed) && fix.speed > 3.5))) {
     const resetAnchor = {
       lastValidFix: fix,
       distanceAnchor: fix,

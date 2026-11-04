@@ -1476,6 +1476,9 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
             <button type="button" class="top-pill-style-btn" id="btn-top-pill-style" aria-expanded="false" aria-controls="map-style-popover" title="Rychlý výběr herního stylu (Objevování / Pergamen / Turistická mapa)">
               ${initialGameMode === 'explorer' ? '🧭 Herní styl ▾' : initialGameMode === 'casual' ? '🗺️ Herní styl ▾' : '📜 Herní styl ▾'}
             </button>
+            <button type="button" class="top-pill-style-btn top-pill-sim-btn" id="btn-top-pill-sim" title="Otevřít / zavřít testovací simulátor GPS">
+              🧪 Test GPS
+            </button>
           </div>
         </div>
 
@@ -6858,7 +6861,8 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       lastSampledFix = { lat: fix.lat, lng: fix.lng, ts: now };
     }
 
-    const result = acceptFix(progress, anchor, fix, now);
+    const effectiveFixTime = fix?.simulated ? (fix.timestamp || now) : now;
+    const result = acceptFix(progress, anchor, fix, effectiveFixTime);
     anchor = result.anchor;
 
     telemetry = updateTelemetryFromFix(telemetry, fix, result, now);
@@ -10318,6 +10322,11 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       renderAppSettingsModalUi();
       playTick(stateObj.soundEnabled);
     }
+  });
+
+  $('btn-top-pill-sim')?.addEventListener('click', (ev) => {
+    ev?.stopPropagation?.();
+    $('walk-fake-gps-toggle')?.click();
   });
 
   document.addEventListener('click', (ev) => {

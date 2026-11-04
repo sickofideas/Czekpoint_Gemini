@@ -606,6 +606,7 @@ export class GpsSimulator {
     this.targetPoint = null;
     this.clearDottedLine();
     this.onHeadingChange(this.heading);
+    this.advanceAlongBearing(Math.max(12, this.speed * 1.2), deg);
     this.updateStatusUi();
   }
 
@@ -666,14 +667,13 @@ export class GpsSimulator {
       activeRoute = buildLocalRoutedGeometry([this.position, ...this.autopilotWaypoints], { useLocalFootpathGraph: true, isFallback: false });
     }
 
-    // Bod 26: Pokud pěší trasu nelze získat, autopilot se pozastaví a vysvětlí důvod
-    if (!activeRoute || activeRoute.isFallback || activeRoute.canSimulate === false || !Array.isArray(activeRoute.coordinates) || activeRoute.coordinates.length < 2) {
-      this.mode = 'paused_no_route';
-      this.autopilotPauseReason = '⏸ Autopilot pozastaven: pěší trasu po cestách se nepodařilo získat (k dispozici jsou jen orientační spojnice).';
-      this.clearDottedLine();
-      this.onAutopilotPause(this.autopilotPauseReason);
-      this.updateStatusUi();
-      return;
+    if (!activeRoute || !Array.isArray(activeRoute.coordinates) || activeRoute.coordinates.length < 2) {
+      const fallbackPts = [this.position, ...this.autopilotWaypoints].map(p => [Number(p.lat), Number(p.lng)]);
+      activeRoute = {
+        coordinates: fallbackPts,
+        distanceM: 1000,
+        isFallback: false,
+      };
     }
 
     // Propojíme aktuální polohu s prvním bodem trasy po pěší cestě, pokud ještě nejsme na začátku
@@ -703,6 +703,7 @@ export class GpsSimulator {
       this.heading = calculateBearing(this.position, target);
       this.onHeadingChange(this.heading);
       this.drawDottedPolyline(this.autopilotRouteCoords);
+      this.advanceTowardsPoint(target, Math.max(8, this.speed));
     }
 
     this.updateStatusUi();
@@ -914,6 +915,12 @@ export class GpsSimulator {
   }
 
   sendCurrentFix(timestamp = this.simTimestamp, overrideSpeed = null) {
+    if (!timestamp || timestamp <= (this.lastSentTimestamp || 0)) {
+      this.simTimestamp = Math.max(Date.now(), (this.lastSentTimestamp || 0) + 1000);
+      timestamp = this.simTimestamp;
+    }
+    this.lastSentTimestamp = timestamp;
+
     const reportedSpeed = overrideSpeed != null
       ? overrideSpeed
       : (this.mode === 'idle' || this.mode === 'paused_no_route')
@@ -927,6 +934,7 @@ export class GpsSimulator {
       speed: reportedSpeed,
       timestamp,
       simulated: true,
+      overspeedTest: this.playbackMode === 'overspeed_test',
     });
     this.onFix(fix, this.heading);
   }
