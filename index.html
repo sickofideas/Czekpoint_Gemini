@@ -2,7 +2,7 @@
 <html lang="cs">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#193e32">
   <meta name="description" content="Vyber si výlet podle skutečné podoby cesty. Czekpoint je osobní atlas procházek, objevování okolí a ověřených GPS razítek.">
   <meta property="og:title" content="Czekpoint — Začni cestu s přehledem">
@@ -12,40 +12,36 @@
   <title>Czekpoint — Začni cestu s přehledem</title>
   <link rel="icon" href="./assets/icon.svg" type="image/svg+xml">
   <link rel="manifest" href="./manifest.webmanifest">
-  <link rel="stylesheet" href="./assets/styles.css?v=3.0.4">
+  <link rel="stylesheet" href="./assets/styles.css?v=4.0.0">
   <link rel="stylesheet" href="./assets/vendor/maplibre-gl/maplibre-gl.css">
-  <link rel="stylesheet" href="./assets/walk.css?v=3.0.4">
+  <link rel="stylesheet" href="./assets/walk.css?v=4.0.0">
   <script defer src="./assets/vendor/maplibre-gl/maplibre-gl.js"></script>
 </head>
 <body>
-  <a class="skip-link" href="#main">Přeskočit na obsah</a>
-  <header class="site-header">
-    <a class="brand" href="#/" aria-label="Czekpoint, úvod"><span class="header-logo-slot"><img src="./assets/icon.svg" class="site-header-logo-icon" width="64" height="64" alt=""></span><span>czekpoint<span class="brand-dot">.</span></span></a>
-    <nav class="main-nav" aria-label="Hlavní navigace">
-      <a href="#/" data-nav="walk">🗺️ Mapa a trasa</a>
-      <a href="#/katalog" data-nav="catalog">📚 Katalog míst</a>
-      <a href="#/pas" data-nav="passport">🎒 Můj pas <span id="passport-count" class="nav-count">0</span></a>
-    </nav>
-    <span class="header-region"><span class="status-dot"></span> Rožmitál a okolí</span>
+  <header class="site-header" id="site-header" hidden>
+    <a class="brand" href="#/" aria-label="Czekpoint, úvod"><span class="header-logo-slot"><img src="./assets/icon.svg" class="site-header-logo-icon" width="40" height="40" alt=""></span><span>czekpoint<span class="brand-dot">.</span></span></a>
+    <span class="header-section-title" id="header-section-title">Objevy</span>
+    <span class="version" style="margin-left:auto;font-size:12px;opacity:.75">v4.0.0</span>
   </header>
   <div id="mode-banner" class="mode-banner" hidden></div>
   <main id="main" class="page-shell" tabindex="-1"><div class="loading-state" role="status"><span class="spinner"></span> Připravujeme výlety…</div></main>
-  <div class="footer-horizon-decor" aria-hidden="true">
-    <svg class="footer-horizon-svg" viewBox="0 0 1200 64" fill="none" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none">
-      <path d="M0,64 L0,48 Q180,28 360,42 T720,36 T1080,44 L1200,38 L1200,64 Z" fill="#1b3d2b" opacity="0.35"/>
-      <path d="M0,64 L0,54 Q240,40 480,50 T960,46 L1200,52 L1200,64 Z" fill="#142e20" opacity="0.6"/>
-      <polygon points="120,44 125,56 115,56" fill="#1b3d2b" opacity="0.5"/>
-      <polygon points="128,42 134,58 122,58" fill="#1b3d2b" opacity="0.5"/>
-      <polygon points="340,36 346,50 334,50" fill="#1b3d2b" opacity="0.55"/>
-      <polygon points="560,32 568,48 552,48" fill="#1b3d2b" opacity="0.55"/>
-      <polygon points="820,38 827,52 813,52" fill="#1b3d2b" opacity="0.5"/>
-      <polygon points="980,40 986,52 974,52" fill="#1b3d2b" opacity="0.5"/>
-      <circle cx="640" cy="30" r="3" fill="#142e20"/>
-      <path d="M638,33 L642,33 L644,45 L636,45 Z" fill="#142e20"/>
-      <line x1="645" y1="34" x2="648" y2="47" stroke="#142e20" stroke-width="1.2"/>
-    </svg>
-  </div>
-  <footer class="site-footer"><a class="brand small" href="#/"><img src="./assets/icon.svg" width="22" height="22" alt=""><span>czekpoint<span class="brand-dot">.</span></span></a><span>Malé výpravy. Lepší přehled.</span><a href="#/o-projektu">O datech a soukromí</a><span class="version">Pilot · v3.0.4</span></footer>
+  <nav class="ios-tab-bar" id="ios-tab-bar" aria-label="Hlavní navigace">
+    <a href="#/" class="ios-tab-item active" data-nav="walk" aria-current="page">
+      <span class="ios-tab-icon" aria-hidden="true">🗺️</span>
+      <span class="ios-tab-label">Mapa</span>
+    </a>
+    <a href="#/katalog" class="ios-tab-item" data-nav="catalog">
+      <span class="ios-tab-icon" aria-hidden="true">🧭</span>
+      <span class="ios-tab-label">Objevy</span>
+    </a>
+    <a href="#/pas" class="ios-tab-item" data-nav="passport">
+      <span class="ios-tab-icon-wrap">
+        <span class="ios-tab-icon" aria-hidden="true">🎒</span>
+        <span id="passport-count" class="nav-count ios-tab-badge">0</span>
+      </span>
+      <span class="ios-tab-label">Můj pas</span>
+    </a>
+  </nav>
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
   <dialog id="report-dialog" class="report-dialog" aria-labelledby="report-title"></dialog>
   <dialog id="confirm-dialog" class="confirm-dialog" aria-labelledby="confirm-title"></dialog>

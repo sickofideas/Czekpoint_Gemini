@@ -854,5 +854,104 @@ dialog:not([open]) {
   }
 }
 
+/* ==========================================================================
+   APPLE CLEAN SLATE v4.0 — NATIVE iOS APP SHELL & BOTTOM TAB BAR
+   ========================================================================== */
+main#main {
+  padding-bottom: calc(74px + env(safe-area-inset-bottom, 0px)) !important;
+}
 
+body.is-walk-view header.site-header {
+  display: none !important;
+}
 
+body.is-walk-view main#main.page-shell {
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  min-height: calc(100dvh - 58px - env(safe-area-inset-bottom, 0px)) !important;
+}
+
+header.site-header.ios-compact-header:not([hidden]) {
+  position: sticky;
+  top: 0;
+  z-index: 4000;
+  padding: calc(8px + env(safe-area-inset-top, 0px)) 16px 8px;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ios-tab-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: calc(58px + env(safe-area-inset-bottom, 0px));
+  padding: 6px 16px calc(6px + env(safe-area-inset-bottom, 0px));
+  background: rgba(15, 29, 21, 0.94);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-top: 1px solid rgba(212, 175, 55, 0.28);
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  align-items: center;
+  z-index: 9000;
+}
+
+.ios-tab-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-height: 46px;
+  color: rgba(248, 245, 236, 0.65);
+  text-decoration: none;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 12px;
+  position: relative;
+  transition: color 0.18s ease, background-color 0.18s ease;
+}
+
+.ios-tab-item[aria-current="page"],
+.ios-tab-item.active {
+  color: #f5b82e;
+}
+
+.ios-tab-icon-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ios-tab-icon {
+  font-size: 1.22rem;
+  line-height: 1;
+}
+
+.ios-tab-label {
+  line-height: 1.1;
+  letter-spacing: 0.01em;
+}
+
+.ios-tab-badge,
+#passport-count.ios-tab-badge {
+  position: absolute;
+  top: -5px;
+  right: -16px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #f5b82e;
+  color: #0f1d15;
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 18px;
+  text-align: center;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+}
