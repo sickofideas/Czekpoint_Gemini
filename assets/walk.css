@@ -7144,3 +7144,56 @@ dialog:not([open]) {
   }
 }
 
+/* 1. Horní kapsle zůstává v toku .map-top-overlays, aby se indikátor načítání a kompas zobrazovaly čistě POD ní */
+.map-top-overlays {
+  position: absolute !important;
+  top: calc(10px + env(safe-area-inset-top, 0px)) !important;
+  left: 10px !important;
+  right: 10px !important;
+  z-index: 1600 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  gap: 8px !important;
+  pointer-events: none !important;
+}
+
+#turn-nav-pill.turn-nav-pill {
+  position: relative !important;
+  top: auto !important;
+  left: auto !important;
+  right: auto !important;
+  width: 100% !important;
+  max-width: 520px !important;
+  margin: 0 auto !important;
+}
+
+/* 2. Varovné pruhy (přesnost GPS / sandbox simulátoru) plovou uvnitř horní části mapy a neposouvají mapu dolů */
+#walk-accuracy-banner:not([hidden]),
+#walk-sandbox-banner:not([hidden]),
+#walk-demo-banner:not([hidden]),
+#walk-radar-banner:not([hidden]) {
+  position: fixed !important;
+  top: calc(66px + env(safe-area-inset-top, 0px)) !important;
+  left: 12px !important;
+  right: 66px !important;
+  max-width: 460px !important;
+  margin: 0 auto !important;
+  z-index: 1580 !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45) !important;
+}
+
+/* 3. Otevřený šuplík míst lícuje přesně s horní hranou iOS Tab Baru bez 14px mezery */
+#walk-bottom-sheet.is-drawer-open:not([hidden]) {
+  margin: 0 !important;
+  bottom: calc(58px + env(safe-area-inset-bottom, 0px)) !important;
+  max-height: calc(78dvh - 58px) !important;
+  z-index: 8950 !important;
+}
+
+/* 4. Pohlednice a cílové okno vždy nad spodním iOS Tab Barem (z-index > 9000) */
+#postcard-modal,
+.session-modal,
+#arrival-goal-modal:not([hidden]) {
+  z-index: 11000 !important;
+}

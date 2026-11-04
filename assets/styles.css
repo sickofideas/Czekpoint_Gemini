@@ -955,3 +955,19 @@ header.site-header.ios-compact-header:not([hidden]) {
   text-align: center;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
 }
+
+body.is-walk-view #mode-banner,
+body.is-walk-view .site-header {
+  display: none !important;
+}
+
+body.is-walk-view {
+  overflow: hidden !important;
+  height: 100dvh !important;
+}
+
+#passport-privacy-modal,
+#postcard-modal,
+.session-modal {
+  z-index: 11000 !important;
+}
