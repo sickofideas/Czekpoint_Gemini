@@ -1,10 +1,10 @@
-export const DEFAULT_3D_PITCH = 32;
-export const DEFAULT_TERRAIN_EXAGGERATION = 1.25;
+export const DEFAULT_3D_PITCH = 52;
+export const DEFAULT_TERRAIN_EXAGGERATION = 1.75;
 
 export const config = {
   appName: 'Czekpoint',
-  version: '4.0.1',
-  appVersion: 'v4.0.1',
+  version: '4.1.0',
+  appVersion: 'v4.1.0',
   regionName: 'Rožmitálsko a Brdy',
   defaultCity: 'Rožmitál pod Třemšínem',
   dataUrl: './data/routes.json',
@@ -210,10 +210,10 @@ export function buildMapLibreStyle(cfg = config, options = {}) {
         visibility: 'visible',
       },
       paint: {
-        'hillshade-exaggeration': 0.45,
-        'hillshade-shadow-color': '#1b3b2b',
-        'hillshade-highlight-color': '#fffef2',
-        'hillshade-accent-color': '#d4af37',
+        'hillshade-exaggeration': 0.65,
+        'hillshade-shadow-color': '#142f24',
+        'hillshade-highlight-color': '#fffef5',
+        'hillshade-accent-color': '#b58938',
       },
     });
   }
@@ -272,16 +272,16 @@ export function buildMapLibreStyle(cfg = config, options = {}) {
       source: 'openfreemap-v',
       'source-layer': 'building',
       type: 'fill-extrusion',
-      minzoom: 13,
+      minzoom: 14,
       maxzoom: 22,
       layout: {
-        visibility: 'none',
+        visibility: (is3dMode && options.show3dBuildings !== false) ? 'visible' : 'none',
       },
       paint: {
-        'fill-extrusion-color': '#d8b48a',
-        'fill-extrusion-height': 0,
-        'fill-extrusion-base': 0,
-        'fill-extrusion-opacity': 0,
+        'fill-extrusion-color': '#d8cfc0',
+        'fill-extrusion-height': ['coalesce', ['get', 'render_height'], ['get', 'height'], 9],
+        'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0],
+        'fill-extrusion-opacity': 0.72,
       },
     });
   }

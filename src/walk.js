@@ -1464,13 +1464,15 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       <!-- Okrajový ukazatel cíle mimo obrazovku -->
       <div id="offscreen-target-indicator" class="offscreen-target-indicator" hidden role="status" aria-live="polite"></div>
 
-      <!-- ZÓNA 2 — PRAVÝ SLOUPEC MAPY (.map-right-toolbar — 4 čistá kulatá tlačítka 46 × 46 px, 1 tlačítko = 1 akce) -->
+      <!-- ZÓNA 2 — PRAVÝ SLOUPEC MAPY (.map-right-toolbar — 🎯, 2D/2.5D, 🔍, ＋/－, ⛶) -->
       <div class="walk-map-toolbar map-right-toolbar" role="toolbar" aria-label="Ovládání mapy">
         <button type="button" class="map-right-btn active" id="btn-recenter-map" aria-pressed="true" title="Moje poloha a sledování směru" aria-label="Moje poloha a sledování směru">🎯</button>
         <button type="button" class="map-right-btn map-3d-toggle-btn active" id="btn-toggle-3d" aria-pressed="true" title="Přepnout 2D a 2.5D pohled" aria-label="Přepnout 2D a 2.5D pohled">
           <span class="btn-3d-label" id="btn-toggle-3d-label">2.5D</span>
         </button>
         <button type="button" class="map-right-btn" id="walk-search-toggle" title="Hledat místo" aria-label="Hledat místo">🔍</button>
+        <button type="button" class="map-right-btn" id="walk-zoom-in" title="Přiblížit mapu" aria-label="Přiblížit mapu">＋</button>
+        <button type="button" class="map-right-btn" id="walk-zoom-out" title="Oddálit mapu" aria-label="Oddálit mapu">－</button>
         <button type="button" class="map-right-btn" id="walk-zen-toggle" aria-pressed="false" title="Celá obrazovka" aria-label="Celá obrazovka">⛶</button>
       </div>
 
@@ -1486,7 +1488,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
           <button type="button" class="button mab-btn mab-start-btn" id="walk-start">
             ▶ Vyrazit
           </button>
-          <button type="button" class="button mab-btn mab-places-drawer-btn" id="btn-open-places-drawer" data-open-places-drawer="1">
+          <button type="button" class="button mab-btn mab-places-drawer-btn" id="btn-open-places-drawer" data-open-places-drawer="places">
             📍 Místa v okolí ▴
           </button>
         </div>
@@ -1501,7 +1503,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
           <button type="button" class="button mab-btn mab-finish-btn" id="walk-finish">
             ⏹ Dokončit
           </button>
-          <button type="button" class="button mab-btn mab-places-drawer-btn" id="btn-open-places-drawer-active" data-open-places-drawer="1">
+          <button type="button" class="button mab-btn mab-places-drawer-btn" id="btn-open-places-drawer-active" data-open-places-drawer="route">
             📍 Trasa ▴
           </button>
         </div>
@@ -1515,21 +1517,64 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     <div id="simulator-test-zone" class="simulator-test-zone" hidden></div>
     <p id="tile-status" class="small-note" role="status" hidden></p>
 
-    <!-- Vysouvací spodní šuplík míst a trasy (#walk-bottom-sheet) -->
-    <section class="bottom-sheet" id="walk-bottom-sheet" hidden aria-label="Plán a zastávky procházky">
+    <!-- Vysouvací spodní šuplík míst a trasy (#walk-bottom-sheet) se 2 přepínacími záložkami -->
+    <section class="bottom-sheet" id="walk-bottom-sheet" data-active-drawer-tab="places" hidden aria-label="Plán a zastávky procházky">
       <div class="bottom-sheet-bar">
-        <div class="sheet-header-summary">
-          <strong>🧭 Zastávky na trase (<span id="basket-count">${plannedRoute.selectedPlaceIds.length}</span>), osobní atlas a místa v okolí</strong>
-          <span class="sheet-header-sub" id="sheet-header-sub">Seřazeno od nejbližšího místa · Potvrzení podle GPS vyžaduje opakované kvalitní vzorky (≤ ${MAX_GPS_ACCURACY_M} m)</span>
+        <div class="drawer-segmented-tabs" role="tablist" aria-label="Zobrazení šuplíku">
+          <button type="button" class="drawer-seg-tab active" role="tab" aria-selected="true" id="btn-drawer-tab-places" data-drawer-tab="places">
+            📍 Místa v okolí (<span id="drawer-tab-places-count">0</span>)
+          </button>
+          <button type="button" class="drawer-seg-tab" role="tab" aria-selected="false" id="btn-drawer-tab-route" data-drawer-tab="route">
+            🥾 Moje trasa a vzpomínky (<span id="drawer-tab-route-count">${plannedRoute.selectedPlaceIds.length + personalMemories.length}</span>)
+          </button>
         </div>
         <div class="sheet-bar-actions">
           <button type="button" class="button small ghost" id="btn-sheet-edit-walk" title="Otevřít sjednocený editor zastávek s potvrzením/zrušením změn">✏️ Upravit zastávky</button>
-          <button type="button" class="button small primary sheet-close-drawer-btn" id="btn-close-places-drawer" aria-label="Zavřít šuplík">✕ Zavřít šuplík</button>
+          <button type="button" class="button small primary sheet-close-drawer-btn" id="btn-close-places-drawer" aria-label="Zavřít šuplík">✕ Zavřít</button>
         </div>
+        <span class="visually-hidden" id="basket-count">${plannedRoute.selectedPlaceIds.length}</span>
       </div>
 
       <div class="sheet-body" id="sheet-body">
-        <div class="mindfulness-prompt-card" id="mindfulness-prompt-card" role="region" aria-label="Volitelná výzva všímavosti">
+        <!-- ZÁLOŽKA 1 (VÝCHOZÍ): MÍSTA V OKOLÍ HNED NA PRVNÍM MÍSTĚ -->
+        <div class="planner-box drawer-places-box" id="drawer-places-box" style="margin-top:0">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:6px">
+            <span class="eyebrow">📍 Zajímavá místa v okolí (seřazeno od nejbližšího)</span>
+            <span id="nearby-places-count-badge" class="poi-total-count-badge"></span>
+          </div>
+          <div id="poi-category-legend" class="poi-category-legend" role="group" aria-label="Rozlišení bodů zájmu podle tvaru a barvy kategorie"></div>
+          <div id="nearby-status" role="status"></div>
+          <p id="nearby-origin" class="small-note"></p>
+          <div id="walk-places"></div>
+        </div>
+
+        <!-- ZÁLOŽKA 2: MOJE TRASA A VZPOMÍNKY -->
+        <div class="top-route-itinerary-wrap" id="top-route-itinerary-wrap" hidden>
+          <div class="top-itinerary-header">
+            <span class="top-itinerary-label" id="top-itinerary-label">🗺️ Plán dnešní cesty a zastávky (kliknutím ukážeš místo na mapě):</span>
+          </div>
+          <div class="top-route-itinerary-strip" id="top-route-itinerary-strip" role="list" aria-label="Body na naplánované trase"></div>
+        </div>
+
+        <div class="planner-box" id="drawer-basket-box" hidden>
+          <div id="planner-basket-list" class="planner-basket-list"></div>
+          <div id="stop-replace-picker" class="stop-replace-picker" hidden></div>
+        </div>
+
+        <div class="route-xray-card" id="route-xray-card" hidden></div>
+
+        <div class="planner-box personal-atlas-box" id="personal-atlas-section" hidden>
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+            <div>
+              <span class="eyebrow">✨ Osobní atlas malých objevů (<span id="personal-memories-count">0</span>)</span>
+              <p class="small-note" style="margin:2px 0 0">Vlastnoruční vzpomínky uživatele (soukromé poznámky v zařízení, nikoliv GPS ověřené památky).</p>
+            </div>
+            <button type="button" class="button small lime" id="btn-sheet-save-memory">✨ Uložit vzpomínku</button>
+          </div>
+          <div id="personal-memories-list" class="personal-memories-list" style="margin-top:8px"></div>
+        </div>
+
+        <div class="mindfulness-prompt-card" id="mindfulness-prompt-card" role="region" aria-label="Volitelná výzva všímavosti" hidden>
           <div class="mindfulness-prompt-head">
             <span class="eyebrow">🍃 Volitelná výzva všímavosti (zůstaň na bezpečné cestě)</span>
             <div class="mindfulness-prompt-actions">
@@ -1544,43 +1589,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
           </div>
         </div>
 
-        <div class="top-route-itinerary-wrap" id="top-route-itinerary-wrap">
-          <div class="top-itinerary-header">
-            <span class="top-itinerary-label" id="top-itinerary-label">🗺️ Plán dnešní cesty a zastávky (kliknutím ukážeš místo na mapě):</span>
-          </div>
-          <div class="top-route-itinerary-strip" id="top-route-itinerary-strip" role="list" aria-label="Body na naplánované trase"></div>
-        </div>
-
-        <div class="planner-box">
-          <div id="planner-basket-list" class="planner-basket-list"></div>
-          <div id="stop-replace-picker" class="stop-replace-picker" hidden></div>
-        </div>
-
-        <div class="route-xray-card" id="route-xray-card"></div>
-
-        <div class="planner-box personal-atlas-box" id="personal-atlas-section">
-          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-            <div>
-              <span class="eyebrow">✨ Osobní atlas malých objevů (<span id="personal-memories-count">0</span>)</span>
-              <p class="small-note" style="margin:2px 0 0">Vlastnoruční vzpomínky uživatele (soukromé poznámky v zařízení, nikoliv GPS ověřené památky).</p>
-            </div>
-            <button type="button" class="button small lime" id="btn-sheet-save-memory">✨ Uložit vzpomínku</button>
-          </div>
-          <div id="personal-memories-list" class="personal-memories-list" style="margin-top:8px"></div>
-        </div>
-
-        <div class="planner-box" style="margin-top:4px">
-          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-            <span class="eyebrow">📍 Zajímavá místa v okolí (seřazeno od nejbližšího)</span>
-            <span id="nearby-places-count-badge" class="poi-total-count-badge"></span>
-          </div>
-          <div id="poi-category-legend" class="poi-category-legend" role="group" aria-label="Rozlišení bodů zájmu podle tvaru a barvy kategorie"></div>
-          <div id="nearby-status" role="status"></div>
-          <p id="nearby-origin" class="small-note"></p>
-          <div id="walk-places"></div>
-        </div>
-
-        <div class="planner-share-row">
+        <div class="planner-share-row" id="drawer-share-row" hidden>
           <button type="button" class="button small" id="btn-share-route-code">📤 Sdílet kód trasy</button>
           <button type="button" class="button small" id="btn-import-route-code">📥 Načíst kód trasy</button>
           <button type="button" class="button small" id="walk-export">💾 Exportovat průzkum (JSON)</button>
@@ -4032,6 +4041,9 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     const plannedPlaces = getPlannedPlaces();
     lastBasketRenderSig = `${confirmedStopIds.size}|${(plannedRoute.selectedPlaceIds || []).join(',')}|${currentElevationProfile ? currentElevationProfile.gainM : 'none'}`;
     if ($('basket-count')) $('basket-count').textContent = String(plannedPlaces.length);
+    if ($('drawer-tab-route-count')) {
+      $('drawer-tab-route-count').textContent = String(plannedPlaces.length + (Array.isArray(personalMemories) ? personalMemories.length : 0));
+    }
 
     const nextUnvisited = plannedPlaces.find(p => !isStopVisited(p));
     const currentPos = lastFix || telemetry.lastKnownPosition || plannedRoute.origin || { lat: 49.6014, lng: 13.8644 };
@@ -4305,6 +4317,9 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     if ($('nearby-places-count-badge')) {
       $('nearby-places-count-badge').textContent = `${sidebarList.length} míst v okolí`;
     }
+    if ($('drawer-tab-places-count')) {
+      $('drawer-tab-places-count').textContent = String(sidebarList.length);
+    }
 
     if (!skipListRebuild && $('walk-places')) {
       const placesSignature = `${activeVisualCat}|${plannedRoute.selectedPlaceIds?.join(',')}|${confirmedStopIds.size}|${sidebarList.slice(0, 40).map(p => `${p.id}:${plannedPlaceIds.has(p.id) ? 1 : 0}:${isStopVisitedInSession(p) ? 1 : 0}:${Math.round(p.distanceM || 0)}`).join(';')}`;
@@ -4396,24 +4411,12 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     // odstupňovanou sadu bodů (decluttering), aby se ikony na malém displeji nepřekrývaly v jeden shluk
     // a na slabých telefonech neběžely desítky zbytečných DOM projekcí.
     const curZoom = (map && typeof map.getZoom === 'function') ? map.getZoom() : 15;
+    $('walk-map-wrap')?.classList.toggle('zoom-compact-labels', curZoom < 14.8);
     const isCompactViewport = typeof window !== 'undefined' && Number(window.innerWidth) > 0 && Number(window.innerWidth) <= 680;
     let displayMapPlaces = mapPlaces;
     {
-      const maxNormalPlaces = isCompactViewport
-        ? (curZoom < 14 ? 8 : curZoom < 16 ? 10 : 14)
-        : (is3dMode || is3DMode)
-        ? (curZoom < 14 ? 12 : 16)
-        : (curZoom < 12 ? 16 : curZoom < 14 ? 22 : 28);
-      // Dostatečný rozestup mezi 2.5D ikonami, aby se nepřekrývaly a šlo na každou pohodlně kliknout
-      const minSepMeters = curZoom >= 17.3
-        ? 28
-        : curZoom >= 16.3
-        ? (isCompactViewport ? 62 : 45)
-        : curZoom >= 15.0
-        ? (isCompactViewport ? 95 : 68)
-        : curZoom >= 14.0
-        ? 150
-        : 260;
+      const maxNormalPlaces = isCompactViewport ? (curZoom < 14 ? 18 : 30) : 40;
+      const minSepMeters = curZoom >= 16.5 ? 8 : curZoom >= 15.0 ? 18 : curZoom >= 14.0 ? 40 : 90;
 
       const mustHave = [];
       const others = [];
@@ -4563,27 +4566,29 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
 
       const glyphHtml = renderCategoryMarkerGlyph(glyphKindKey, visited ? 'visited' : 'default');
       const distShortLabel = formatBigDist(distFromPlayerM);
+      const photoInnerHtml = `<span class="czekpoint-marker-glyph kind-${e(categoryKey)} visual-cat-${e(visualCat.key)}">${glyphHtml}</span>`;
 
       let iconHtml = '';
       if (isMysterySilhouette) {
-        const mysteryPrefix = isRareMystery ? '🔥 Vzácný objev' : '❓ Tajemné místo';
-        const mysteryLabelText = Number.isFinite(distFromPlayerM) ? `${mysteryPrefix} · ${distShortLabel}` : mysteryPrefix;
+        const mysteryPillLabel = Number.isFinite(distFromPlayerM)
+          ? `${visualCat.shortLabel} · ${distShortLabel}`
+          : visualCat.shortLabel;
         iconHtml = `
-          <div class="place-marker-wrap is-mystery-silhouette ${isRareMystery ? 'is-rare-mystery' : ''} ${animClass}">
+          <div class="place-marker-wrap is-mystery-silhouette ${isRareMystery ? 'is-rare-mystery' : ''} ${tierClass} ${animClass}">
             <div class="place-marker-inner">
-              <span class="czekpoint-marker-badge mystery-medallion cat-${e(visualCat.key)} shape-${e(visualCat.shape)} ${tierClass}" data-kind="${e(categoryKey)}" data-visual-cat="${e(visualCat.key)}" data-shape="${e(visualCat.shape)}" title="${e(`${mysteryLabelText} (${visualCat.shortLabel})`)}">
-                <span class="mystery-question-mark" aria-hidden="true">❓</span>
+              <span class="czekpoint-marker-badge mystery-medallion cat-${e(visualCat.key)} shape-${e(visualCat.shape)} ${tierClass}" data-kind="${e(categoryKey)}" data-visual-cat="${e(visualCat.key)}" data-shape="${e(visualCat.shape)}" title="${e(`${visualCat.label} · ${distShortLabel}`)}">
+                ${photoInnerHtml}
+                <span class="mystery-corner-q" aria-hidden="true">?</span>
                 ${orderBadgeHtml}
               </span>
-              <span class="mystery-distance-pill">${e(mysteryLabelText)}</span>
+              <span class="totem-title-pill is-mystery-pill">${e(mysteryPillLabel)}</span>
             </div>
           </div>
         `;
       } else {
-        const photoInnerHtml = `<span class="czekpoint-marker-glyph kind-${e(categoryKey)} visual-cat-${e(visualCat.key)}">${glyphHtml}</span>`;
         const shortTitle = String(p.title || '').length > 22 ? `${String(p.title).slice(0, 20)}…` : String(p.title || '');
         iconHtml = `
-          <div class="place-marker-wrap is-revealed-totem ${animClass}">
+          <div class="place-marker-wrap is-revealed-totem ${tierClass} ${animClass}">
             <div class="place-marker-inner">
               <span class="czekpoint-marker-badge cat-${e(visualCat.key)} shape-${e(visualCat.shape)} ${tierClass} ${animClass} has-bitmap-glyph" data-kind="${e(categoryKey)}" data-visual-cat="${e(visualCat.key)}" data-shape="${e(visualCat.shape)}" title="${e(`${p.title || ''} — ${visualCat.label}`)}">
                 ${photoInnerHtml}
@@ -7047,7 +7052,8 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       }
 
       const active3d = Boolean(is3dMode || is3DMode);
-      const target3DStateKey = `${active3d ? '3d' : '2d'}:diorama`;
+      const showBuildings = appSettings.show3dBuildings !== false;
+      const target3DStateKey = `${active3d ? '3d' : '2d'}:${showBuildings ? 'b1' : 'b0'}`;
       const force3DSync = Boolean(options && options.force3DSync);
 
       if (force3DSync || lastApplied3DModeStateKey !== target3DStateKey) {
@@ -7070,6 +7076,13 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
               maxzoom: 14,
             });
           }
+          if (!map.getSource('openfreemap-v')) {
+            map.addSource('openfreemap-v', {
+              type: 'vector',
+              url: config?.openFreeMapVectorUrl || 'https://tiles.openfreemap.org/planet',
+            });
+          }
+
           if (!map.getLayer('terrain-hillshade')) {
             const hillshadeBefore = map.getLayer('opentopo-raster-layer')
               ? 'opentopo-raster-layer'
@@ -7089,43 +7102,64 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
                   visibility: 'visible',
                 },
                 paint: {
-                  'hillshade-exaggeration': 0.45,
-                  'hillshade-shadow-color': '#1b3b2b',
-                  'hillshade-highlight-color': '#fffef2',
-                  'hillshade-accent-color': '#d4af37',
+                  'hillshade-exaggeration': 0.65,
+                  'hillshade-shadow-color': '#142f24',
+                  'hillshade-highlight-color': '#fffef5',
+                  'hillshade-accent-color': '#b58938',
                 },
               },
               hillshadeBefore
             );
+          } else {
+            try { map.setLayoutProperty('terrain-hillshade', 'visibility', 'visible'); } catch {}
           }
 
-          if (map.getLayer('czekpoint-3d-buildings')) {
-            try { map.setLayoutProperty('czekpoint-3d-buildings', 'visibility', 'none'); } catch {}
-          }
-          if (map.getLayer('czekpoint-3d-forests')) {
-            try { map.setLayoutProperty('czekpoint-3d-forests', 'visibility', 'none'); } catch {}
-          }
-
-          if (appliedTerrain3D !== true) {
+          if (!map.getLayer('czekpoint-3d-buildings')) {
+            const buildingsBefore = map.getLayer('planned-route-casing')
+              ? 'planned-route-casing'
+              : map.getLayer('walked-segments-casing')
+              ? 'walked-segments-casing'
+              : undefined;
+            map.addLayer(
+              {
+                id: 'czekpoint-3d-buildings',
+                source: 'openfreemap-v',
+                'source-layer': 'building',
+                type: 'fill-extrusion',
+                minzoom: 14,
+                maxzoom: 22,
+                layout: {
+                  visibility: showBuildings ? 'visible' : 'none',
+                },
+                paint: {
+                  'fill-extrusion-color': '#d8cfc0',
+                  'fill-extrusion-height': ['coalesce', ['get', 'render_height'], ['get', 'height'], 9],
+                  'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0],
+                  'fill-extrusion-opacity': 0.72,
+                },
+              },
+              buildingsBefore
+            );
+          } else {
             try {
-              map.setTerrain({ source: 'terrain-dem', exaggeration: DEFAULT_TERRAIN_EXAGGERATION });
-              appliedTerrain3D = true;
+              map.setLayoutProperty('czekpoint-3d-buildings', 'visibility', showBuildings ? 'visible' : 'none');
             } catch {}
           }
+
+          try {
+            map.setTerrain({ source: 'terrain-dem', exaggeration: DEFAULT_TERRAIN_EXAGGERATION });
+            appliedTerrain3D = true;
+          } catch {}
         } else {
-          if (appliedTerrain3D || (typeof map.getTerrain === 'function' && map.getTerrain())) {
-            try { map.setTerrain(null); } catch {}
+          try {
+            map.setTerrain(null);
             appliedTerrain3D = false;
+          } catch {}
+          if (map.getLayer('terrain-hillshade')) {
+            try { map.setLayoutProperty('terrain-hillshade', 'visibility', 'none'); } catch {}
           }
-          for (const layerId of ['czekpoint-3d-buildings', 'czekpoint-3d-forests', 'terrain-hillshade']) {
-            if (map.getLayer(layerId)) {
-              try { map.removeLayer(layerId); } catch {}
-            }
-          }
-          for (const sourceId of ['openfreemap-v', 'hillshade-dem', 'terrain-dem']) {
-            if (map.getSource(sourceId)) {
-              try { map.removeSource(sourceId); } catch {}
-            }
+          if (map.getLayer('czekpoint-3d-buildings')) {
+            try { map.setLayoutProperty('czekpoint-3d-buildings', 'visibility', 'none'); } catch {}
           }
         }
         lastApplied3DModeStateKey = target3DStateKey;
@@ -7210,31 +7244,33 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         try {
           map.easeTo({
             pitch: DEFAULT_3D_PITCH,
+            zoom: Math.max(map.getZoom(), 16.2),
             padding,
-            duration: opts.instant ? 0 : 400,
+            duration: opts.instant ? 0 : 550,
           });
         } catch {}
         if (!opts.silent) {
-          status('🏔️ Přepnuto na 2.5D pohled (náklon 32°).');
+          status('🏔️ Přepnuto na 2.5D pohled (náklon 52°).');
         }
         return;
       }
       try {
         ensureCustomMapSourcesAndLayers({ force3DSync: true });
-        if (appliedTerrain3D !== is3dMode) {
+        try {
           map.setTerrain({ source: 'terrain-dem', exaggeration: DEFAULT_TERRAIN_EXAGGERATION });
           appliedTerrain3D = true;
-        }
+        } catch {}
         sync3DBuildingsLayerState();
         update3DUiState();
         drawFog(true);
         map.easeTo({
           pitch: DEFAULT_3D_PITCH,
-          padding,
-          duration: opts.instant ? 0 : 400,
+          zoom: Math.max(map.getZoom(), 16.2),
+          padding: getMapCameraPadding(),
+          duration: opts.instant ? 0 : 550,
         });
         if (!opts.silent) {
-          status('🏔️ Přepnuto na 2.5D terénní pohled (náklon 32°).');
+          status('🏔️ Přepnuto na 2.5D terénní pohled (náklon 52°).');
         }
         verify3DMapState('setMap3DMode');
       } catch {
@@ -7258,8 +7294,9 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       try {
         map.easeTo({
           pitch: 0,
+          bearing: followHeadingMode ? map.getBearing() : 0,
           padding: getMapCameraPadding(),
-          duration: opts.instant ? 0 : 400,
+          duration: opts.instant ? 0 : 450,
         });
       } catch {}
       if (!opts.silent) {
@@ -7578,14 +7615,14 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       const safeMobilePixelRatio = Math.min(rawDpr, 1.5);
       map = new maplibregl.Map({
         container: mapContainer,
-        style: buildMapLibreStyle(config, { showContourLayer, showHikingTrails, is3dMode, show3dBuildings: false }),
+        style: buildMapLibreStyle(config, { showContourLayer, showHikingTrails, is3dMode, show3dBuildings: appSettings.show3dBuildings !== false }),
         center: [center.lng, center.lat],
         zoom: is3dMode ? 17 : 16.5,
         pitch: is3dMode ? DEFAULT_3D_PITCH : 0,
         bearing: 0,
         minZoom: 3,
         maxZoom: 19,
-        maxPitch: 42,
+        maxPitch: 65,
         pixelRatio: safeMobilePixelRatio,
         fadeDuration: 0,
         maxTileCacheSize: 20,
@@ -7595,7 +7632,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       });
       window.__czekpointMap = map;
       hardenMapLibreInternals(map, center);
-      appliedTerrain3D = Boolean(is3dMode);
+      appliedTerrain3D = false;
       update3DUiState();
       enableAllMapInteractions();
       hideWebGLErrorBanner();
@@ -8631,13 +8668,39 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     saveAppState();
   });
 
-  // ZÓNA 3: Otevírání a zavírání vysouvacího spodního šuplíku míst (#walk-bottom-sheet)
-  function setPlacesDrawerOpen(open) {
+  // ZÓNA 3: Otevírání a zavírání vysouvacího spodního šuplíku míst (#walk-bottom-sheet) se 2 záložkami
+  let activeDrawerTab = 'places';
+
+  function setDrawerTab(tabName) {
+    activeDrawerTab = tabName === 'route' ? 'route' : 'places';
+    const sheetEl = $('walk-bottom-sheet');
+    if (sheetEl) {
+      sheetEl.setAttribute('data-active-drawer-tab', activeDrawerTab);
+    }
+    const isPlaces = activeDrawerTab === 'places';
+    root.querySelectorAll('[data-drawer-tab]').forEach(btn => {
+      const isMatch = btn.getAttribute('data-drawer-tab') === activeDrawerTab;
+      btn.classList.toggle('active', isMatch);
+      btn.setAttribute('aria-selected', String(isMatch));
+    });
+    if ($('drawer-places-box')) $('drawer-places-box').hidden = !isPlaces;
+    if ($('top-route-itinerary-wrap')) $('top-route-itinerary-wrap').hidden = isPlaces;
+    if ($('drawer-basket-box')) $('drawer-basket-box').hidden = isPlaces;
+    if ($('route-xray-card')) $('route-xray-card').hidden = isPlaces;
+    if ($('personal-atlas-section')) $('personal-atlas-section').hidden = isPlaces;
+    if ($('drawer-share-row')) $('drawer-share-row').hidden = isPlaces;
+    if ($('mindfulness-prompt-card')) {
+      $('mindfulness-prompt-card').hidden = isPlaces || appSettings.mindfulnessPrompts === false || mindfulnessSkippedSession;
+    }
+  }
+
+  function setPlacesDrawerOpen(open, preferredTab) {
     const sheetEl = $('walk-bottom-sheet');
     if (!sheetEl) return;
     const isOpen = Boolean(open);
     if (isOpen) {
       closeCompetingMapOverlays('drawer');
+      setDrawerTab(preferredTab || activeDrawerTab || 'places');
     }
     sheetEl.hidden = !isOpen;
     sheetEl.classList.toggle('is-drawer-open', isOpen);
@@ -8648,11 +8711,24 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     }
   }
 
+  root.querySelectorAll('[data-drawer-tab]').forEach(tabBtn => {
+    tabBtn.addEventListener('click', () => {
+      const targetTab = tabBtn.getAttribute('data-drawer-tab') || 'places';
+      setDrawerTab(targetTab);
+      playTick(stateObj.soundEnabled);
+    });
+  });
+
   root.querySelectorAll('[data-open-places-drawer]').forEach(btn => {
     btn.addEventListener('click', () => {
       const sheetEl = $('walk-bottom-sheet');
+      const targetTab = btn.getAttribute('data-open-places-drawer') === 'route' ? 'route' : 'places';
       const isCurrentlyOpen = sheetEl && !sheetEl.hidden;
-      setPlacesDrawerOpen(!isCurrentlyOpen);
+      if (isCurrentlyOpen && activeDrawerTab === targetTab) {
+        setPlacesDrawerOpen(false);
+      } else {
+        setPlacesDrawerOpen(true, targetTab);
+      }
       playTick(stateObj.soundEnabled);
     });
   });
@@ -11062,7 +11138,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       cardEl.hidden = true;
       return;
     }
-    cardEl.hidden = false;
+    cardEl.hidden = activeDrawerTab !== 'route';
     const promptItem = MINDFULNESS_PROMPTS[mindfulnessPromptIndex % MINDFULNESS_PROMPTS.length] || MINDFULNESS_PROMPTS[0];
     textEl.textContent = promptItem.text;
   }
@@ -11071,6 +11147,9 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     const countEl = $('personal-memories-count');
     const listEl = $('personal-memories-list');
     if (countEl) countEl.textContent = String(personalMemories.length);
+    if ($('drawer-tab-route-count')) {
+      $('drawer-tab-route-count').textContent = String((plannedRoute.selectedPlaceIds?.length || 0) + personalMemories.length);
+    }
     if (!listEl) return;
 
     listEl.innerHTML = '';
