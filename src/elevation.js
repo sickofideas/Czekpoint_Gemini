@@ -760,6 +760,9 @@ export async function fetchCatalogRouteElevationProfile(route, options = {}) {
 
 /**
  * Vykreslí kompletní panel vizuálního profilu převýšení (grafu) pro detailní zobrazení trasy v katalogu.
+ * @param {any} route
+ * @param {any} [profileInput]
+ * @param {any[]} [allRoutes]
  */
 export function renderCatalogElevationProfileHtml(route, profileInput = null, allRoutes = []) {
   const profile =

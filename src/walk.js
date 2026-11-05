@@ -292,29 +292,34 @@ export function formatBackgroundGpsStatus(lastFixTimestamp = /** @type {any} */ 
  * Vykreslí jemné vektorové SVG pro vnitřek mapové značky podle kategorie místa.
  * Samotná poloha značky na mapě zůstává výhradně v režii Leafletu; animuje se jen tento vnitřní prvek.
  */
+const CATEGORY_MARKER_GLYPH_CACHE = new Map();
+
 export function renderCategoryMarkerGlyph(kind, state = 'default') {
+  const cacheKey = `${kind || 'default'}|${state || 'default'}`;
+  const cachedSvg = CATEGORY_MARKER_GLYPH_CACHE.get(cacheKey);
+  if (cachedSvg) return cachedSvg;
+
+  let svg = '';
   if (state === 'visited') {
-    return `<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" class="marker-glyph-svg"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    svg = `<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" class="marker-glyph-svg"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  } else if (kind === 'water') {
+    svg = `<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" class="marker-glyph-svg"><path class="glyph-wave-1" d="M3 10.5c2.2-1.8 4.5-1.8 6.7 0s4.5 1.8 6.7 0 3.4-1.4 4.6-.4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path class="glyph-wave-2" d="M3 15.5c2.2-1.8 4.5-1.8 6.7 0s4.5 1.8 6.7 0 3.4-1.4 4.6-.4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>`;
+  } else if (kind === 'forest' || kind === 'nature') {
+    svg = `<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" class="marker-glyph-svg"><g class="glyph-tree-crown"><polygon points="12,3 6,11 9.5,11 5.5,17 18.5,17 14.5,11 18,11" fill="currentColor"/></g><rect x="10.8" y="17" width="2.4" height="4" rx="1" fill="currentColor"/></svg>`;
+  } else if (kind === 'view' || kind === 'views') {
+    svg = `<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" class="marker-glyph-svg"><path d="M2.5 18.5L9.5 7.5l4.2 6.2 2.8-4.2 5 9H2.5z" fill="currentColor"/><circle class="glyph-sun-glint" cx="17.5" cy="6" r="2.2" fill="currentColor"/></svg>`;
+  } else if (kind === 'sacral') {
+    svg = `<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" class="marker-glyph-svg"><path d="M12 2v5M9.5 4.5h5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path d="M6 20V11l6-4.5L18 11v9H6zm4.2-5v5h3.6v-5a1.8 1.8 0 0 0-3.6 0z" fill="currentColor"/></svg>`;
+  } else if (kind === 'culture' || kind === 'castles') {
+    svg = `<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" class="marker-glyph-svg"><path d="M4 19V7h3v2h2V7h6v2h2V7h3v12H4zm6-5v5h4v-5a2 2 0 0 0-4 0z" fill="currentColor"/></svg>`;
+  } else if (kind === 'route-start') {
+    svg = `<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" class="marker-glyph-svg"><line x1="6" y1="4" x2="6" y2="20" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path class="glyph-flag-cloth" d="M6 5h11l-2.4 3.8L17 12.5H6V5z" fill="currentColor"/></svg>`;
+  } else {
+    svg = `<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" class="marker-glyph-svg"><circle cx="12" cy="12" r="5.5" fill="currentColor"/></svg>`;
   }
-  if (kind === 'water') {
-    return `<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" class="marker-glyph-svg"><path class="glyph-wave-1" d="M3 10.5c2.2-1.8 4.5-1.8 6.7 0s4.5 1.8 6.7 0 3.4-1.4 4.6-.4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path class="glyph-wave-2" d="M3 15.5c2.2-1.8 4.5-1.8 6.7 0s4.5 1.8 6.7 0 3.4-1.4 4.6-.4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>`;
-  }
-  if (kind === 'forest' || kind === 'nature') {
-    return `<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" class="marker-glyph-svg"><g class="glyph-tree-crown"><polygon points="12,3 6,11 9.5,11 5.5,17 18.5,17 14.5,11 18,11" fill="currentColor"/></g><rect x="10.8" y="17" width="2.4" height="4" rx="1" fill="currentColor"/></svg>`;
-  }
-  if (kind === 'view' || kind === 'views') {
-    return `<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" class="marker-glyph-svg"><path d="M2.5 18.5L9.5 7.5l4.2 6.2 2.8-4.2 5 9H2.5z" fill="currentColor"/><circle class="glyph-sun-glint" cx="17.5" cy="6" r="2.2" fill="currentColor"/></svg>`;
-  }
-  if (kind === 'sacral') {
-    return `<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" class="marker-glyph-svg"><path d="M12 2v5M9.5 4.5h5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path d="M6 20V11l6-4.5L18 11v9H6zm4.2-5v5h3.6v-5a1.8 1.8 0 0 0-3.6 0z" fill="currentColor"/></svg>`;
-  }
-  if (kind === 'culture' || kind === 'castles') {
-    return `<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" class="marker-glyph-svg"><path d="M4 19V7h3v2h2V7h6v2h2V7h3v12H4zm6-5v5h4v-5a2 2 0 0 0-4 0z" fill="currentColor"/></svg>`;
-  }
-  if (kind === 'route-start') {
-    return `<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" class="marker-glyph-svg"><line x1="6" y1="4" x2="6" y2="20" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path class="glyph-flag-cloth" d="M6 5h11l-2.4 3.8L17 12.5H6V5z" fill="currentColor"/></svg>`;
-  }
-  return `<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" class="marker-glyph-svg"><circle cx="12" cy="12" r="5.5" fill="currentColor"/></svg>`;
+
+  CATEGORY_MARKER_GLYPH_CACHE.set(cacheKey, svg);
+  return svg;
 }
 
 /**

@@ -156,6 +156,7 @@ export function buildMapLibreStyle(cfg = config, options = {}) {
         maxzoom: safeDemMaxZoom,
       };
 
+  /** @type {Record<string, any>} */
   const sources = {
     'osm-raster': {
       type: 'raster',
