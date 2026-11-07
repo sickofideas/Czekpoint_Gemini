@@ -301,21 +301,21 @@ export function renderCategoryMarkerGlyph(kind, state = 'default') {
 
   let svg = '';
   if (state === 'visited') {
-    svg = `<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" class="marker-glyph-svg"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    svg = `<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true" class="marker-glyph-svg"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
   } else if (kind === 'water') {
-    svg = `<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" class="marker-glyph-svg"><path class="glyph-wave-1" d="M3 10.5c2.2-1.8 4.5-1.8 6.7 0s4.5 1.8 6.7 0 3.4-1.4 4.6-.4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path class="glyph-wave-2" d="M3 15.5c2.2-1.8 4.5-1.8 6.7 0s4.5 1.8 6.7 0 3.4-1.4 4.6-.4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>`;
+    svg = `<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true" class="marker-glyph-svg"><path class="glyph-wave-1" d="M3 10.5c2.2-1.8 4.5-1.8 6.7 0s4.5 1.8 6.7 0 3.4-1.4 4.6-.4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path class="glyph-wave-2" d="M3 15.5c2.2-1.8 4.5-1.8 6.7 0s4.5 1.8 6.7 0 3.4-1.4 4.6-.4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>`;
   } else if (kind === 'forest' || kind === 'nature') {
-    svg = `<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" class="marker-glyph-svg"><g class="glyph-tree-crown"><polygon points="12,3 6,11 9.5,11 5.5,17 18.5,17 14.5,11 18,11" fill="currentColor"/></g><rect x="10.8" y="17" width="2.4" height="4" rx="1" fill="currentColor"/></svg>`;
+    svg = `<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true" class="marker-glyph-svg"><g class="glyph-tree-crown"><polygon points="12,3 6,11 9.5,11 5.5,17 18.5,17 14.5,11 18,11" fill="currentColor"/></g><rect x="10.8" y="17" width="2.4" height="4" rx="1" fill="currentColor"/></svg>`;
   } else if (kind === 'view' || kind === 'views') {
-    svg = `<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" class="marker-glyph-svg"><path d="M2.5 18.5L9.5 7.5l4.2 6.2 2.8-4.2 5 9H2.5z" fill="currentColor"/><circle class="glyph-sun-glint" cx="17.5" cy="6" r="2.2" fill="currentColor"/></svg>`;
+    svg = `<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true" class="marker-glyph-svg"><path d="M2.5 18.5L9.5 7.5l4.2 6.2 2.8-4.2 5 9H2.5z" fill="currentColor"/><circle class="glyph-sun-glint" cx="17.5" cy="6" r="2.2" fill="currentColor"/></svg>`;
   } else if (kind === 'sacral') {
-    svg = `<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" class="marker-glyph-svg"><path d="M12 2v5M9.5 4.5h5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path d="M6 20V11l6-4.5L18 11v9H6zm4.2-5v5h3.6v-5a1.8 1.8 0 0 0-3.6 0z" fill="currentColor"/></svg>`;
+    svg = `<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true" class="marker-glyph-svg"><path d="M12 2v5M9.5 4.5h5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path d="M6 20V11l6-4.5L18 11v9H6zm4.2-5v5h3.6v-5a1.8 1.8 0 0 0-3.6 0z" fill="currentColor"/></svg>`;
   } else if (kind === 'culture' || kind === 'castles') {
-    svg = `<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" class="marker-glyph-svg"><path d="M4 19V7h3v2h2V7h6v2h2V7h3v12H4zm6-5v5h4v-5a2 2 0 0 0-4 0z" fill="currentColor"/></svg>`;
+    svg = `<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true" class="marker-glyph-svg"><path d="M4 19V7h3v2h2V7h6v2h2V7h3v12H4zm6-5v5h4v-5a2 2 0 0 0-4 0z" fill="currentColor"/></svg>`;
   } else if (kind === 'route-start') {
-    svg = `<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" class="marker-glyph-svg"><line x1="6" y1="4" x2="6" y2="20" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path class="glyph-flag-cloth" d="M6 5h11l-2.4 3.8L17 12.5H6V5z" fill="currentColor"/></svg>`;
+    svg = `<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true" class="marker-glyph-svg"><line x1="6" y1="4" x2="6" y2="20" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path class="glyph-flag-cloth" d="M6 5h11l-2.4 3.8L17 12.5H6V5z" fill="currentColor"/></svg>`;
   } else {
-    svg = `<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" class="marker-glyph-svg"><circle cx="12" cy="12" r="5.5" fill="currentColor"/></svg>`;
+    svg = `<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true" class="marker-glyph-svg"><circle cx="12" cy="12" r="5.5" fill="currentColor"/></svg>`;
   }
 
   CATEGORY_MARKER_GLYPH_CACHE.set(cacheKey, svg);
@@ -1545,7 +1545,10 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         <div class="planner-box drawer-places-box" id="drawer-places-box" style="margin-top:0">
           <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:6px">
             <span class="eyebrow">📍 Zajímavá místa v okolí (seřazeno od nejbližšího)</span>
-            <span id="nearby-places-count-badge" class="poi-total-count-badge"></span>
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <button type="button" class="button small lime" id="btn-drawer-quick-loop" data-drawer-quick-loop="true">✨ Navrhnout okruh (~3 km)</button>
+              <span id="nearby-places-count-badge" class="poi-total-count-badge"></span>
+            </div>
           </div>
           <div id="poi-category-legend" class="poi-category-legend" role="group" aria-label="Rozlišení bodů zájmu podle tvaru a barvy kategorie"></div>
           <div id="nearby-status" role="status"></div>
@@ -1555,8 +1558,9 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
 
         <!-- ZÁLOŽKA 2: MOJE TRASA A VZPOMÍNKY -->
         <div class="top-route-itinerary-wrap" id="top-route-itinerary-wrap" hidden>
-          <div class="top-itinerary-header">
+          <div class="top-itinerary-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
             <span class="top-itinerary-label" id="top-itinerary-label">🗺️ Plán dnešní cesty a zastávky (kliknutím ukážeš místo na mapě):</span>
+            <button type="button" class="button small lime" id="btn-drawer-quick-loop-route" data-drawer-quick-loop="true">✨ Navrhnout okruh (~3 km)</button>
           </div>
           <div class="top-route-itinerary-strip" id="top-route-itinerary-strip" role="list" aria-label="Body na naplánované trase"></div>
         </div>
@@ -4633,6 +4637,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     const playerRefPos = normalized || lastFix || telemetry.lastKnownPosition || getRouteOriginPoint();
     for (const p of displayMapPlaces) {
       const visited = isStopVisitedInSession(p);
+      const isDiscovered = Boolean(visited || hasLifetimeStamp(p) || confirmedStopIds.has(p.id));
       const isRouteStart = p.pointKind === 'route-start';
       const isPlanned = plannedPlaceIds.has(p.id);
       const isNextTarget = nextUnvisitedStop && nextUnvisitedStop.id === p.id;
@@ -4642,6 +4647,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       if (isFirstAppear) appearedPlaceIds.add(p.id);
 
       const distFromPlayerM = playerRefPos ? (haversineMeters(playerRefPos, p) ?? Infinity) : Infinity;
+      const isMysterySilhouette = Boolean(appSettings.gameMode === 'explorer' && !isDiscovered && !isPlanned && !isRouteStart && distFromPlayerM > 35);
 
       const visualCat = resolvePlaceVisualCategory(p);
       const categoryKey = isRouteStart ? 'route-start' : (p.kind || visualCat.kind || 'forest');
@@ -4669,23 +4675,42 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       const distShortLabel = formatBigDist(distFromPlayerM);
       const rawTitle = String(p.title || visualCat.shortLabel || visualCat.label || 'Místo');
       const shortTitle = rawTitle.length > 22 ? `${rawTitle.slice(0, 20)}…` : rawTitle;
-      const pillLabel = Number.isFinite(distFromPlayerM)
-        ? `${shortTitle} · ${distShortLabel}`
-        : shortTitle;
 
-      const iconHtml = `
-        <div class="place-marker-wrap is-revealed-totem ${tierClass} ${animClass}">
-          <div class="place-marker-inner">
-            <span class="czekpoint-marker-badge cat-${e(visualCat.key)} ${tierClass} ${animClass}" data-kind="${e(categoryKey)}" data-visual-cat="${e(visualCat.key)}" title="${e(`${rawTitle} — ${visualCat.label} (${distShortLabel})`)}">
-              <span class="czekpoint-marker-glyph kind-${e(categoryKey)} visual-cat-${e(visualCat.key)}">${glyphHtml}</span>
-              ${orderBadgeHtml}
-            </span>
-            <span class="totem-title-pill">${e(pillLabel)}</span>
+      let iconHtml = '';
+      if (isMysterySilhouette) {
+        const mysteryPillLabel = Number.isFinite(distFromPlayerM)
+          ? `❓ ${visualCat.shortLabel} · ${distShortLabel}`
+          : `❓ ${visualCat.shortLabel}`;
+        iconHtml = `
+          <div class="place-marker-wrap is-mystery-silhouette ${tierClass} ${animClass}">
+            <div class="place-marker-inner">
+              <span class="czekpoint-marker-badge mystery-medallion cat-${e(visualCat.key)} ${tierClass} ${animClass}" data-kind="${e(categoryKey)}" data-visual-cat="${e(visualCat.key)}" title="${e(`❓ ${visualCat.label} · ${distShortLabel}`)}">
+                <span class="czekpoint-marker-glyph kind-${e(categoryKey)} visual-cat-${e(visualCat.key)}">${glyphHtml}</span>
+                <span class="mystery-corner-q" aria-hidden="true">?</span>
+                ${orderBadgeHtml}
+              </span>
+              <span class="totem-title-pill is-mystery-pill">${e(mysteryPillLabel)}</span>
+            </div>
           </div>
-        </div>
-      `;
+        `;
+      } else {
+        const pillLabel = Number.isFinite(distFromPlayerM)
+          ? `${shortTitle} · ${distShortLabel}`
+          : shortTitle;
+        iconHtml = `
+          <div class="place-marker-wrap is-revealed-totem ${tierClass} ${animClass}">
+            <div class="place-marker-inner">
+              <span class="czekpoint-marker-badge cat-${e(visualCat.key)} ${tierClass} ${animClass}" data-kind="${e(categoryKey)}" data-visual-cat="${e(visualCat.key)}" title="${e(`${rawTitle} — ${visualCat.label} (${distShortLabel})`)}">
+                <span class="czekpoint-marker-glyph kind-${e(categoryKey)} visual-cat-${e(visualCat.key)}">${glyphHtml}</span>
+                ${orderBadgeHtml}
+              </span>
+              <span class="totem-title-pill">${e(pillLabel)}</span>
+            </div>
+          </div>
+        `;
+      }
 
-      const stateSig = `${p.lat},${p.lng}|${visualCat.key}|${tierClass}|${animClass}|${stopOrderIdx}|${Math.round((distFromPlayerM || 0) / 10)}`;
+      const stateSig = `${p.lat},${p.lng}|${visualCat.key}|${tierClass}|${animClass}|${stopOrderIdx}|${isMysterySilhouette ? 'mys' : 'rev'}|${Math.round((distFromPlayerM || 0) / 10)}`;
 
       const existing = placeMarkersById.get(p.id);
       if (existing) {
@@ -4696,19 +4721,19 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
           existing.lng = p.lng;
         }
         if (existing.stateSig !== stateSig && existing.element) {
-          existing.element.classList.remove('is-mystery-silhouette');
+          existing.element.classList.toggle('is-mystery-silhouette', isMysterySilhouette);
           existing.element.classList.toggle('just-discovered-flip', Boolean(isJustConfirmed));
-          existing.element.title = `${rawTitle} · ${distShortLabel}`;
+          existing.element.title = isMysterySilhouette ? `❓ ${visualCat.label} · ${distShortLabel}` : `${rawTitle} · ${distShortLabel}`;
           existing.element.innerHTML = iconHtml;
           existing.stateSig = stateSig;
           existing.iconStateKey = stateSig;
         }
       } else {
         const el = document.createElement('div');
-        el.className = `czekpoint-marker-anchor ${isJustConfirmed ? 'just-discovered-flip' : ''}`.trim();
-        el.style.width = '68px';
-        el.style.height = '68px';
-        el.title = `${rawTitle} · ${distShortLabel}`;
+        el.className = `czekpoint-marker-anchor ${isMysterySilhouette ? 'is-mystery-silhouette' : ''} ${isJustConfirmed ? 'just-discovered-flip' : ''}`.trim();
+        el.style.width = '60px';
+        el.style.height = '60px';
+        el.title = isMysterySilhouette ? `❓ ${visualCat.label} · ${distShortLabel}` : `${rawTitle} · ${distShortLabel}`;
         el.innerHTML = iconHtml;
 
         const marker = new maplibregl.Marker({ element: el, anchor: 'bottom' })
@@ -8823,6 +8848,50 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
   $('sheet-toggle-btn')?.addEventListener('click', () => {
     setPlacesDrawerOpen(false);
     playTick(stateObj.soundEnabled);
+  });
+
+  root.querySelectorAll('#btn-drawer-quick-loop, [data-drawer-quick-loop]').forEach(quickLoopBtn => {
+    quickLoopBtn.addEventListener('click', () => {
+      const originPt = getRouteOriginPoint();
+      const allPlaces = getAllAvailablePlaces();
+      let trip = autoSuggestTrip({
+        origin: originPt,
+        targetKm: 3,
+        companionMode: stateObj.companionMode || 'solo',
+        availablePlaces: allPlaces,
+        discoveries: progress.discoveries,
+      });
+      if (!trip.found) {
+        trip = autoSuggestTrip({
+          origin: originPt,
+          targetKm: 5,
+          companionMode: 'solo',
+          availablePlaces: allPlaces,
+          discoveries: [],
+        });
+      }
+      if (!trip.found || !Array.isArray(trip.selectedPlaceIds) || trip.selectedPlaceIds.length === 0) {
+        status(trip.reason || 'V tomto okolí se nepodařilo automaticky sestavit okruh.');
+        return;
+      }
+      plannedRoute.selectedPlaceIds = trip.selectedPlaceIds;
+      plannedRoute.embeddedStops = trip.selectedPlaceIds
+        .map(id => allPlaces.find(p => p.id === id))
+        .filter(Boolean)
+        .map(p => ({
+          id: p.id,
+          title: p.title,
+          lat: p.lat,
+          lng: p.lng,
+          kind: p.kind || 'forest',
+          category: p.category || 'nature',
+        }));
+      plannedRoute.routeType = 'loop';
+      stateObj.explorationMode = 'focus';
+      setPlacesDrawerOpen(false);
+      recalculateRemainingRoute('✨ Navržen pěší okruh v okolí — fialovo-zlatá trasa je vykreslena na mapě!');
+      playStampChord(stateObj.soundEnabled);
+    });
   });
 
   const handleViewportChange = () => {

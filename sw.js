@@ -5,8 +5,8 @@
 // - Poskytuje cache-first strategii s doživotním fallbackem pro dlaždice při výpadku signálu
 // ============================================================
 
-const APP_CACHE_NAME = 'czekpoint-app-shell-v4.1.0';
-const ICON_CACHE_NAME = 'czekpoint-svg-icons-v4.1.0';
+const APP_CACHE_NAME = 'czekpoint-app-shell-v5.0.0';
+const ICON_CACHE_NAME = 'czekpoint-svg-icons-v5.0.0';
 const TILE_CACHE_NAME = 'czekpoint-offline-tiles-v1.3';
 
 // Všechny SVG ikony kategorií, špendlíků a avatarů na mapě pro okamžité Cache-First načtení bez signálu

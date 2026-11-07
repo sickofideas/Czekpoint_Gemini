@@ -166,18 +166,7 @@ function renderCard(route, passport = false, index = 0) {
 }
 
 function renderExplore() {
-  const totalPlaces = state.routes.filter(r => !isActualRouteItem(r)).length;
-  const totalRoutes = state.routes.filter(r => isActualRouteItem(r)).length;
-  main.innerHTML = `<section class="hero" aria-labelledby="hero-title">
-    <div class="hero-copy"><div class="eyebrow">${icon('leaf')} Začni kousek od domova</div>
-      <h1 id="hero-title" tabindex="-1">Ven s dobrým<br><em>přehledem.</em></h1>
-      <p>Katalog obsahuje <strong>${totalPlaces} samostatných míst</strong> (hrady, vyhlídky, muzea, rybníky) a <strong>${totalRoutes} připravené trasy</strong>. Místo si můžeš uložit srdíčkem do oblíbených na později, nebo ho tlačítkem <strong>+ Přidat do výpravy</strong> rovnou zařadit do dnešní procházky.</p>
-      <div class="hero-actions"><a class="button primary" href="#/prochazka">Začít procházku s mapou ${icon('arrow')}</a><a class="button ghost" href="#vylety" data-action="scroll-routes">Prohlédnout katalog míst a tras</a></div>
-      <div class="trust-line"><span>${icon('check')}Bez registrace</span><span>${icon('book')}Osobní atlas bez reklam</span></div>
-    </div>
-    <div class="hero-art">${renderBrandLogoHtml({ id: 'hero-brand-logo' })}</div>
-    </section>
-    <section id="vylety" class="explore-section" aria-labelledby="routes-heading">
+  main.innerHTML = `<section id="vylety" class="explore-section" aria-labelledby="routes-heading">
       <div class="section-heading"><div><h2 id="routes-heading">Katalog míst a tras</h2><p>Rozlišujeme jednotlivá místa (zastávky) a vycházkové trasy (okruhy).</p></div><span class="subtle muted">Rožmitálsko a okolí · ${state.routes.length} položek</span></div>
       <div class="filter-panel"><div class="filter-top"><label class="search-field">${icon('search')}<span class="sr-only">Hledat místo nebo trasu</span><input id="search-input" type="search" placeholder="Hledat místo, památku nebo trasu…" maxlength="100" value="${e(state.filters.search)}"></label>
       <label><span class="sr-only">Typ položky</span><select id="type-filter" class="filter-select"><option value="all">Vše: místa i trasy</option><option value="place">📍 Jen samostatná místa</option><option value="route">🥾 Jen trasy (okruhy)</option></select></label>
@@ -1516,15 +1505,29 @@ document.addEventListener('click', async event => {
         explorationMode: s.explorationMode || 'focus',
       };
       const ids = Array.isArray(planned.selectedPlaceIds) ? [...planned.selectedPlaceIds] : [];
+      const embedded = Array.isArray(planned.embeddedStops) ? [...planned.embeddedStops] : [];
       const inWalk = ids.includes(id);
       if (inWalk) {
         planned.selectedPlaceIds = ids.filter(x => x !== id);
+        planned.embeddedStops = embedded.filter(x => x && x.id !== id);
       } else {
         if (ids.length >= 10) {
           toast('Ve výpravě může být nejvýše 10 zastávek.', true);
           return;
         }
         planned.selectedPlaceIds = [...ids, id];
+        if (route.location && Number.isFinite(Number(route.location.lat)) && Number.isFinite(Number(route.location.lng))) {
+          if (!embedded.some(x => x && x.id === route.id)) {
+            embedded.push({
+              id: route.id,
+              title: route.title,
+              lat: Number(route.location.lat),
+              lng: Number(route.location.lng),
+              kind: route.kind || 'forest',
+            });
+          }
+          planned.embeddedStops = embedded;
+        }
       }
       s.plannedRoute = planned;
       s = saveState(s);
