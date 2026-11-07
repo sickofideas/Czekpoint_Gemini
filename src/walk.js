@@ -4518,11 +4518,10 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     // a na slabých telefonech neběžely desítky zbytečných DOM projekcí.
     const curZoom = (map && typeof map.getZoom === 'function') ? map.getZoom() : 15;
     $('walk-map-wrap')?.classList.toggle('zoom-compact-labels', curZoom < 14.8);
-    const isCompactViewport = typeof window !== 'undefined' && Number(window.innerWidth) > 0 && Number(window.innerWidth) <= 680;
     let displayMapPlaces = mapPlaces;
     {
-      const maxNormalPlaces = isCompactViewport ? (curZoom < 14 ? 18 : 30) : 40;
-      const minSepMeters = curZoom >= 16.5 ? 8 : curZoom >= 15.0 ? 18 : curZoom >= 14.0 ? 40 : 90;
+      const maxNormalPlaces = 45;
+      const minSepMeters = 5;
 
       const mustHave = [];
       const others = [];
@@ -4605,8 +4604,8 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       } else {
         const el = document.createElement('div');
         el.className = 'czekpoint-marker-anchor user-memory-anchor';
-        el.style.width = '52px';
-        el.style.height = '52px';
+        el.style.width = '64px';
+        el.style.height = '64px';
         el.title = `✨ Vlastnoruční vzpomínka: ${m.symbolTitle}`;
         el.innerHTML = iconHtml;
         const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
@@ -4630,12 +4629,10 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       }
     }
 
-    // Aktualizujeme nebo vytvoříme 2.5D totemy míst (anchor: 'bottom') a Tajemné siluety vystupující z mlhy (.is-mystery-silhouette)
+    // Vykreslíme velké přehledné špendlíky míst (anchor: 'bottom') s čitelným názvem a vzdáleností
     const playerRefPos = normalized || lastFix || telemetry.lastKnownPosition || getRouteOriginPoint();
-    const isMysteryGameMode = appSettings.gameMode === 'explorer' || appSettings.gameMode === 'gamified';
     for (const p of displayMapPlaces) {
       const visited = isStopVisitedInSession(p);
-      const isDiscovered = Boolean(visited || (Array.isArray(stateObj.discoveries) && stateObj.discoveries.includes(p.id)) || confirmedStopIds.has(p.id));
       const isRouteStart = p.pointKind === 'route-start';
       const isPlanned = plannedPlaceIds.has(p.id);
       const isNextTarget = nextUnvisitedStop && nextUnvisitedStop.id === p.id;
@@ -4645,8 +4642,6 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       if (isFirstAppear) appearedPlaceIds.add(p.id);
 
       const distFromPlayerM = playerRefPos ? (haversineMeters(playerRefPos, p) ?? Infinity) : Infinity;
-      const isMysterySilhouette = Boolean(!isDiscovered && !isRouteStart && isMysteryGameMode && distFromPlayerM > 35);
-      const isRareMystery = Boolean(p.wikipedia || p.wikidata || p.collectible || p.source === 'catalogue' || p.isRealPhoto);
 
       const visualCat = resolvePlaceVisualCategory(p);
       const categoryKey = isRouteStart ? 'route-start' : (p.kind || visualCat.kind || 'forest');
@@ -4672,41 +4667,25 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
 
       const glyphHtml = renderCategoryMarkerGlyph(glyphKindKey, visited ? 'visited' : 'default');
       const distShortLabel = formatBigDist(distFromPlayerM);
-      const photoInnerHtml = `<span class="czekpoint-marker-glyph kind-${e(categoryKey)} visual-cat-${e(visualCat.key)}">${glyphHtml}</span>`;
+      const rawTitle = String(p.title || visualCat.shortLabel || visualCat.label || 'Místo');
+      const shortTitle = rawTitle.length > 22 ? `${rawTitle.slice(0, 20)}…` : rawTitle;
+      const pillLabel = Number.isFinite(distFromPlayerM)
+        ? `${shortTitle} · ${distShortLabel}`
+        : shortTitle;
 
-      let iconHtml = '';
-      if (isMysterySilhouette) {
-        const mysteryPillLabel = Number.isFinite(distFromPlayerM)
-          ? `${visualCat.shortLabel} · ${distShortLabel}`
-          : visualCat.shortLabel;
-        iconHtml = `
-          <div class="place-marker-wrap is-mystery-silhouette ${isRareMystery ? 'is-rare-mystery' : ''} ${tierClass} ${animClass}">
-            <div class="place-marker-inner">
-              <span class="czekpoint-marker-badge mystery-medallion cat-${e(visualCat.key)} shape-${e(visualCat.shape)} ${tierClass}" data-kind="${e(categoryKey)}" data-visual-cat="${e(visualCat.key)}" data-shape="${e(visualCat.shape)}" title="${e(`${visualCat.label} · ${distShortLabel}`)}">
-                ${photoInnerHtml}
-                <span class="mystery-corner-q" aria-hidden="true">?</span>
-                ${orderBadgeHtml}
-              </span>
-              <span class="totem-title-pill is-mystery-pill">${e(mysteryPillLabel)}</span>
-            </div>
+      const iconHtml = `
+        <div class="place-marker-wrap is-revealed-totem ${tierClass} ${animClass}">
+          <div class="place-marker-inner">
+            <span class="czekpoint-marker-badge cat-${e(visualCat.key)} ${tierClass} ${animClass}" data-kind="${e(categoryKey)}" data-visual-cat="${e(visualCat.key)}" title="${e(`${rawTitle} — ${visualCat.label} (${distShortLabel})`)}">
+              <span class="czekpoint-marker-glyph kind-${e(categoryKey)} visual-cat-${e(visualCat.key)}">${glyphHtml}</span>
+              ${orderBadgeHtml}
+            </span>
+            <span class="totem-title-pill">${e(pillLabel)}</span>
           </div>
-        `;
-      } else {
-        const shortTitle = String(p.title || '').length > 22 ? `${String(p.title).slice(0, 20)}…` : String(p.title || '');
-        iconHtml = `
-          <div class="place-marker-wrap is-revealed-totem ${tierClass} ${animClass}">
-            <div class="place-marker-inner">
-              <span class="czekpoint-marker-badge cat-${e(visualCat.key)} shape-${e(visualCat.shape)} ${tierClass} ${animClass} has-bitmap-glyph" data-kind="${e(categoryKey)}" data-visual-cat="${e(visualCat.key)}" data-shape="${e(visualCat.shape)}" title="${e(`${p.title || ''} — ${visualCat.label}`)}">
-                ${photoInnerHtml}
-                ${orderBadgeHtml}
-              </span>
-              <span class="totem-title-pill">${e(shortTitle)}</span>
-            </div>
-          </div>
-        `;
-      }
+        </div>
+      `;
 
-      const stateSig = `${p.lat},${p.lng}|${visualCat.key}|${visualCat.shape}|${tierClass}|${animClass}|${stopOrderIdx}|${isMysterySilhouette ? `mys:${Math.round((distFromPlayerM || 0) / 10)}` : 'rev'}`;
+      const stateSig = `${p.lat},${p.lng}|${visualCat.key}|${tierClass}|${animClass}|${stopOrderIdx}|${Math.round((distFromPlayerM || 0) / 10)}`;
 
       const existing = placeMarkersById.get(p.id);
       if (existing) {
@@ -4717,18 +4696,19 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
           existing.lng = p.lng;
         }
         if (existing.stateSig !== stateSig && existing.element) {
-          existing.element.classList.toggle('is-mystery-silhouette', isMysterySilhouette);
+          existing.element.classList.remove('is-mystery-silhouette');
           existing.element.classList.toggle('just-discovered-flip', Boolean(isJustConfirmed));
+          existing.element.title = `${rawTitle} · ${distShortLabel}`;
           existing.element.innerHTML = iconHtml;
           existing.stateSig = stateSig;
           existing.iconStateKey = stateSig;
         }
       } else {
         const el = document.createElement('div');
-        el.className = `czekpoint-marker-anchor ${isMysterySilhouette ? 'is-mystery-silhouette' : ''} ${isJustConfirmed ? 'just-discovered-flip' : ''}`.trim();
-        el.style.width = '56px';
-        el.style.height = '64px';
-        el.title = isMysterySilhouette ? 'Tajemné místo v mlze' : (p.title || '');
+        el.className = `czekpoint-marker-anchor ${isJustConfirmed ? 'just-discovered-flip' : ''}`.trim();
+        el.style.width = '68px';
+        el.style.height = '68px';
+        el.title = `${rawTitle} · ${distShortLabel}`;
         el.innerHTML = iconHtml;
 
         const marker = new maplibregl.Marker({ element: el, anchor: 'bottom' })
