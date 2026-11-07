@@ -2524,7 +2524,6 @@ dialog:not([open]) {
   display: flex;
   align-items: center;
   justify-content: center;
-  animation: avatarIdleBreathe 2.8s ease-in-out infinite;
   will-change: transform;
 }
 
@@ -2536,7 +2535,7 @@ dialog:not([open]) {
 }
 
 .player-avatar-marker.is-walking {
-  animation: avatarWalkBob 0.55s ease-in-out infinite alternate;
+  animation: none;
 }
 
 /* Perspektivní eliptický stín a pulzující smaragdově-zlatý prstenec na zemi pod medailonem */
@@ -5353,10 +5352,12 @@ dialog:not([open]) {
 
 .player-avatar-marker.is-walking {
   animation: none !important;
+  transform: none !important;
 }
 
 .player-avatar-marker.is-walking .avatar-medallion-core {
-  animation: avatarWalkBob 0.55s ease-in-out infinite alternate !important;
+  animation: none !important;
+  transform: none !important;
 }
 
 .map-3d-camera-controls {

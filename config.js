@@ -273,7 +273,7 @@ export function buildMapLibreStyle(cfg = config, options = {}) {
       source: 'openfreemap-v',
       'source-layer': 'building',
       type: 'fill-extrusion',
-      minzoom: 14,
+      minzoom: 13,
       maxzoom: 22,
       layout: {
         visibility: (is3dMode && options.show3dBuildings !== false) ? 'visible' : 'none',

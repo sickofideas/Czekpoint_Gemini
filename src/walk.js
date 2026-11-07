@@ -1160,7 +1160,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
   let hikingBlazeMarkers = [];
   let routeOverlayMarkers = [];
   let appSettings = { ...DEFAULT_APP_SETTINGS, ...(stateObj.appSettings || {}) };
-  if (appSettings.show3dBuildings === undefined) {
+  if (!appSettings.show3dBuildingsExplicit) {
     appSettings.show3dBuildings = true;
   }
   let showHikingTrails = appSettings.kctTrails !== false;
@@ -2022,6 +2022,58 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
   let lastMoveendCenterPos = null;
   let lastMoveendZoomVal = null;
 
+  function resolveForwardGtaBearingDeg(refPos = null) {
+    if (Number.isFinite(currentWalkHeadingDeg)) {
+      return ((Number(currentWalkHeadingDeg) % 360) + 360) % 360;
+    }
+    if (fakeGpsSim && fakeGpsSim.isOpen && fakeGpsSim.mode !== 'idle' && Number.isFinite(Number(fakeGpsSim.heading))) {
+      return ((Number(fakeGpsSim.heading) % 360) + 360) % 360;
+    }
+    if (Number.isFinite(lastGpsCourseHeading)) {
+      return ((Number(lastGpsCourseHeading) % 360) + 360) % 360;
+    }
+    const pos = refPos && Number.isFinite(Number(refPos.lat)) && Number.isFinite(Number(refPos.lng))
+      ? { lat: Number(refPos.lat), lng: Number(refPos.lng) }
+      : getAvatarReferencePosition();
+    if (pos && Array.isArray(plannedRouteCoords) && plannedRouteCoords.length >= 2) {
+      let bestIdx = 0;
+      let bestDist = Infinity;
+      for (let i = 0; i < plannedRouteCoords.length; i++) {
+        const pt = plannedRouteCoords[i];
+        const cLat = Array.isArray(pt) ? Number(pt[0]) : Number(pt?.lat);
+        const cLng = Array.isArray(pt) ? Number(pt[1]) : Number(pt?.lng);
+        if (!Number.isFinite(cLat) || !Number.isFinite(cLng)) continue;
+        const d = haversineMeters(pos, { lat: cLat, lng: cLng }) ?? Infinity;
+        if (d < bestDist) {
+          bestDist = d;
+          bestIdx = i;
+        }
+      }
+      const startNode = plannedRouteCoords[bestIdx];
+      const sLat = Array.isArray(startNode) ? Number(startNode[0]) : Number(startNode?.lat);
+      const sLng = Array.isArray(startNode) ? Number(startNode[1]) : Number(startNode?.lng);
+      for (let j = bestIdx + 1; j < plannedRouteCoords.length; j++) {
+        const nextNode = plannedRouteCoords[j];
+        const nLat = Array.isArray(nextNode) ? Number(nextNode[0]) : Number(nextNode?.lat);
+        const nLng = Array.isArray(nextNode) ? Number(nextNode[1]) : Number(nextNode?.lng);
+        if (!Number.isFinite(nLat) || !Number.isFinite(nLng)) continue;
+        const stepDist = haversineMeters({ lat: sLat, lng: sLng }, { lat: nLat, lng: nLng }) ?? 0;
+        if (stepDist >= 8 || j === plannedRouteCoords.length - 1) {
+          if (stepDist >= 1.0) {
+            return calculateBearing({ lat: sLat, lng: sLng }, { lat: nLat, lng: nLng });
+          }
+        }
+      }
+    }
+    if (currentTargetPlace && Number.isFinite(targetBearing)) {
+      return ((Number(targetBearing) % 360) + 360) % 360;
+    }
+    if (Number.isFinite(currentDeviceHeading)) {
+      return ((Number(currentDeviceHeading) % 360) + 360) % 360;
+    }
+    return map && typeof map.getBearing === 'function' ? ((Number(map.getBearing()) || 0) + 360) % 360 : 0;
+  }
+
   function centerMapOnPlayer(pos = lastFix || telemetry.lastKnownPosition, animate = false) {
     if (!follow || isUserTouchingMap) return;
     if (!map || !pos || !Number.isFinite(Number(pos.lat)) || !Number.isFinite(Number(pos.lng))) return;
@@ -2032,8 +2084,12 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     };
     if (is3dMode || is3DMode) {
       opts.pitch = DEFAULT_3D_PITCH;
-      if (Number.isFinite(currentWalkHeadingDeg) && followHeadingMode) {
-        opts.bearing = currentWalkHeadingDeg;
+    }
+    if (followHeadingMode) {
+      const forwardBrg = resolveForwardGtaBearingDeg(pos);
+      if (Number.isFinite(forwardBrg)) {
+        opts.bearing = forwardBrg;
+        camBearing = forwardBrg;
       }
     }
     try {
@@ -2044,6 +2100,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       } else if (typeof map.setCenter === 'function') {
         map.setCenter(opts.center);
       }
+      syncTurnPillCompassBearing();
     } catch {}
   }
 
@@ -2226,8 +2283,11 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     if (!player) return;
     const avatarId = stateObj.profile?.avatarId || 'liska';
     const currentMapBearingDeg = map && typeof map.getBearing === 'function' ? Number(map.getBearing()) || 0 : 0;
+    const desiredWorldBearing = (currentTargetPlace && Number.isFinite(targetBearing))
+      ? targetBearing
+      : resolveForwardGtaBearingDeg();
     const screenRelativeAngleDeg = computeScreenRelativeAngleDeg(
-      Number.isFinite(targetBearing) ? targetBearing : 0,
+      Number.isFinite(desiredWorldBearing) ? desiredWorldBearing : 0,
       currentMapBearingDeg
     );
     const el = typeof player.getElement === 'function' ? player.getElement() : null;
@@ -2242,7 +2302,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
           pointer.style.display = showArrow ? '' : 'none';
           pointer.style.transform = `rotate(${Math.round(screenRelativeAngleDeg)}deg)`;
           pointer.dataset.screenAngle = String(Math.round(screenRelativeAngleDeg));
-          pointer.dataset.targetBearing = String(Math.round(Number.isFinite(targetBearing) ? targetBearing : 0));
+          pointer.dataset.targetBearing = String(Math.round(Number.isFinite(desiredWorldBearing) ? desiredWorldBearing : 0));
         }
         return;
       }
@@ -2256,7 +2316,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       const newPointer = el.querySelector('.avatar-direction-pointer');
       if (newPointer) {
         newPointer.dataset.screenAngle = String(Math.round(screenRelativeAngleDeg));
-        newPointer.dataset.targetBearing = String(Math.round(Number.isFinite(targetBearing) ? targetBearing : 0));
+        newPointer.dataset.targetBearing = String(Math.round(Number.isFinite(desiredWorldBearing) ? desiredWorldBearing : 0));
       }
     }
   }
@@ -2265,22 +2325,21 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
   let camLat = null;
   let camBearing = 0;
   let currentWalkHeadingDeg = null;
-  let last3dCameraSyncPos = null;
-  let last3dCameraSyncAt = 0;
+  let renderedPlayerPos = null;
 
   /**
-   * Lehký a stabilní posun 3D modelu a kamery bez 60 FPS centimetrové smyčky:
-   * - Přichytí pozici k chodníku/stezce (snapPointToPedestrianPath, tolerance ±16 m), aby postavička nikdy nelétala přes 3D budovy.
-   * - Ve 3D režimu přepočítává kameru jen při reálném posunu o >= 5 metrů (nebo po >= 1,5 s), nikdy několikrát za sekundu.
+   * Plynulý klouzavý posun postavičky a GTA-style kamery (60 FPS lineární interpolace):
+   * - Přichytí pozici k chodníku/stezce (snapPointToPedestrianPath, tolerance ±16 m).
+   * - Postavička neposkakuje po skocích, ale plynule jede z aktuální vykreslené pozice do cílového bodu.
+   * - Při zapnutém followHeadingMode („🧭“) otáčí mapu (ve 2D i 2.5D) tak, že směr chůze / budoucí trasy míří vždy nahoru (GTA pohled).
    */
-  function smoothMovePlayerTo(rawTargetLat, rawTargetLng, durationMs = 1100) {
+  function smoothMovePlayerTo(rawTargetLat, rawTargetLng, durationMs = 950) {
     if (!map || !player || !Number.isFinite(rawTargetLat) || !Number.isFinite(rawTargetLng)) return;
     if (playerLerpRafId) {
       cancelAnimationFrame(playerLerpRafId);
       playerLerpRafId = null;
     }
 
-    // Přichycení k pěší trase / chodníku v toleranci 16 m, aby model chodil po stezkách a ne přes budovy
     const snappedPt = snapPointToPedestrianPath(
       { lat: rawTargetLat, lng: rawTargetLng },
       plannedRouteCoords,
@@ -2290,67 +2349,109 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     const targetLng = snappedPt && Number.isFinite(snappedPt.lng) ? snappedPt.lng : rawTargetLng;
 
     setPlayerMarkerVisible(true);
-    updatePlayerAvatarIcon(Boolean(active || demo || simSandboxActive));
 
-    const startLatLng = typeof player.getLatLng === 'function' ? player.getLatLng() : null;
-    const distM = startLatLng ? (haversineMeters({ lat: startLatLng.lat, lng: startLatLng.lng }, { lat: targetLat, lng: targetLng }) ?? 999) : 999;
+    const markerLatLng = typeof player.getLatLng === 'function' ? player.getLatLng() : null;
+    const startLat = renderedPlayerPos && Number.isFinite(renderedPlayerPos.lat)
+      ? renderedPlayerPos.lat
+      : (markerLatLng && Number.isFinite(markerLatLng.lat) ? markerLatLng.lat : targetLat);
+    const startLng = renderedPlayerPos && Number.isFinite(renderedPlayerPos.lng)
+      ? renderedPlayerPos.lng
+      : (markerLatLng && Number.isFinite(markerLatLng.lng) ? markerLatLng.lng : targetLng);
 
-    // Azimut kroku pouze při smysluplném posunu (>= 3 m), aby se kamera ve 3D necukala na centimetrech
-    if (startLatLng && Number.isFinite(startLatLng.lat) && Number.isFinite(startLatLng.lng) && distM >= 3.0) {
-      currentWalkHeadingDeg = calculateBearing({ lat: startLatLng.lat, lng: startLatLng.lng }, { lat: targetLat, lng: targetLng });
+    const distM = haversineMeters({ lat: startLat, lng: startLng }, { lat: targetLat, lng: targetLng }) ?? 0;
+
+    if (distM >= 0.35 && distM <= 300) {
+      currentWalkHeadingDeg = calculateBearing({ lat: startLat, lng: startLng }, { lat: targetLat, lng: targetLng });
     }
 
     visualPlayerPos = { lat: targetLat, lng: targetLng };
-    player.setLatLng([targetLat, targetLng]);
-    accuracyRing?.setLatLng([targetLat, targetLng]);
+    updatePlayerAvatarIcon(Boolean(active || demo || simSandboxActive));
 
-    const nowMs = Date.now();
-    const camStepDistM = last3dCameraSyncPos
-      ? (haversineMeters(last3dCameraSyncPos, { lat: targetLat, lng: targetLng }) ?? 999)
-      : 999;
-    const is3dActive = Boolean(is3dMode || is3DMode);
+    const startBearing = typeof map.getBearing === 'function' ? (Number(map.getBearing()) || 0) : (Number(camBearing) || 0);
+    const targetCamHeading = followHeadingMode
+      ? resolveForwardGtaBearingDeg({ lat: targetLat, lng: targetLng })
+      : startBearing;
+    const bearingDelta = ((targetCamHeading - startBearing + 540) % 360) - 180;
 
-    // Ve 3D aktualizujeme kameru pouze při posunu >= 5 m (nebo prvotním skoku), žádné přepočítávání několikrát za sekundu!
-    if (follow && !isUserTouchingMap && map && (!is3dActive || camStepDistM >= 5.0 || (nowMs - last3dCameraSyncAt) >= 2200)) {
-      last3dCameraSyncPos = { lat: targetLat, lng: targetLng };
-      last3dCameraSyncAt = nowMs;
+    const shouldGlide =
+      durationMs > 0 &&
+      distM >= 0.12 &&
+      distM <= 220 &&
+      typeof requestAnimationFrame === 'function';
 
-      if (typeof map.getBearing === 'function') {
-        camBearing = Number(map.getBearing()) || 0;
-      }
+    if (shouldGlide) {
+      const animDuration = Math.max(180, Math.min(1200, Number(durationMs) || 920));
+      const animStartMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
 
-      const jumpOpts = {
-        center: [targetLng, targetLat],
-        padding: getMapCameraPadding(),
+      const stepFrame = (nowPerf) => {
+        const currentNow = Number.isFinite(nowPerf)
+          ? nowPerf
+          : (typeof performance !== 'undefined' ? performance.now() : Date.now());
+        const elapsed = Math.max(0, currentNow - animStartMs);
+        const t = Math.min(1, elapsed / animDuration);
+
+        const curLat = startLat + (targetLat - startLat) * t;
+        const curLng = startLng + (targetLng - startLng) * t;
+        renderedPlayerPos = { lat: curLat, lng: curLng };
+
+        player.setLatLng([curLat, curLng]);
+        accuracyRing?.setLatLng([curLat, curLng]);
+
+        if (follow && !isUserTouchingMap && map) {
+          const jumpOpts = {
+            center: [curLng, curLat],
+            padding: getMapCameraPadding(),
+          };
+          if (is3dMode || is3DMode) {
+            jumpOpts.pitch = DEFAULT_3D_PITCH;
+          }
+          if (followHeadingMode) {
+            const brgProgress = Math.min(1, t * 1.35);
+            camBearing = (startBearing + bearingDelta * brgProgress + 360) % 360;
+            jumpOpts.bearing = camBearing;
+          }
+          camLng = curLng;
+          camLat = curLat;
+          try {
+            map.jumpTo(jumpOpts);
+          } catch {}
+          updatePlayerAvatarIcon(Boolean(active || demo || simSandboxActive));
+          syncTurnPillCompassBearing();
+        }
+
+        if (t < 1) {
+          playerLerpRafId = requestAnimationFrame(stepFrame);
+        } else {
+          playerLerpRafId = null;
+        }
       };
 
-      // KRITICKÉ: Ve 3D režimu NIKDY automaticky nerotovat azimut kamery (bearing),
-      // pokud uživatel výslovně nezapnul režim „🧭 Sledovat směr“ (followHeadingMode)!
-      // Průběžné otáčení kamery na každém kroku při náklonu 58° způsobovalo cukání a protáčení světa.
-      if (followHeadingMode) {
-        const targetCamHeading = Number.isFinite(currentDeviceHeading)
-          ? currentDeviceHeading
-          : (Number.isFinite(currentWalkHeadingDeg) ? currentWalkHeadingDeg : camBearing);
-        const delta = ((targetCamHeading - camBearing + 540) % 360) - 180;
-        camBearing = (camBearing + delta * 0.35 + 360) % 360;
-        if (Number.isFinite(camBearing)) {
+      playerLerpRafId = requestAnimationFrame(stepFrame);
+    } else {
+      renderedPlayerPos = { lat: targetLat, lng: targetLng };
+      player.setLatLng([targetLat, targetLng]);
+      accuracyRing?.setLatLng([targetLat, targetLng]);
+
+      if (follow && !isUserTouchingMap && map) {
+        const jumpOpts = {
+          center: [targetLng, targetLat],
+          padding: getMapCameraPadding(),
+        };
+        if (is3dMode || is3DMode) {
+          jumpOpts.pitch = DEFAULT_3D_PITCH;
+        }
+        if (followHeadingMode) {
+          camBearing = (startBearing + bearingDelta + 360) % 360;
           jumpOpts.bearing = camBearing;
         }
-      }
-
-      camLng = targetLng;
-      camLat = targetLat;
-
-      if (typeof map.easeTo === 'function' && durationMs > 0 && camStepDistM < 160) {
+        camLng = targetLng;
+        camLat = targetLat;
         try {
-          map.easeTo({ ...jumpOpts, duration: is3dActive ? 550 : 400, easing: t => t, essential: true });
-        } catch {
-          try { map.jumpTo?.(jumpOpts); } catch {}
-        }
-      } else if (typeof map.jumpTo === 'function') {
-        try { map.jumpTo(jumpOpts); } catch {}
+          map.jumpTo(jumpOpts);
+        } catch {}
+        updatePlayerAvatarIcon(Boolean(active || demo || simSandboxActive));
+        syncTurnPillCompassBearing();
       }
-      syncTurnPillCompassBearing();
     }
 
     if (!follow) {
@@ -2358,6 +2459,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     }
     renderTrail();
 
+    const nowMs = Date.now();
     if (distM >= 8.0 || (nowMs - lastFogUpdateAt) >= 900) {
       drawFog();
     }
@@ -3044,30 +3146,30 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     updateHeadingModeBannerUi();
     headingFollowStabilizer.reset();
 
-    // Vycentrujeme mapu na Avatara a ujistíme se, že je viditelný uprostřed obrazovky
-    const activePos = lastFix || telemetry.lastKnownPosition || getRouteOriginPoint();
+    // Vycentrujeme mapu na Avatara a okamžitě natočíme mapu ve směru trasy / chůze (GTA pohled: směr vpřed je nahoře)
+    const activePos = visualPlayerPos || lastFix || telemetry.lastKnownPosition || getRouteOriginPoint();
     if (map && player && activePos && Number.isFinite(activePos.lat) && Number.isFinite(activePos.lng)) {
       if (player.getOpacity() === 0) {
         player.setLatLng([activePos.lat, activePos.lng]);
         setPlayerMarkerVisible(true);
       }
-      centerMapOnPlayer(activePos, false);
+      centerMapOnPlayer(activePos, true);
+      updateDirectionalIndicators();
     }
 
-    // DÁVKA 3 (Bod 3.1): Na iOS vyžádáme oprávnění DeviceOrientationEvent.requestPermission()
     if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
       try {
         const perm = await DeviceOrientationEvent.requestPermission();
         if (perm !== 'granted') {
           compassSensorState = 'denied';
           updateHeadingModeBannerUi();
-          status('⚠️ Přístup ke kompasu byl zamítnut — sledování polohy GPS běží dál bez otáčení podle telefonu.');
+          status('🧭 GTA orientace zapnuta — směr chůze a trasy je vždy nahoře.');
           return;
         }
       } catch {
         compassSensorState = 'denied';
         updateHeadingModeBannerUi();
-        status('⚠️ Kompas telefonu nebyl povolen — sledování polohy GPS běží dál bez otáčení podle telefonu.');
+        status('🧭 GTA orientace zapnuta — směr chůze a trasy je vždy nahoře.');
         return;
       }
     }
@@ -3077,10 +3179,11 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     if (lastAbsoluteCompassAt > 0 && Date.now() - lastAbsoluteCompassAt < 5000) {
       compassSensorState = 'active';
       updateHeadingModeBannerUi();
-      if (currentDeviceHeading != null) {
-        applyHeadingToMapCamera(currentDeviceHeading, 'compass');
+      const forwardBrg = resolveForwardGtaBearingDeg(activePos);
+      if (Number.isFinite(forwardBrg)) {
+        applyHeadingToMapCamera(forwardBrg, 'compass');
       }
-      status('🧭 Sledovat směr zapnuto — mapa se otáčí kolem Avatara podle natočení telefonu.');
+      status('🧭 GTA orientace zapnuta — mapa se otáčí kolem postavičky tak, že směr chůze je vždy nahoře.');
       return;
     }
 
@@ -3091,17 +3194,15 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       compassCheckTimer = null;
       if (disposed || !followHeadingMode) return;
       if (lastAbsoluteCompassAt === 0 || Date.now() - lastAbsoluteCompassAt > 3000) {
-        // Zařízení neposkytuje absolutní kompas — nikdy si nevymýšlíme hodnoty kompasu!
         compassSensorState = 'unavailable';
         updateHeadingModeBannerUi();
-        if (lastGpsCourseHeading != null && follow) {
-          applyHeadingToMapCamera(lastGpsCourseHeading, 'gps_course');
-          status('🧭 Směr podle chůze (GPS) — telefon neposkytuje kompas.');
-        } else {
-          status('🧭 Směr podle chůze (GPS) — telefon neposkytuje kompas. Sledování polohy GPS je aktivní (otáčení mapy se zapne při chůzi ≥ 1,0 m/s).');
+        const forwardBrg = resolveForwardGtaBearingDeg(activePos);
+        if (Number.isFinite(forwardBrg) && follow) {
+          applyHeadingToMapCamera(forwardBrg, 'gps_course');
         }
+        status('🧭 GTA orientace zapnuta — mapa se otáčí kolem postavičky tak, že směr kudy máš jít je vždy nahoře.');
       }
-    }, 650);
+    }, 450);
   }
 
   function getCompanionSpeedKmH() {
@@ -6249,7 +6350,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         accuracyRing.setRadius(cleanFix.accuracy);
       }
     } else if (map && player && accuracyRing) {
-      smoothMovePlayerTo(cleanFix.lat, cleanFix.lng, coords.simulated ? 420 : 1100);
+      smoothMovePlayerTo(cleanFix.lat, cleanFix.lng, coords.simulated ? 920 : 1050);
       accuracyRing.setRadius(cleanFix.accuracy);
     } else {
       visualPlayerPos = cleanFix;
@@ -7131,7 +7232,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
                 source: 'openfreemap-v',
                 'source-layer': 'building',
                 type: 'fill-extrusion',
-                minzoom: 14,
+                minzoom: 13,
                 maxzoom: 22,
                 layout: {
                   visibility: showBuildings ? 'visible' : 'none',
@@ -8229,18 +8330,14 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
           if (perm === 'granted') {
             compassSensorState = 'active';
             bindOrientationListeners();
-            setFollowHeadingMode(true);
           } else {
             compassSensorState = 'denied';
-            followHeadingMode = false;
-            updateHeadingModeBannerUi();
-            status('⚠️ Přístup ke kompasu nebyl povolen.');
           }
+          setFollowHeadingMode(true);
         })
         .catch(() => {
           compassSensorState = 'denied';
-          followHeadingMode = false;
-          updateHeadingModeBannerUi();
+          setFollowHeadingMode(true);
         });
     } else {
       setFollowHeadingMode(willEnableHeading);
@@ -11096,6 +11193,9 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       const key = pillBtn.dataset.pillKey;
       const val = pillBtn.dataset.pillVal === '1';
       appSettings[key] = val;
+      if (key === 'show3dBuildings') {
+        appSettings.show3dBuildingsExplicit = true;
+      }
       stateObj.appSettings = { ...appSettings };
       saveAppState();
       if (key === 'kctTrails') syncHikingTrailsLayerState();

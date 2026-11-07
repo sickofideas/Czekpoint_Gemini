@@ -376,10 +376,16 @@ export function loadState() {
         confirmedStopIds: Array.isArray(data.confirmedStopIds) ? [...new Set(data.confirmedStopIds)] : [],
         savedTrips: Array.isArray(data.savedTrips) ? data.savedTrips.slice(0, 50) : [],
         voiceNavEnabled: typeof data.voiceNavEnabled === 'boolean' ? data.voiceNavEnabled : true,
-        appSettings: {
-          ...DEFAULT_APP_SETTINGS,
-          ...(data.appSettings && typeof data.appSettings === 'object' ? data.appSettings : {}),
-        },
+        appSettings: (() => {
+          const merged = {
+            ...DEFAULT_APP_SETTINGS,
+            ...(data.appSettings && typeof data.appSettings === 'object' ? data.appSettings : {}),
+          };
+          if (!merged.show3dBuildingsExplicit) {
+            merged.show3dBuildings = true;
+          }
+          return merged;
+        })(),
         pointsLedger: (data.pointsLedger && typeof data.pointsLedger === 'object' && !Array.isArray(data.pointsLedger))
           ? data.pointsLedger
           : {},
