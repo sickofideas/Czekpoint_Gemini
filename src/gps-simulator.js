@@ -378,6 +378,25 @@ export class GpsSimulator {
 
   setSharedWalkingRoute(route) {
     this.sharedWalkingRoute = route || null;
+    if (this.mode === 'autopilot' && route && Array.isArray(route.coordinates) && route.coordinates.length >= 2) {
+      const newCoords = route.coordinates.map(c =>
+        Array.isArray(c) ? { lat: Number(c[0]), lng: Number(c[1]) } : { lat: Number(c.lat), lng: Number(c.lng) }
+      ).filter(pt => Number.isFinite(pt.lat) && Number.isFinite(pt.lng));
+      if (newCoords.length >= 2) {
+        let bestIdx = 0;
+        let bestDist = Infinity;
+        for (let i = 0; i < newCoords.length; i++) {
+          const d = haversineMeters(this.position, newCoords[i]) ?? Infinity;
+          if (d < bestDist) {
+            bestDist = d;
+            bestIdx = i;
+          }
+        }
+        this.autopilotRouteCoords = newCoords;
+        this.autopilotCoordIndex = Math.min(newCoords.length - 1, bestIdx + 1);
+        this.drawDottedPolyline(this.autopilotRouteCoords);
+      }
+    }
   }
 
   open() {
@@ -624,7 +643,10 @@ export class GpsSimulator {
   stepOnce(distanceMeters = 15) {
     const bearing = this.currentDirectionDeg != null ? this.currentDirectionDeg : this.heading;
     const rawNext = moveCoordinates(this.position, distanceMeters, bearing);
-    const snapped = snapPointToPedestrianPath(rawNext, this.autopilotRouteCoords, 16);
+    const activeCoords = (this.sharedWalkingRoute?.coordinates?.length >= 2)
+      ? this.sharedWalkingRoute.coordinates
+      : this.autopilotRouteCoords;
+    const snapped = snapPointToPedestrianPath(rawNext, activeCoords, 28);
     this.position = snapped && snapped.snapped ? { lat: snapped.lat, lng: snapped.lng } : rawNext;
     this.heading = bearing;
     this.onHeadingChange(this.heading);
@@ -734,11 +756,14 @@ export class GpsSimulator {
 
     let remaining = totalDistMeters;
     let substeps = 0;
+    const activeCoords = (this.sharedWalkingRoute?.coordinates?.length >= 2)
+      ? this.sharedWalkingRoute.coordinates
+      : this.autopilotRouteCoords;
     while (remaining > 0.05 && substeps < 120) {
       substeps++;
       const stepDist = Math.min(remaining, MAX_SUBSTEP_M);
       const rawNext = moveCoordinates(this.position, stepDist, bearingDeg);
-      const snapped = snapPointToPedestrianPath(rawNext, this.autopilotRouteCoords, 14);
+      const snapped = snapPointToPedestrianPath(rawNext, activeCoords, 28);
       this.position = snapped && snapped.snapped ? { lat: snapped.lat, lng: snapped.lng } : rawNext;
       remaining -= stepDist;
       this.heading = bearingDeg;
@@ -766,12 +791,15 @@ export class GpsSimulator {
     let remaining = totalDistMeters;
     let substeps = 0;
     let arrived = false;
+    const activeCoords = (this.sharedWalkingRoute?.coordinates?.length >= 2)
+      ? this.sharedWalkingRoute.coordinates
+      : this.autopilotRouteCoords;
     while (remaining > 0.05 && substeps < 120) {
       substeps++;
       const distToTarget = haversineMeters(this.position, target) ?? 0;
       const stepDist = Math.min(remaining, distToTarget, MAX_SUBSTEP_M);
       const step = stepTowards(this.position, target, stepDist);
-      const snapped = snapPointToPedestrianPath({ lat: step.lat, lng: step.lng }, this.autopilotRouteCoords, 14);
+      const snapped = snapPointToPedestrianPath({ lat: step.lat, lng: step.lng }, activeCoords, 28);
       this.position = snapped && snapped.snapped ? { lat: snapped.lat, lng: snapped.lng } : { lat: step.lat, lng: step.lng };
       this.heading = step.heading;
       remaining -= stepDist;

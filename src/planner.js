@@ -1995,14 +1995,14 @@ export function snapPointToPedestrianPath(point, routeCoords = null, maxSnapMete
         checkSegment(p1.lat, p1.lng, p2.lat, p2.lng);
       }
     }
-  }
-
-  const nodes = ROZMITAL_PEDESTRIAN_GRAPH.nodes;
-  for (const [u, v] of ROZMITAL_PEDESTRIAN_GRAPH.edges) {
-    const n1 = nodes[u];
-    const n2 = nodes[v];
-    if (n1 && n2) {
-      checkSegment(n1.lat, n1.lng, n2.lat, n2.lng);
+  } else {
+    const nodes = ROZMITAL_PEDESTRIAN_GRAPH.nodes;
+    for (const [u, v] of ROZMITAL_PEDESTRIAN_GRAPH.edges) {
+      const n1 = nodes[u];
+      const n2 = nodes[v];
+      if (n1 && n2) {
+        checkSegment(n1.lat, n1.lng, n2.lat, n2.lng);
+      }
     }
   }
 

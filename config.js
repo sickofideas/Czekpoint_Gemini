@@ -1,10 +1,10 @@
-export const DEFAULT_3D_PITCH = 52;
-export const DEFAULT_TERRAIN_EXAGGERATION = 1.75;
+export const DEFAULT_3D_PITCH = 60;
+export const DEFAULT_TERRAIN_EXAGGERATION = 2.4;
 
 export const config = {
   appName: 'Czekpoint',
-  version: '5.0.0',
-  appVersion: 'v5.0.0',
+  version: '5.1.0',
+  appVersion: 'v5.1.0',
   regionName: 'Rožmitálsko a Brdy',
   defaultCity: 'Rožmitál pod Třemšínem',
   dataUrl: './data/routes.json',
@@ -258,13 +258,13 @@ export function buildMapLibreStyle(cfg = config, options = {}) {
       maxzoom: 22,
       filter: ['==', ['get', 'class'], 'wood'],
       layout: {
-        visibility: 'none',
+        visibility: is3dMode ? 'visible' : 'none',
       },
       paint: {
-        'fill-extrusion-color': '#2d6a4f',
-        'fill-extrusion-height': 0,
+        'fill-extrusion-color': '#1b4332',
+        'fill-extrusion-height': 14,
         'fill-extrusion-base': 0,
-        'fill-extrusion-opacity': 0,
+        'fill-extrusion-opacity': 0.55,
       },
     });
 
@@ -273,16 +273,28 @@ export function buildMapLibreStyle(cfg = config, options = {}) {
       source: 'openfreemap-v',
       'source-layer': 'building',
       type: 'fill-extrusion',
-      minzoom: 13,
+      minzoom: 12,
       maxzoom: 22,
       layout: {
         visibility: (is3dMode && options.show3dBuildings !== false) ? 'visible' : 'none',
       },
       paint: {
-        'fill-extrusion-color': '#d8cfc0',
-        'fill-extrusion-height': ['coalesce', ['get', 'render_height'], ['get', 'height'], 9],
+        'fill-extrusion-color': [
+          'interpolate',
+          ['linear'],
+          ['coalesce', ['get', 'render_height'], ['get', 'height'], 10],
+          0, '#d97706',
+          10, '#b45309',
+          22, '#92400e',
+        ],
+        'fill-extrusion-height': [
+          '*',
+          ['max', 8, ['coalesce', ['get', 'render_height'], ['get', 'height'], 10]],
+          2.2,
+        ],
         'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0],
-        'fill-extrusion-opacity': 0.72,
+        'fill-extrusion-opacity': 0.92,
+        'fill-extrusion-vertical-gradient': true,
       },
     });
   }

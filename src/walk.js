@@ -301,21 +301,21 @@ export function renderCategoryMarkerGlyph(kind, state = 'default') {
 
   let svg = '';
   if (state === 'visited') {
-    svg = `<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true" class="marker-glyph-svg"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    svg = `<svg viewBox="0 0 24 24" width="34" height="34" aria-hidden="true" class="marker-glyph-svg"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
   } else if (kind === 'water') {
-    svg = `<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true" class="marker-glyph-svg"><path class="glyph-wave-1" d="M3 10.5c2.2-1.8 4.5-1.8 6.7 0s4.5 1.8 6.7 0 3.4-1.4 4.6-.4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path class="glyph-wave-2" d="M3 15.5c2.2-1.8 4.5-1.8 6.7 0s4.5 1.8 6.7 0 3.4-1.4 4.6-.4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>`;
+    svg = `<svg viewBox="0 0 24 24" width="34" height="34" aria-hidden="true" class="marker-glyph-svg"><path class="glyph-wave-1" d="M3 10.5c2.2-1.8 4.5-1.8 6.7 0s4.5 1.8 6.7 0 3.4-1.4 4.6-.4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path class="glyph-wave-2" d="M3 15.5c2.2-1.8 4.5-1.8 6.7 0s4.5 1.8 6.7 0 3.4-1.4 4.6-.4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>`;
   } else if (kind === 'forest' || kind === 'nature') {
-    svg = `<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true" class="marker-glyph-svg"><g class="glyph-tree-crown"><polygon points="12,3 6,11 9.5,11 5.5,17 18.5,17 14.5,11 18,11" fill="currentColor"/></g><rect x="10.8" y="17" width="2.4" height="4" rx="1" fill="currentColor"/></svg>`;
+    svg = `<svg viewBox="0 0 24 24" width="34" height="34" aria-hidden="true" class="marker-glyph-svg"><g class="glyph-tree-crown"><polygon points="12,3 6,11 9.5,11 5.5,17 18.5,17 14.5,11 18,11" fill="currentColor"/></g><rect x="10.8" y="17" width="2.4" height="4" rx="1" fill="currentColor"/></svg>`;
   } else if (kind === 'view' || kind === 'views') {
-    svg = `<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true" class="marker-glyph-svg"><path d="M2.5 18.5L9.5 7.5l4.2 6.2 2.8-4.2 5 9H2.5z" fill="currentColor"/><circle class="glyph-sun-glint" cx="17.5" cy="6" r="2.2" fill="currentColor"/></svg>`;
+    svg = `<svg viewBox="0 0 24 24" width="34" height="34" aria-hidden="true" class="marker-glyph-svg"><path d="M2.5 18.5L9.5 7.5l4.2 6.2 2.8-4.2 5 9H2.5z" fill="currentColor"/><circle class="glyph-sun-glint" cx="17.5" cy="6" r="2.2" fill="currentColor"/></svg>`;
   } else if (kind === 'sacral') {
-    svg = `<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true" class="marker-glyph-svg"><path d="M12 2v5M9.5 4.5h5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path d="M6 20V11l6-4.5L18 11v9H6zm4.2-5v5h3.6v-5a1.8 1.8 0 0 0-3.6 0z" fill="currentColor"/></svg>`;
+    svg = `<svg viewBox="0 0 24 24" width="34" height="34" aria-hidden="true" class="marker-glyph-svg"><path d="M12 2v5M9.5 4.5h5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path d="M6 20V11l6-4.5L18 11v9H6zm4.2-5v5h3.6v-5a1.8 1.8 0 0 0-3.6 0z" fill="currentColor"/></svg>`;
   } else if (kind === 'culture' || kind === 'castles') {
-    svg = `<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true" class="marker-glyph-svg"><path d="M4 19V7h3v2h2V7h6v2h2V7h3v12H4zm6-5v5h4v-5a2 2 0 0 0-4 0z" fill="currentColor"/></svg>`;
+    svg = `<svg viewBox="0 0 24 24" width="34" height="34" aria-hidden="true" class="marker-glyph-svg"><path d="M4 19V7h3v2h2V7h6v2h2V7h3v12H4zm6-5v5h4v-5a2 2 0 0 0-4 0z" fill="currentColor"/></svg>`;
   } else if (kind === 'route-start') {
-    svg = `<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true" class="marker-glyph-svg"><line x1="6" y1="4" x2="6" y2="20" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path class="glyph-flag-cloth" d="M6 5h11l-2.4 3.8L17 12.5H6V5z" fill="currentColor"/></svg>`;
+    svg = `<svg viewBox="0 0 24 24" width="34" height="34" aria-hidden="true" class="marker-glyph-svg"><line x1="6" y1="4" x2="6" y2="20" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path class="glyph-flag-cloth" d="M6 5h11l-2.4 3.8L17 12.5H6V5z" fill="currentColor"/></svg>`;
   } else {
-    svg = `<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true" class="marker-glyph-svg"><circle cx="12" cy="12" r="5.5" fill="currentColor"/></svg>`;
+    svg = `<svg viewBox="0 0 24 24" width="34" height="34" aria-hidden="true" class="marker-glyph-svg"><circle cx="12" cy="12" r="5.5" fill="currentColor"/></svg>`;
   }
 
   CATEGORY_MARKER_GLYPH_CACHE.set(cacheKey, svg);
@@ -1957,8 +1957,38 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     return true;
   }
 
+  function syncAllSelectedStopsToEmbeddedStops() {
+    if (!plannedRoute || !Array.isArray(plannedRoute.selectedPlaceIds)) return;
+    if (!Array.isArray(plannedRoute.embeddedStops)) {
+      plannedRoute.embeddedStops = [];
+    }
+    if (plannedRoute.selectedPlaceIds.length === 0) {
+      plannedRoute.embeddedStops = [];
+      return;
+    }
+    const allAvail = getAllAvailablePlaces();
+    for (const id of plannedRoute.selectedPlaceIds) {
+      const found = allAvail.find(item => item && item.id === id);
+      if (found) {
+        ensureStopSavedInEmbeddedStops(found);
+      }
+    }
+  }
+
   function saveAppState() {
-    if (!canPersistRealState()) return true;
+    syncAllSelectedStopsToEmbeddedStops();
+    if (!canPersistRealState()) {
+      // I když je otevřený simulátor, uložíme naplánované cíle trasy (plannedRoute), aby po obnovení stránky nezmizely!
+      if (realSnapshotBeforeSim) {
+        realSnapshotBeforeSim.plannedRoute = JSON.parse(JSON.stringify(plannedRoute));
+      }
+      try {
+        const diskState = loadState();
+        diskState.plannedRoute = JSON.parse(JSON.stringify(plannedRoute));
+        saveState(diskState);
+      } catch {}
+      return true;
+    }
     stateObj.plannedRoute = plannedRoute;
     stateObj.confirmedStopIds = [...confirmedStopIds];
     stateObj.walkSegments = progress.walkSegments;
@@ -2022,6 +2052,9 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
 
   let userZoomLocked = false;
   let lastUserZoomAt = 0;
+  let isUserZooming = false;
+  let pendingTargetZoom = null;
+  let lastZoomBtnClickAt = 0;
   let lastPlacesRenderPlayerPos = null;
   let lastMoveendCenterPos = null;
   let lastMoveendZoomVal = null;
@@ -2079,7 +2112,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
   }
 
   function centerMapOnPlayer(pos = lastFix || telemetry.lastKnownPosition, animate = false) {
-    if (!follow || isUserTouchingMap) return;
+    if (!follow || isUserTouchingMap || isUserZooming || (Date.now() - lastUserZoomAt) < 480) return;
     if (!map || !pos || !Number.isFinite(Number(pos.lat)) || !Number.isFinite(Number(pos.lng))) return;
     const padding = getMapCameraPadding();
     const opts = {
@@ -2401,7 +2434,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         player.setLatLng([curLat, curLng]);
         accuracyRing?.setLatLng([curLat, curLng]);
 
-        if (follow && !isUserTouchingMap && map) {
+        if (follow && !isUserTouchingMap && !isUserZooming && (Date.now() - lastUserZoomAt) >= 480 && map) {
           const jumpOpts = {
             center: [curLng, curLat],
             padding: getMapCameraPadding(),
@@ -2436,7 +2469,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       player.setLatLng([targetLat, targetLng]);
       accuracyRing?.setLatLng([targetLat, targetLng]);
 
-      if (follow && !isUserTouchingMap && map) {
+      if (follow && !isUserTouchingMap && !isUserZooming && (Date.now() - lastUserZoomAt) >= 480 && map) {
         const jumpOpts = {
           center: [targetLng, targetLat],
           padding: getMapCameraPadding(),
@@ -2727,11 +2760,18 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
 
         const interpLat = p1.lat + (p2.lat - p1.lat) * t;
         const interpLng = p1.lng + (p2.lng - p1.lng) * t;
+        let baseFootPt = { lat: interpLat, lng: interpLng };
+        if (Array.isArray(plannedRouteCoords) && plannedRouteCoords.length >= 2) {
+          const snappedFp = snapPointToPedestrianPath(baseFootPt, plannedRouteCoords, 24);
+          if (snappedFp && snappedFp.snapped) {
+            baseFootPt = { lat: snappedFp.lat, lng: snappedFp.lng };
+          }
+        }
         const bearingDeg = calculateBearing(p1, p2);
 
         const isLeft = (stepIndex % 2 === 0);
         const perpAngleDeg = (bearingDeg + (isLeft ? -90 : 90) + 360) % 360;
-        const offsetPt = moveCoordinates({ lat: interpLat, lng: interpLng }, 0.4, perpAngleDeg);
+        const offsetPt = moveCoordinates(baseFootPt, 0.14, perpAngleDeg);
 
         footprints.push({
           lat: offsetPt.lat,
@@ -4042,6 +4082,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
    */
   async function recalculateRemainingRoute(reasonMsg = '') {
     plannedRouteRenderKey = null;
+    syncAllSelectedStopsToEmbeddedStops();
     saveAppState();
     renderPlannerBasketAndXray();
     renderPlaces();
@@ -4731,8 +4772,8 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       } else {
         const el = document.createElement('div');
         el.className = `czekpoint-marker-anchor ${isMysterySilhouette ? 'is-mystery-silhouette' : ''} ${isJustConfirmed ? 'just-discovered-flip' : ''}`.trim();
-        el.style.width = '60px';
-        el.style.height = '60px';
+        el.style.width = '68px';
+        el.style.height = '68px';
         el.title = isMysterySilhouette ? `❓ ${visualCat.label} · ${distShortLabel}` : `${rawTitle} · ${distShortLabel}`;
         el.innerHTML = iconHtml;
 
@@ -5986,6 +6027,20 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       : [];
     stateObj.stickBadges = [badge, ...existingBadges].slice(0, 200);
 
+    // Po dokončení trasy vymažeme naplánované cíle trasy, potvrzené zastávky a vykreslenou čáru trasy
+    confirmedStopIds.clear();
+    nearbyRecordedIds.clear();
+    plannedRoute.selectedPlaceIds = [];
+    plannedRoute.embeddedStops = [];
+    lastRoutedGeometry = null;
+    plannedRouteCoords = null;
+    plannedRouteRenderKey = null;
+    currentElevationProfile = null;
+    currentTargetPlace = null;
+    targetDistanceM = null;
+    targetBearing = null;
+    fakeGpsSim?.setSharedWalkingRoute?.(null);
+
     stateObj = {
       ...stateObj,
       activeExpedition: null,
@@ -5993,7 +6048,20 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       walkSegments: progress.walkSegments,
       revealedFeatures: progress.revealedFeatures,
       personalMemories,
+      plannedRoute,
+      confirmedStopIds: [],
     };
+
+    if (realSnapshotBeforeSim) {
+      realSnapshotBeforeSim.plannedRoute = JSON.parse(JSON.stringify(plannedRoute));
+      realSnapshotBeforeSim.confirmedStopIds = [];
+      try {
+        const diskState = loadState();
+        diskState.plannedRoute = JSON.parse(JSON.stringify(plannedRoute));
+        diskState.confirmedStopIds = [];
+        saveState(diskState);
+      } catch {}
+    }
 
     // DÁVKA 4: Idempotentní zápis procházky do pointsLedger a vyhodnocení 8 milníků
     if (!simSandboxActive && !demo) {
@@ -6020,6 +6088,13 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         return;
       }
     }
+
+    applyPlannedRouteGeoJsonToMap([], false);
+    clearRouteOverlayMarkers();
+    renderPlannerBasketAndXray();
+    renderPlaces();
+    renderQuestHud(lastFix || getRouteOriginPoint());
+    updateTurnNavPill(lastFix || getRouteOriginPoint());
 
     if (gainedM > 0 || gainedS > 0) {
       playStampChord(stateObj.soundEnabled);
@@ -6255,6 +6330,14 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     });
     cleanFix.heading = coordsHeading;
     cleanFix.speed = coordsSpeed;
+    if (Array.isArray(plannedRouteCoords) && plannedRouteCoords.length >= 2) {
+      const snapTolM = cleanFix.simulated ? 55 : 32;
+      const routeSnap = snapPointToPedestrianPath(cleanFix, plannedRouteCoords, snapTolM);
+      if (routeSnap && routeSnap.snapped && Number.isFinite(routeSnap.lat) && Number.isFinite(routeSnap.lng)) {
+        cleanFix.lat = routeSnap.lat;
+        cleanFix.lng = routeSnap.lng;
+      }
+    }
     prevAcceptedFixForCourse = cleanFix;
     lastAcceptedFix = cleanFix;
     lastFix = cleanFix;
@@ -7225,6 +7308,39 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
             try { map.setLayoutProperty('terrain-hillshade', 'visibility', 'visible'); } catch {}
           }
 
+          if (!map.getLayer('czekpoint-3d-forests')) {
+            const forestsBefore = map.getLayer('planned-route-casing')
+              ? 'planned-route-casing'
+              : map.getLayer('walked-segments-casing')
+              ? 'walked-segments-casing'
+              : undefined;
+            try {
+              map.addLayer(
+                {
+                  id: 'czekpoint-3d-forests',
+                  source: 'openfreemap-v',
+                  'source-layer': 'landcover',
+                  type: 'fill-extrusion',
+                  minzoom: 11,
+                  maxzoom: 22,
+                  filter: ['==', ['get', 'class'], 'wood'],
+                  layout: {
+                    visibility: 'visible',
+                  },
+                  paint: {
+                    'fill-extrusion-color': '#1b4332',
+                    'fill-extrusion-height': 14,
+                    'fill-extrusion-base': 0,
+                    'fill-extrusion-opacity': 0.55,
+                  },
+                },
+                forestsBefore
+              );
+            } catch {}
+          } else {
+            try { map.setLayoutProperty('czekpoint-3d-forests', 'visibility', 'visible'); } catch {}
+          }
+
           if (!map.getLayer('czekpoint-3d-buildings')) {
             const buildingsBefore = map.getLayer('planned-route-casing')
               ? 'planned-route-casing'
@@ -7237,16 +7353,28 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
                 source: 'openfreemap-v',
                 'source-layer': 'building',
                 type: 'fill-extrusion',
-                minzoom: 13,
+                minzoom: 12,
                 maxzoom: 22,
                 layout: {
                   visibility: showBuildings ? 'visible' : 'none',
                 },
                 paint: {
-                  'fill-extrusion-color': '#d8cfc0',
-                  'fill-extrusion-height': ['coalesce', ['get', 'render_height'], ['get', 'height'], 9],
+                  'fill-extrusion-color': [
+                    'interpolate',
+                    ['linear'],
+                    ['coalesce', ['get', 'render_height'], ['get', 'height'], 10],
+                    0, '#d97706',
+                    10, '#b45309',
+                    22, '#92400e',
+                  ],
+                  'fill-extrusion-height': [
+                    '*',
+                    ['max', 8, ['coalesce', ['get', 'render_height'], ['get', 'height'], 10]],
+                    2.2,
+                  ],
                   'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0],
-                  'fill-extrusion-opacity': 0.72,
+                  'fill-extrusion-opacity': 0.92,
+                  'fill-extrusion-vertical-gradient': true,
                 },
               },
               buildingsBefore
@@ -7268,6 +7396,9 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
           } catch {}
           if (map.getLayer('terrain-hillshade')) {
             try { map.setLayoutProperty('terrain-hillshade', 'visibility', 'none'); } catch {}
+          }
+          if (map.getLayer('czekpoint-3d-forests')) {
+            try { map.setLayoutProperty('czekpoint-3d-forests', 'visibility', 'none'); } catch {}
           }
           if (map.getLayer('czekpoint-3d-buildings')) {
             try { map.setLayoutProperty('czekpoint-3d-buildings', 'visibility', 'none'); } catch {}
@@ -7329,6 +7460,8 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     if (!map) return;
     try {
       map.dragPan?.enable?.();
+      map.scrollZoom?.enable?.();
+      map.doubleClickZoom?.enable?.();
       map.touchZoomRotate?.enable?.();
       map.dragRotate?.enable?.();
       map.touchPitch?.enable?.();
@@ -7348,24 +7481,8 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     enableAllMapInteractions();
 
     if (next3D) {
-      const padding = getMapCameraPadding();
-      const styleReady = typeof map.isStyleLoaded === 'function' ? map.isStyleLoaded() : true;
-      if (!styleReady) {
-        update3DUiState();
-        try {
-          map.easeTo({
-            pitch: DEFAULT_3D_PITCH,
-            zoom: Math.max(map.getZoom(), 16.2),
-            padding,
-            duration: opts.instant ? 0 : 550,
-          });
-        } catch {}
-        if (!opts.silent) {
-          status('🏔️ Přepnuto na 2.5D pohled (náklon 52°).');
-        }
-        return;
-      }
       try {
+        lastApplied3DModeStateKey = null;
         ensureCustomMapSourcesAndLayers({ force3DSync: true });
         try {
           map.setTerrain({ source: 'terrain-dem', exaggeration: DEFAULT_TERRAIN_EXAGGERATION });
@@ -7374,14 +7491,34 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         sync3DBuildingsLayerState();
         update3DUiState();
         drawFog(true);
-        map.easeTo({
-          pitch: DEFAULT_3D_PITCH,
-          zoom: Math.max(map.getZoom(), 16.2),
-          padding: getMapCameraPadding(),
-          duration: opts.instant ? 0 : 550,
-        });
+        const curZ = typeof map.getZoom === 'function' ? map.getZoom() : 16;
+        const targetZ = curZ < 15.2 ? 16.0 : curZ;
+        if (opts.instant && typeof map.jumpTo === 'function') {
+          map.jumpTo({
+            pitch: DEFAULT_3D_PITCH,
+            zoom: targetZ,
+            padding: getMapCameraPadding(),
+          });
+        } else if (typeof map.easeTo === 'function') {
+          map.easeTo({
+            pitch: DEFAULT_3D_PITCH,
+            zoom: targetZ,
+            padding: getMapCameraPadding(),
+            duration: opts.instant ? 0 : 500,
+          });
+        }
+        if (typeof map.once === 'function') {
+          map.once('idle', () => {
+            if (!is3DMode || !map) return;
+            try {
+              lastApplied3DModeStateKey = null;
+              ensureCustomMapSourcesAndLayers({ force3DSync: true });
+              map.setTerrain({ source: 'terrain-dem', exaggeration: DEFAULT_TERRAIN_EXAGGERATION });
+            } catch {}
+          });
+        }
         if (!opts.silent) {
-          status('🏔️ Přepnuto na 2.5D terénní pohled (náklon 52°).');
+          status('🏔️ Přepnuto na 2.5D terénní pohled s 3D budovami a reliéfem (náklon 60°).');
         }
         verify3DMapState('setMap3DMode');
       } catch {
@@ -7493,7 +7630,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
 
     const hardenTerrainInstance = (terrainObj) => {
       if (!terrainObj || terrainObj.__czekpointHardened) return;
-      terrainObj.__lastSmoothElev = null;
+      terrainObj.__lastSmoothElev = 520;
       if (typeof terrainObj.getElevationForLngLatZoom === 'function') {
         const origGetElev = terrainObj.getElevationForLngLatZoom.bind(terrainObj);
         terrainObj.getElevationForLngLatZoom = function (lngLat, zoom) {
@@ -7506,21 +7643,29 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
             : Math.min(maxSourceZoom, Math.floor(Number(mapInstance.transform?.tileZoom) || 14));
           const safeZoom = Math.max(minSourceZoom, Math.min(maxSourceZoom, rawZoom));
           try {
-            const rawElev = Number(origGetElev(safeLl, safeZoom));
-            if (Number.isFinite(rawElev)) {
+            let rawElev = Number(origGetElev(safeLl, safeZoom));
+            // V MapLibre GL vrací getElevationForLngLatZoom hodnotu 0, pokud DEM dlaždice pro daný zoom ještě není v cache.
+            // Skok z ~520 m na 0 m způsoboval prudké odskakování zoomu při přibližování a oddalování!
+            if ((!Number.isFinite(rawElev) || rawElev === 0) && safeZoom !== maxSourceZoom) {
+              const fallbackElev = Number(origGetElev(safeLl, maxSourceZoom));
+              if (Number.isFinite(fallbackElev) && fallbackElev !== 0) {
+                rawElev = fallbackElev;
+              }
+            }
+            if (Number.isFinite(rawElev) && rawElev !== 0) {
               this.__lastSmoothElev = rawElev;
               return rawElev;
             }
-            return Number.isFinite(this.__lastSmoothElev) ? this.__lastSmoothElev : 0;
+            return Number.isFinite(this.__lastSmoothElev) ? this.__lastSmoothElev : 520;
           } catch {
-            return Number.isFinite(this.__lastSmoothElev) ? this.__lastSmoothElev : 0;
+            return Number.isFinite(this.__lastSmoothElev) ? this.__lastSmoothElev : 520;
           }
         };
       }
       terrainObj.__czekpointHardened = true;
     };
 
-    // 2. Ochrana transformace proti nulovým rozměrům a NaN souřadnicím v pointCoordinate / pointLocation / coordinateLocation / recalculateZoom
+    // 2. Ochrana transformace proti nulovým rozměrům a přepisování zoomu při načítání DEM dlaždic
     const tr = mapInstance.transform;
     if (tr && !tr.__czekpointHardened) {
       if (!Number.isFinite(tr.width) || tr.width <= 0 || !Number.isFinite(tr.height) || tr.height <= 0) {
@@ -7536,20 +7681,12 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         const origPointCoordinate = tr.pointCoordinate.bind(tr);
         tr.pointCoordinate = function (p, terrain) {
           hardenTerrainInstance(terrain);
-          const safeW = Number.isFinite(tr.width) && tr.width > 0 ? tr.width : 390;
-          const safeH = Number.isFinite(tr.height) && tr.height > 0 ? tr.height : 600;
-          if (!Number.isFinite(tr.width) || tr.width <= 0 || !Number.isFinite(tr.height) || tr.height <= 0) {
-            try { tr.resize?.(safeW, safeH); } catch {}
-          }
-          const px = Number.isFinite(Number(p?.x)) ? Number(p.x) : safeW / 2;
-          const py = Number.isFinite(Number(p?.y)) ? Number(p.y) : safeH / 2;
-          const safePoint = (p && Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y)))
-            ? p
-            : { x: px, y: py };
           try {
-            const coord = origPointCoordinate(safePoint, terrain);
-            if (coord && Number.isFinite(Number(coord.x)) && Number.isFinite(Number(coord.y))) {
-              return coord;
+            if (p && Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y))) {
+              const coord = origPointCoordinate(p, terrain);
+              if (coord && Number.isFinite(Number(coord.x)) && Number.isFinite(Number(coord.y))) {
+                return coord;
+              }
             }
           } catch {}
           try {
@@ -7569,20 +7706,12 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         const origPointLocation = tr.pointLocation.bind(tr);
         tr.pointLocation = function (p, terrain) {
           hardenTerrainInstance(terrain);
-          const safeW = Number.isFinite(tr.width) && tr.width > 0 ? tr.width : 390;
-          const safeH = Number.isFinite(tr.height) && tr.height > 0 ? tr.height : 600;
-          if (!Number.isFinite(tr.width) || tr.width <= 0 || !Number.isFinite(tr.height) || tr.height <= 0) {
-            try { tr.resize?.(safeW, safeH); } catch {}
-          }
-          const px = Number.isFinite(Number(p?.x)) ? Number(p.x) : safeW / 2;
-          const py = Number.isFinite(Number(p?.y)) ? Number(p.y) : safeH / 2;
-          const safePoint = (p && Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y)))
-            ? p
-            : { x: px, y: py };
           try {
-            const ll = origPointLocation(safePoint, terrain);
-            if (ll && Number.isFinite(Number(ll.lng)) && Number.isFinite(Number(ll.lat))) {
-              return ensureValidLngLat(ll);
+            if (p && Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y))) {
+              const ll = origPointLocation(p, terrain);
+              if (ll && Number.isFinite(Number(ll.lng)) && Number.isFinite(Number(ll.lat))) {
+                return ensureValidLngLat(ll);
+              }
             }
           } catch {}
           return ensureValidLngLat(tr.center);
@@ -7608,8 +7737,13 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
         const origRecalculateZoom = tr.recalculateZoom.bind(tr);
         tr.recalculateZoom = function (terrain) {
           hardenTerrainInstance(terrain);
+          const prevZoom = this.zoom;
           try {
-            return origRecalculateZoom(terrain);
+            origRecalculateZoom(terrain);
+            // Zabráníme samovolnému přeskakování zoomu při dotahování DEM dlaždic
+            if (Number.isFinite(prevZoom) && Math.abs(this.zoom - prevZoom) > 0.01) {
+              this.zoom = prevZoom;
+            }
           } catch {}
         };
       }
@@ -7624,9 +7758,13 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
     if (typeof mapInstance.setTerrain === 'function' && !mapInstance.__czekpointSetTerrainHardened) {
       const origSetTerrain = mapInstance.setTerrain.bind(mapInstance);
       mapInstance.setTerrain = function (options) {
+        const preservedZoom = typeof this.getZoom === 'function' ? this.getZoom() : null;
         try {
           const res = origSetTerrain(options);
           if (this.terrain) hardenTerrainInstance(this.terrain);
+          if (Number.isFinite(preservedZoom) && typeof this.setZoom === 'function') {
+            this.setZoom(preservedZoom);
+          }
           return res;
         } catch {}
       };
@@ -7637,8 +7775,13 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       const origFinalizeElevation = mapInstance._finalizeElevation.bind(mapInstance);
       mapInstance._finalizeElevation = function () {
         if (this.terrain) hardenTerrainInstance(this.terrain);
+        const preservedZoom = this.transform?.zoom;
         try {
-          return origFinalizeElevation();
+          const res = origFinalizeElevation();
+          if (Number.isFinite(preservedZoom) && this.transform && Math.abs(this.transform.zoom - preservedZoom) > 0.02) {
+            this.transform.zoom = preservedZoom;
+          }
+          return res;
         } catch {}
       };
       mapInstance.__czekpointFinalizeElevHardened = true;
@@ -7656,7 +7799,7 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
           const y = Number.isFinite(Number(point[1])) ? Number(point[1]) : safeH / 2;
           safePt = [x, y];
         } else if (!point || !Number.isFinite(Number(point.x)) || !Number.isFinite(Number(point.y))) {
-          safePt = { x: safeW / 2, y: safeH / 2 };
+          safePt = [safeW / 2, safeH / 2];
         }
         try {
           const res = origUnproject(safePt);
@@ -7668,36 +7811,6 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       };
       mapInstance.__czekpointUnprojectHardened = true;
     }
-
-    // 4. Ochrana ScrollZoomHandler (us.wheel / us._start) proti událostem s NaN pozicí nebo při nulové velikosti mapy
-    const sz = mapInstance.scrollZoom;
-    if (sz && !sz.__czekpointHardened) {
-      if (typeof sz.wheel === 'function') {
-        const origWheel = sz.wheel.bind(sz);
-        sz.wheel = function (e) {
-          const w = mapInstance.transform?.width || 0;
-          const h = mapInstance.transform?.height || 0;
-          if (w <= 0 || h <= 0) return;
-          try {
-            return origWheel(e);
-          } catch {}
-        };
-      }
-      if (typeof sz._start === 'function') {
-        const origStart = sz._start.bind(sz);
-        sz._start = function (e) {
-          const w = Number.isFinite(mapInstance.transform?.width) && mapInstance.transform.width > 0 ? mapInstance.transform.width : 390;
-          const h = Number.isFinite(mapInstance.transform?.height) && mapInstance.transform.height > 0 ? mapInstance.transform.height : 600;
-          if (!this._pos || !Number.isFinite(Number(this._pos.x)) || !Number.isFinite(Number(this._pos.y))) {
-            this._pos = { x: w / 2, y: h / 2 };
-          }
-          try {
-            return origStart(e);
-          } catch {}
-        };
-      }
-      sz.__czekpointHardened = true;
-    }
   }
 
   function initializeMapLibreInstance() {
@@ -7708,7 +7821,10 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
       return false;
     }
 
-    const rawCenter = lastFix || (progress.cells.length ? cellCenter(progress.cells.at(-1)) : { lat: 49.6014, lng: 13.8644 });
+    const savedRouteStop = (Array.isArray(plannedRoute?.selectedPlaceIds) && plannedRoute.selectedPlaceIds.length > 0)
+      ? (Array.isArray(plannedRoute?.embeddedStops) && plannedRoute.embeddedStops.length > 0 ? plannedRoute.embeddedStops[0] : plannedRoute?.origin)
+      : null;
+    const rawCenter = lastFix || savedRouteStop || (progress.cells.length ? cellCenter(progress.cells.at(-1)) : (plannedRoute?.origin || { lat: 49.6014, lng: 13.8644 }));
     const center = (rawCenter && Number.isFinite(Number(rawCenter.lat)) && Number.isFinite(Number(rawCenter.lng)))
       ? { lat: Number(rawCenter.lat), lng: Number(rawCenter.lng) }
       : { lat: 49.6014, lng: 13.8644 };
@@ -7964,13 +8080,20 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
 
     map.on('zoomstart', () => {
       userZoomLocked = true;
+      isUserZooming = true;
       lastUserZoomAt = Date.now();
     });
     map.on('zoomend', () => {
+      isUserZooming = false;
       lastUserZoomAt = Date.now();
+      pendingTargetZoom = typeof map.getZoom === 'function' ? map.getZoom() : null;
       renderTrail();
       renderPlaces({ skipListRebuild: true });
       scheduleFog(80, true);
+    });
+    map.on('wheel', () => {
+      userZoomLocked = true;
+      lastUserZoomAt = Date.now();
     });
     // DÁVKA 1 (v2.2.1 P0 Bod 4): Zákaz odpojování follow při pouhém kliknutí — odpojení pouze při posunu > 12 px
     let mapTouchStartPointer = null;
@@ -10847,17 +10970,47 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
 
   $('walk-zoom-in')?.addEventListener('click', () => {
     if (!map) return;
+    const now = Date.now();
     userZoomLocked = true;
-    lastUserZoomAt = Date.now();
-    map.zoomIn({ duration: 250 });
+    isUserZooming = true;
+    lastUserZoomAt = now;
+    const curZoom = typeof map.getZoom === 'function' ? Number(map.getZoom()) : 16;
+    const baseZoom = (now - lastZoomBtnClickAt < 400 && Number.isFinite(pendingTargetZoom))
+      ? pendingTargetZoom
+      : curZoom;
+    const nextZoom = Math.min(19, Math.round((baseZoom + 1) * 10) / 10);
+    pendingTargetZoom = nextZoom;
+    lastZoomBtnClickAt = now;
+    try {
+      if (typeof map.easeTo === 'function') {
+        map.easeTo({ zoom: nextZoom, duration: 220 });
+      } else if (typeof map.zoomIn === 'function') {
+        map.zoomIn({ duration: 220 });
+      }
+    } catch {}
     playTick(stateObj.soundEnabled);
   });
 
   $('walk-zoom-out')?.addEventListener('click', () => {
     if (!map) return;
+    const now = Date.now();
     userZoomLocked = true;
-    lastUserZoomAt = Date.now();
-    map.zoomOut({ duration: 250 });
+    isUserZooming = true;
+    lastUserZoomAt = now;
+    const curZoom = typeof map.getZoom === 'function' ? Number(map.getZoom()) : 16;
+    const baseZoom = (now - lastZoomBtnClickAt < 400 && Number.isFinite(pendingTargetZoom))
+      ? pendingTargetZoom
+      : curZoom;
+    const nextZoom = Math.max(3, Math.round((baseZoom - 1) * 10) / 10);
+    pendingTargetZoom = nextZoom;
+    lastZoomBtnClickAt = now;
+    try {
+      if (typeof map.easeTo === 'function') {
+        map.easeTo({ zoom: nextZoom, duration: 220 });
+      } else if (typeof map.zoomOut === 'function') {
+        map.zoomOut({ duration: 220 });
+      }
+    } catch {}
     playTick(stateObj.soundEnabled);
   });
 
@@ -11651,8 +11804,14 @@ export function mountWalk(root, routes, config = defaultAppConfig, actions = {})
 
   // ZADÁNÍ #10 (Bod 1.1): Při prvním otevření mapy NEVYBÍRÁME automaticky zastávky,
   // aby horní lišta „Půjdeš ~X hod...“ nesvítila bez kontextu hned po otevření!
+  syncAllSelectedStopsToEmbeddedStops();
   renderTripWizardUi();
+  renderPlannerBasketAndXray();
   renderPlaces();
+  if (Array.isArray(plannedRoute.selectedPlaceIds) && plannedRoute.selectedPlaceIds.length > 0) {
+    renderPlannedRouteOnMap(true);
+    updateTurnNavPill(lastFix || getRouteOriginPoint());
+  }
   scheduleFog(50, true);
   renderTrail();
   stats();
