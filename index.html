@@ -132,12 +132,18 @@
       min-height: 28px !important;
       border-width: 2px !important;
     }
-    /* Barvy podle kategorie místa */
+    /* Barvy podle kategorie místa (vyšší specificita než #walk-map .czekpoint-marker-badge) */
+    html body #walk-map .czekpoint-marker-badge.cat-castles,
     html body .czekpoint-marker-badge.cat-castles { background: linear-gradient(135deg, #d97706, #92400e) !important; }
+    html body #walk-map .czekpoint-marker-badge.cat-sacral,
     html body .czekpoint-marker-badge.cat-sacral  { background: linear-gradient(135deg, #9333ea, #581c87) !important; }
+    html body #walk-map .czekpoint-marker-badge.cat-views,
     html body .czekpoint-marker-badge.cat-views   { background: linear-gradient(135deg, #0284c7, #0c4a6e) !important; }
+    html body #walk-map .czekpoint-marker-badge.cat-water,
     html body .czekpoint-marker-badge.cat-water   { background: linear-gradient(135deg, #0ea5e9, #0369a1) !important; }
+    html body #walk-map .czekpoint-marker-badge.cat-nature,
     html body .czekpoint-marker-badge.cat-nature  { background: linear-gradient(135deg, #16a34a, #14532d) !important; }
+    html body #walk-map .czekpoint-marker-badge.tier-visited,
     html body .czekpoint-marker-badge.tier-visited {
       background: linear-gradient(135deg, #10b981, #047857) !important;
       border-color: #fde047 !important;
@@ -149,6 +155,7 @@
       transform: scale(1.1) !important;
     }
     /* Tajemná silueta v módu Objevování v mlze */
+    html body #walk-map .place-marker-wrap.is-mystery-silhouette .czekpoint-marker-badge,
     html body .place-marker-wrap.is-mystery-silhouette .czekpoint-marker-badge {
       background: radial-gradient(circle at 35% 30%, #1e3a2f 0%, #09130e 100%) !important;
       border: 3.5px solid #f5b82e !important;
@@ -280,11 +287,11 @@
       font-size: 16px !important;
     }
 
-    /* 7. PRAVÝ SLOUPEC TLAČÍTEK NA MAPĚ (OBŘÍ KULATÁ TLAČÍTKA 62 × 62 PX — PŘEBÍJÍ ID PRAVIDLA VE WALK.CSS!) */
+    /* 7. PRAVÝ SLOUPEC TLAČÍTEK NA MAPĚ (OBŘÍ KULATÁ TLAČÍTKA 66 × 66 PX A IKONY 32 PX) */
     html body .map-right-toolbar {
       position: absolute !important;
       right: 12px !important;
-      bottom: 96px !important;
+      bottom: 92px !important;
       top: auto !important;
       gap: 10px !important;
       z-index: 1350 !important;
@@ -300,30 +307,39 @@
     html body .map-right-toolbar #walk-zoom-in,
     html body .map-right-toolbar #walk-zoom-out,
     html body .map-right-toolbar #walk-zen-toggle {
-      width: 62px !important;
-      height: 62px !important;
-      min-width: 62px !important;
-      min-height: 62px !important;
+      width: 66px !important;
+      height: 66px !important;
+      min-width: 66px !important;
+      min-height: 66px !important;
       max-width: none !important;
       max-height: none !important;
       padding: 0 !important;
       border-radius: 50% !important;
-      font-size: 22px !important;
+      font-size: 32px !important;
+      line-height: 1 !important;
       font-weight: 900 !important;
       background: rgba(12, 26, 19, 0.96) !important;
       color: #ffffff !important;
-      border: 3px solid #f5b82e !important;
-      box-shadow: 0 8px 22px rgba(0, 0, 0, 0.65) !important;
+      border: 3.5px solid #f5b82e !important;
+      box-shadow: 0 8px 22px rgba(0, 0, 0, 0.72) !important;
       display: inline-flex !important;
       align-items: center !important;
       justify-content: center !important;
       cursor: pointer !important;
       pointer-events: auto !important;
     }
-    html body .map-right-toolbar #btn-toggle-3d .btn-3d-label {
-      font-size: 16px !important;
+    html body .map-right-toolbar button > *,
+    html body .map-right-toolbar #walk-zoom-in,
+    html body .map-right-toolbar #walk-zoom-out {
+      font-size: 34px !important;
+      line-height: 1 !important;
       font-weight: 900 !important;
-      letter-spacing: -0.02em !important;
+    }
+    html body .map-right-toolbar #btn-toggle-3d,
+    html body .map-right-toolbar #btn-toggle-3d .btn-3d-label {
+      font-size: 20px !important;
+      font-weight: 900 !important;
+      letter-spacing: -0.03em !important;
     }
     html body .map-right-toolbar button.active,
     html body .map-right-toolbar #btn-recenter-map.active,

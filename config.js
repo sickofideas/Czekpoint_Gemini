@@ -1,5 +1,5 @@
-export const DEFAULT_3D_PITCH = 60;
-export const DEFAULT_TERRAIN_EXAGGERATION = 2.4;
+export const DEFAULT_3D_PITCH = 52;
+export const DEFAULT_TERRAIN_EXAGGERATION = 1.25;
 
 export const config = {
   appName: 'Czekpoint',
@@ -18,7 +18,7 @@ export const config = {
   terrainDemUrl: 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png',
   terrainEncoding: 'terrarium',
   terrainTileSize: 256,
-  terrainMaxZoom: 14,
+  terrainMaxZoom: 12,
   terrainExaggeration: DEFAULT_TERRAIN_EXAGGERATION,
   default3dPitch: DEFAULT_3D_PITCH,
   openFreeMapVectorUrl: 'https://tiles.openfreemap.org/planet',
@@ -126,8 +126,7 @@ export function createGeoJsonCirclePolygon(center, radiusMeters, steps = 48) {
 
 /**
  * Sestaví čistý MapLibre GL styl (v8) pro 2.5D Reliéfní Diorama s rastrovými vrstvami (OSM, OpenTopoMap, Waymarked Trails),
- * výškovým zdrojem `raster-dem` (`terrain-dem`) a jemným přírodním stínováním svahů (`terrain-hillshade`),
- * bez šedých krabic budov (`czekpoint-3d-buildings` trvale vypnuto).
+ * výškovým zdrojem `raster-dem` (`terrain-dem`) a jemným přírodním stínováním svahů (`terrain-hillshade`).
  */
 export function buildMapLibreStyle(cfg = config, options = {}) {
   const showContourLayer = Boolean(options.showContourLayer);
@@ -140,7 +139,7 @@ export function buildMapLibreStyle(cfg = config, options = {}) {
   const hasMaptilerKey = Boolean(cfg?.maptilerApiKey && String(cfg.maptilerApiKey).trim());
   const exaggeration = Number(cfg?.terrainExaggeration) || DEFAULT_TERRAIN_EXAGGERATION;
   const rawDemMaxZoom = Number(cfg?.terrainMaxZoom);
-  const safeDemMaxZoom = Number.isFinite(rawDemMaxZoom) ? Math.min(15, Math.max(0, Math.floor(rawDemMaxZoom))) : 14;
+  const safeDemMaxZoom = Number.isFinite(rawDemMaxZoom) ? Math.min(12, Math.max(0, Math.floor(rawDemMaxZoom))) : 12;
 
   const terrainDemSource = hasMaptilerKey
     ? {
@@ -211,10 +210,10 @@ export function buildMapLibreStyle(cfg = config, options = {}) {
         visibility: 'visible',
       },
       paint: {
-        'hillshade-exaggeration': 0.65,
-        'hillshade-shadow-color': '#142f24',
-        'hillshade-highlight-color': '#fffef5',
-        'hillshade-accent-color': '#b58938',
+        'hillshade-exaggeration': 0.35,
+        'hillshade-shadow-color': '#1b3b2b',
+        'hillshade-highlight-color': '#ffffff',
+        'hillshade-accent-color': '#a3824a',
       },
     });
   }
@@ -230,7 +229,7 @@ export function buildMapLibreStyle(cfg = config, options = {}) {
         visibility: showContourLayer ? 'visible' : 'none',
       },
       paint: {
-        'raster-opacity': 0.78,
+        'raster-opacity': 0.32,
       },
     },
     {
@@ -250,50 +249,20 @@ export function buildMapLibreStyle(cfg = config, options = {}) {
 
   if (is3dMode) {
     layers.push({
-      id: 'czekpoint-3d-forests',
-      source: 'openfreemap-v',
-      'source-layer': 'landcover',
-      type: 'fill-extrusion',
-      minzoom: 11,
-      maxzoom: 22,
-      filter: ['==', ['get', 'class'], 'wood'],
-      layout: {
-        visibility: is3dMode ? 'visible' : 'none',
-      },
-      paint: {
-        'fill-extrusion-color': '#1b4332',
-        'fill-extrusion-height': 14,
-        'fill-extrusion-base': 0,
-        'fill-extrusion-opacity': 0.55,
-      },
-    });
-
-    layers.push({
       id: 'czekpoint-3d-buildings',
       source: 'openfreemap-v',
       'source-layer': 'building',
       type: 'fill-extrusion',
-      minzoom: 12,
+      minzoom: 15.2,
       maxzoom: 22,
       layout: {
         visibility: (is3dMode && options.show3dBuildings !== false) ? 'visible' : 'none',
       },
       paint: {
-        'fill-extrusion-color': [
-          'interpolate',
-          ['linear'],
-          ['coalesce', ['get', 'render_height'], ['get', 'height'], 10],
-          0, '#d97706',
-          10, '#b45309',
-          22, '#92400e',
-        ],
-        'fill-extrusion-height': [
-          '*',
-          ['max', 8, ['coalesce', ['get', 'render_height'], ['get', 'height'], 10]],
-          2.2,
-        ],
+        'fill-extrusion-color': '#e2d9c8',
+        'fill-extrusion-height': ['coalesce', ['get', 'render_height'], ['get', 'height'], 7],
         'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0],
-        'fill-extrusion-opacity': 0.92,
+        'fill-extrusion-opacity': 0.45,
         'fill-extrusion-vertical-gradient': true,
       },
     });

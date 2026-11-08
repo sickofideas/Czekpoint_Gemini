@@ -589,8 +589,24 @@ export function acceptFix(progress, anchor, fix, now = Date.now()) {
           : 'Nový dílek mapy! +10 bodů',
       };
     }
+
+    // Even if we didn't cross into a new fog cell yet, append step >= 2.2m to walkSegments so footprints render immediately behind the walker
+    let nextWalkSegments = progress.walkSegments || [];
+    const lastSeg = nextWalkSegments.length > 0 ? nextWalkSegments[nextWalkSegments.length - 1] : null;
+    const lastPt = Array.isArray(lastSeg) && lastSeg.length > 0 ? lastSeg[lastSeg.length - 1] : null;
+    const distFromLastSegPt = lastPt
+      ? (haversineMeters({ lat: lastPt[0], lng: lastPt[1] }, fix) ?? 0)
+      : distFromAnchor;
+    if (distFromLastSegPt >= 2.2) {
+      if (anchor?.needsNewSegment || nextWalkSegments.length === 0) {
+        nextWalkSegments = appendToWalkSegments(nextWalkSegments, currentDistanceAnchor, true);
+      }
+      nextWalkSegments = appendToWalkSegments(nextWalkSegments, fix, false);
+      subAnchor.needsNewSegment = false;
+    }
+
     return {
-      progress,
+      progress: nextWalkSegments !== progress.walkSegments ? { ...progress, walkSegments: nextWalkSegments } : progress,
       anchor: subAnchor,
       accepted: false,
       eligibleForVisit: true,

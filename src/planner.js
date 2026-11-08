@@ -1996,14 +1996,7 @@ export function snapPointToPedestrianPath(point, routeCoords = null, maxSnapMete
       }
     }
   } else {
-    const nodes = ROZMITAL_PEDESTRIAN_GRAPH.nodes;
-    for (const [u, v] of ROZMITAL_PEDESTRIAN_GRAPH.edges) {
-      const n1 = nodes[u];
-      const n2 = nodes[v];
-      if (n1 && n2) {
-        checkSegment(n1.lat, n1.lng, n2.lat, n2.lng);
-      }
-    }
+    return { lat: norm.lat, lng: norm.lng, snapped: false, distanceToPathM: 0 };
   }
 
   if (bestDistM <= maxSnapMeters) {
@@ -2208,15 +2201,12 @@ export async function fetchWalkingGeometry(waypoints, fetchImpl = typeof fetch !
 
   try {
     const coordsStr = accessibleWaypoints.map(p => `${Number(p.lng).toFixed(5)},${Number(p.lat).toFixed(5)}`).join(';');
-    // 1. Primární pěší router: OpenStreetMap Germany Foot router (timeout 8000 ms)
-    // 2. Sekundární pěší router: OpenStreetMap Germany HikeBike / OSRM Foot router (timeout 8000 ms)
     const primaryUrl = `https://routing.openstreetmap.de/routed-foot/route/v1/foot/${coordsStr}?overview=full&geometries=geojson&steps=true`;
-    const secondaryUrl = `https://routing.openstreetmap.de/routed-HikeBike/route/v1/driving/${coordsStr}?overview=full&geometries=geojson&steps=true`;
-    const tertiaryUrl = `https://router.project-osrm.org/route/v1/foot/${coordsStr}?overview=full&geometries=geojson&steps=true`;
+    const secondaryUrl = `https://router.project-osrm.org/route/v1/foot/${coordsStr}?overview=full&geometries=geojson&steps=true`;
 
     let route = null;
 
-    for (const url of [primaryUrl, secondaryUrl, tertiaryUrl]) {
+    for (const url of [primaryUrl, secondaryUrl]) {
       let timeoutId;
       const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
       const signal = controller ? controller.signal : undefined;

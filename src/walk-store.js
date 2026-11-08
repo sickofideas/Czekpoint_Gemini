@@ -14,7 +14,7 @@ export const MAX_STICK_BADGES = 200;
 export const DEFAULT_APP_SETTINGS = Object.freeze({
   fogParchment: true,     // 📜 Tajemný pergamen (odkrývání mlhy)
   kctTrails: true,        // 🥾 Turistické značky KČT a stezky
-  contours: true,         // ⛰️ Vrstevnice a terén
+  contours: false,        // ⛰️ Vrstevnice a terén (výchozí vypnuto, aby nepřekrývaly čistou OSM mapu a rybníky)
   footprints: true,       // 👣 Stopy pohorek za mnou
   orbitalArrow: true,     // 🎯 Zlatá směrová šipka u Avatara
   voiceNav: true,         // 🗣️ Česká hlasová navigace
